@@ -129,7 +129,7 @@ pub fn run(rest: &[String]) -> bool {
     println!("atlas failed: {atlas_failed}");
     println!("non-atlas xml (skipped): {non_atlas}");
     println!("subtextures: {subtextures}");
-    println!("trimmed (non-zero frame*): {trimmed}");
+    println!("with_frame_attrs: {trimmed}");
     println!("negative frameX/Y: {negative_frame}");
     println!("rotated true: {rotated_true}");
     println!("missing png refs: {missing_png_refs}");

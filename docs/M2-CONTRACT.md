@@ -100,6 +100,26 @@ pub struct AnimateSprite { pub name: String, pub x: i32, pub y: i32, pub w: i32,
 pub fn parse_animate(json: &str) -> Result<AnimateAtlas, AtlasError>;
 // audited counts for gate A: 88 files ok, 6071 sprites, 0 missing meta.image.
 
+// Trimming geometry (pure; never renders). Flixel-semantics per
+// `.haxelib/flixel/git/flixel/graphics/frames/FlxAtlasFrames.hx fromSparrow`:
+// offset = (-frameX, -frameY); when a frame* attr is 0/absent it falls back to
+// the page rect dim; the page rect is NEVER swapped for rotated frames — the
+// sprite-orientation rect below is what the renderer transposes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameQuad {
+    /// Rect in the page STORED orientation when not rotated; for `rotated=true`
+    /// the parsed width/height are swapped, i.e. the sprite's unrotated
+    /// footprint (invariant on real data: atlas_rect.height == parsed width).
+    pub atlas_rect: [i32; 4],
+    /// (-frameX, -frameY) — always present/frame attrs may be 0.
+    pub dest_offset: [i32; 2],
+    /// (frameWidth or width, frameHeight or height). For the never-in-data
+    /// corner case `rotated && no frame attrs at all`, flixel swaps the page
+    /// dims here: dest_size = (height, width).
+    pub dest_size: [i32; 2],
+}
+pub fn frame_quad(subtexture: &SubTexture) -> FrameQuad;
+
 // The lenient XML scanner lives here as a pub module so oxide-font reuses it for
 // angel-code fonts (its only XML consumers are these two formats):
 pub mod xml;
@@ -264,7 +284,7 @@ The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A fo
   atlas failed: 0
   non-atlas xml (skipped): 61
   subtextures: 8486
-  trimmed (non-zero frame*): 5684
+  with_frame_attrs: 5684
   negative frameX/Y: 4144
   rotated true: 198
   missing png refs: 20

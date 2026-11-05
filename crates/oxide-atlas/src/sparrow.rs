@@ -25,6 +25,66 @@ pub struct Atlas {
     pub subtextures: Vec<SubTexture>,
 }
 
+/// Trimming geometry for one subtexture. Pure data; the renderer applies it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameQuad {
+    /// Page rect in sprite orientation: for `rotated=true` the parsed
+    /// width/height are swapped (the renderer transposes the page rect).
+    pub atlas_rect: [i32; 4],
+    /// `(-frameX, -frameY)`.
+    pub dest_offset: [i32; 2],
+    /// `(frameWidth or width, frameHeight or height)`; for the never-in-data
+    /// corner case `rotated && frameWidth == 0 && frameHeight == 0` flixel
+    /// swaps the page dims: `(height, width)`.
+    pub dest_size: [i32; 2],
+}
+
+/// Computes flixel's `FlxAtlasFrames.fromSparrow` trimming geometry for one
+/// subtexture. Pure arithmetic; no I/O and no rendering.
+pub fn frame_quad(subtexture: &SubTexture) -> FrameQuad {
+    let atlas_rect = if subtexture.rotated {
+        [
+            subtexture.x,
+            subtexture.y,
+            subtexture.height,
+            subtexture.width,
+        ]
+    } else {
+        [
+            subtexture.x,
+            subtexture.y,
+            subtexture.width,
+            subtexture.height,
+        ]
+    };
+
+    let dest_offset = [-subtexture.frame_x, -subtexture.frame_y];
+
+    let dest_size =
+        if subtexture.rotated && subtexture.frame_width == 0 && subtexture.frame_height == 0 {
+            [subtexture.height, subtexture.width]
+        } else {
+            [
+                if subtexture.frame_width != 0 {
+                    subtexture.frame_width
+                } else {
+                    subtexture.width
+                },
+                if subtexture.frame_height != 0 {
+                    subtexture.frame_height
+                } else {
+                    subtexture.height
+                },
+            ]
+        };
+
+    FrameQuad {
+        atlas_rect,
+        dest_offset,
+        dest_size,
+    }
+}
+
 /// Parses a Sparrow `TextureAtlas` XML document.
 ///
 /// Missing geometry attributes default to `0`; a present non-integer geometry
