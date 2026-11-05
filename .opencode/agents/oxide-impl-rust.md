@@ -1,7 +1,7 @@
 ---
 description: Implements one crate of Oxide Engine against an explicit API contract. Runs the single gate command, returns its output, and reports deviations. Delegate here for all Rust implementation work.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/deepseek-v4.1-flash#max
 temperature: 0.1
 steps: 80
 permissions:
