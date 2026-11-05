@@ -58,6 +58,15 @@ settings.json
 crash.log
 oxide.log
 
+# --- opencode plugins (installed by opencode/npm) --------------------------
+/node_modules/
+**/node_modules/
+package-lock.json
+bun.lock
+bun.lockb
+package.json
+.opencode/package.json
+
 # --- Python helpers (asset audits, one-off scripts) ------------------------
 .venv/
 __pycache__/

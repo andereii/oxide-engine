@@ -9,6 +9,35 @@
   // Session titles / compaction summaries do not need Argon.
   "small_model": "opencode-go/deepseek-v4.1-flash",
 
+  // Automatic model fallback (plugin 0.3.1, supports opencode v2).
+  // Per-agent chains live in each agent's frontmatter (`fallback_models:`).
+  "plugins": [
+    {
+      "package": "opencode-runtime-fallback",
+      "options": {
+        // Quota/permission failures are not in the plugin defaults (429/500/502/503/504).
+        // 402 and 403 are what "out of budget" usually looks like.
+        "retry_on_errors": [402, 403, 429, 500, 502, 503, 504, 529],
+        "retryable_error_patterns": [
+          "quota",
+          "insufficient[^.]{0,20}(credit|balance|funds)",
+          "billing\\s+suspended",
+          "usage\\s+limit",
+          "credit\\s+balance",
+          "out\\s+of\\s+credits"
+        ],
+        // Monthly quota does not recover in 60s; transient 429s do. 5 min is the compromise.
+        "cooldown_seconds": 300,
+        // TTFT: reasoning tokens count as activity, so `#max` does not trip it.
+        "timeout_seconds": 120,
+        "max_fallback_attempts": 3,
+        "notify_on_fallback": true,
+        // Keep foreground subagent calls waiting through a fallback instead of failing.
+        "foreground_task_fallback": true
+      }
+    }
+  ],
+
   "permissions": [
     { "action": "edit", "resource": "*", "effect": "allow" },
     { "action": "read", "resource": "*", "effect": "allow" },

@@ -38,6 +38,9 @@ permissions:
   - action: shell
     resource: "rm -rf /*"
     effect: deny
+fallback_models:
+  - "xai/grok-4.7"
+
 ---
 
 # ROLE

@@ -44,6 +44,10 @@ permissions:
   - action: shell
     resource: "rm -rf /*"
     effect: deny
+fallback_models:
+  - "xai/grok-4.7"
+  - "opencode-go/deepseek-v4.1-flash#max"
+
 ---
 
 # MISSION
