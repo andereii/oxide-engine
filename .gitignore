@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# Oxide Engine — repository ignores
+# Rust + Bevy + generated media pipeline + vendored codec builds
+# Comments in English (repo language). See PLAN-ES.md §0.
+# ---------------------------------------------------------------------------
+
+# --- Rust / Cargo ----------------------------------------------------------
+/target/
+**/*.rs.bk
+*.pdb
+*.profraw
+*.profdata
+/lcov.info
+/coverage/
+/flamegraph.svg
+perf.data*
+# Cargo.lock is committed on purpose (binary project, reproducible builds).
+
+# --- Build, packaging and generated media ---------------------------------
+# Everything here is produced by `oxide pack` / `cargo xtask pack`.
+# Never commit it: it is 1.3 GB of derived data.
+/assets-raw/
+/assets-dist/
+/assets.pak
+/assets-*.pak
+/media-ab-test/
+/dist/
+/release/
+/build/
+/export/
+*.zip
+!tests/fixtures/**/*.zip
+
+# --- Bevy asset caches -----------------------------------------------------
+/imported_assets/
+/.bevy/
+/cache/
+
+# --- Mods (keep the folder, ignore local content) --------------------------
+/mods/*
+!/mods/.gitkeep
+
+# --- Vendored native code: build products only, sources are committed ------
+/vendor/mruby/build/
+/vendor/mruby/bin/
+/vendor/mruby/**/*.o
+/vendor/mruby/**/*.a
+/vendor/libopus/build/
+/vendor/dav1d/build/
+/vendor/rav1d/target/
+/third_party/build/
+
+# --- Local runtime data (saves, settings, logs) ---------------------------
+/userdata/
+/saves/
+settings.json
+*.log
+crash.log
+oxide.log
+
+# --- Python helpers (asset audits, one-off scripts) ------------------------
+.venv/
+__pycache__/
+*.pyc
+
+# --- Editors / agents ------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+*.swp
+*~
+.claude/
+.gemini/
+.codex/
+.aider*
+# AGENTS.md IS committed: it is the instruction file for coding agents.
+
+# --- OS -------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local overrides / secrets --------------------------------------------
+.env
+.env.local
+*.local.toml
