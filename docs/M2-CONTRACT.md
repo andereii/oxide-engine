@@ -264,8 +264,15 @@ The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A fo
 - **Gate B** unit+integration tests in `oxide-font` (run under `cargo xtask test`):
   glyph counts for the three real Sparrow fonts are NOT in fixtures (real assets dir, do
   not duplicate); assert from `micro-font.xml` fixture: glyph prefixes `{A,B,-dash-}`,
-  `A`=45x59, `B`=38x59, `maxHeight=59`, `caseAllowed=Both`; `measure("AB")=(83,59)`,
+  `A`=45x59, `B`=38x59, `maxHeight=59`, `caseAllowed=Upper` (names `A0000`/`B0000` match
+  `^[A-Z]\d+$`, none matches `^[a-z]\d+$`, `-dash-0000` matches neither — oracle rule
+  `containsUpper != containsLower`); `measure("AB")=(83,59)`,
   `measure("A B")=(123,59)` (space=40), `measure("A\nB")=(38,118)`, missing glyph zero-width.
+  Real-font checks (guarded by assets-dir presence): default=99 glyph prefixes,
+  max height 70; bold=63 / 77; freeplay-clear=10 / 24; case: default=Both,
+  bold=Upper, freeplay-clear=Both; oracle quirk kept verbatim: `glyph_prefix('&') =
+  "-andpersand-"` which does NOT exist in default.xml (only raw `&0000` frames exist),
+  so `measure("&")` consumes zero advance — parity with AtlasText beats plausibility.
   Angel (`vcr-lite.fnt`): 90–char source trimmed to 5; `info.size=16 face="vcr-bmp"`,
   `lineHeight=18`, page file `vcr-bmp.png`; `measure("AB")=(20,18)`; glyph rect check
   `validate() == Ok(…)`. Overflow fixture `angel-overflow.fnt` → `validate() ==
