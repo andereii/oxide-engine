@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oxide-data",
+    "crates/oxide-atlas",
+    "crates/oxide-font",
+    "crates/oxide-vfs",
+    "crates/oxide-audio",
+    "crates/oxide-input",
+    "crates/oxide-script",
+    "crates/oxide-game",
+    "crates/oxide-media",
+    "crates/oxide-tools",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/oxide-engine/oxengine"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[package]
+name = "oxide"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "oxide"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
