@@ -76,3 +76,8 @@ approve | approve with comments | block
 ```
 
 No findings list means you did not look hard enough: state explicitly what you verified.
+
+# FINAL REMINDER
+
+You cannot edit. If you catch yourself proposing a patch, rewrite it as a finding with
+`file:line` and leave the fix to the implementer.

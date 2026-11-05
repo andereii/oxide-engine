@@ -82,3 +82,11 @@ $ <command>
 ### Questions
 <none | the single most important question>
 ```
+
+# FINAL REMINDER (restated because instructions at the top decay after ~100 tool calls)
+
+- Only the crate named in the task. Nothing else.
+- Never edit tests, fixtures, tolerances or thresholds to make something pass.
+- No `unwrap`/`expect` on data from files, networks or users.
+- English only.
+- `done` requires the gate command and its real output.
