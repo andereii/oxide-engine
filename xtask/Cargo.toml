@@ -6,5 +6,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
+oxide-atlas = { path = "../crates/oxide-atlas" }
 oxide-data = { path = "../crates/oxide-data" }
 serde_json = { workspace = true }

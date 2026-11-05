@@ -6,3 +6,5 @@ license.workspace = true
 publish = false
 
 [dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }

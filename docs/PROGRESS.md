@@ -70,3 +70,31 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
   0008 (VFS precedence: last mod wins, per polymod source), 0009 (notify 8.2 + zip 8.2
   feature-trimmed, no C; hand-rolled lenient XML scanner in oxide-atlas).
 - Next: delegate oxide-atlas to @oxide-impl-rust.
+
+## 2026-11-05 — M2 gate A green (oxide-atlas)
+
+- Gate: `cargo xtask parse-atlas --dir ~/Descargas/fnf/Funkin/assets` → exit 0
+  (independently re-run by the orchestrator, not just the subagent):
+  ```
+  xml visited: 266
+  atlas ok: 205
+  atlas failed: 0
+  non-atlas xml (skipped): 61
+  subtextures: 8486
+  trimmed (non-zero frame*): 5684
+  negative frameX/Y: 4144
+  rotated true: 198
+  missing png refs: 20
+  packer ok 0 failed 0 (none in assets; fixtures cover parser)
+  animate ok 88 failed 0 sprites 6071
+  ```
+  Every number matches the pre-delegation audit (docs/M2-CONTRACT.md §0).
+- Broken-XML regression: `cargo test` in xtask runs `parse-atlas` over
+  `tests/fixtures/atlas/broken/numeric-garbage.xml` → exit 1 asserted
+  (`xtask/tests/parse_atlas_fixture.rs`).
+- `oxide-atlas`: lenient std-only XML scanner (raw `<`/`&` in attribute values,
+  BOM/blank line before the declaration), Sparrow/Packer(hash+array)/Animate parsers,
+  12 crate tests green. No new dependencies (ADR-0009). Deviation accepted: in-memory
+  parser entry points report `uri = "<inline>"`; xtask prints the real path on stderr.
+- `cargo xtask verify` → exit 0 (including parse-all 432/432 unchanged).
+- Next: delegate oxide-font and oxide-vfs (parallel; disjoint crates).

@@ -4,6 +4,7 @@
 //! with "not implemented yet", never 0. Gate changes require an ADR in docs/DECISIONS.md.
 
 mod parse_all;
+mod parse_atlas;
 
 use std::process::{Command, ExitCode};
 
@@ -14,7 +15,7 @@ fn main() -> ExitCode {
         None => {
             eprintln!("usage: cargo xtask <command> [args]");
             eprintln!(
-                "commands: verify | fmt | clippy | test | parse-all | fixtures-conductor | replay | perf-budget | media-check | pack"
+                "commands: verify | fmt | clippy | test | parse-all | parse-atlas | fixtures-conductor | replay | perf-budget | media-check | pack"
             );
             return ExitCode::from(2);
         }
@@ -35,6 +36,7 @@ fn main() -> ExitCode {
         "clippy" => to_code(clippy(rest)),
         "test" => to_code(test(rest)),
         "parse-all" => to_code(parse_all::run(rest)),
+        "parse-atlas" => to_code(parse_atlas::run(rest)),
         "fixtures-conductor" | "replay" | "perf-budget" | "media-check" | "pack" => {
             eprintln!("{command}: not implemented yet");
             ExitCode::from(2)
