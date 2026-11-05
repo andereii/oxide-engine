@@ -1,7 +1,7 @@
 ---
-description: Fallback orchestrator on Grok with the same mission and rules as oxide-orchestrator. Switch to it when the Gemini Argon quota is exhausted; it continues the same session with full history.
+description: Orchestrator pinned to Gemini Argon. Use it only when opencode-go/gemini-4-argon responds again (it currently fails with 'Endpoint is unavailable'); it has the same mission and rules as oxide-orchestrator.
 mode: primary
-model: xai/grok-4.7
+model: opencode-go/gemini-4-argon
 steps: 300
 permissions:
   - action: edit

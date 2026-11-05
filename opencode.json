@@ -20,7 +20,7 @@
           "upstream request failed",
           "model.{0,20}not.{0,10}(found|available)"
         ],
-        "cooldown_seconds": 300,
+        "cooldown_seconds": 1800,
         "timeout_seconds": 120,
         "max_fallback_attempts": 3,
         "notify_on_fallback": true,
