@@ -22,10 +22,10 @@ fn main() -> ExitCode {
 
     match command {
         "verify" => {
-            // M0: verify = fmt + clippy + test. As gates get implemented
-            // (parse-all in M1, fixtures-conductor/replay/perf-budget later,
-            // media-check/pack in M3) they are appended here.
-            if fmt(rest) && clippy(rest) && test(rest) {
+            // As of M1: verify = fmt + clippy + test + parse-all.
+            // Pending gates (appended as they get implemented): fixtures-conductor
+            // and replay (M4), perf-budget (M5), media-check/pack (M3).
+            if fmt(rest) && clippy(rest) && test(rest) && parse_all::run(&[]) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
@@ -34,7 +34,7 @@ fn main() -> ExitCode {
         "fmt" => to_code(fmt(rest)),
         "clippy" => to_code(clippy(rest)),
         "test" => to_code(test(rest)),
-        "parse-all" => parse_all::run(rest),
+        "parse-all" => to_code(parse_all::run(rest)),
         "fixtures-conductor" | "replay" | "perf-budget" | "media-check" | "pack" => {
             eprintln!("{command}: not implemented yet");
             ExitCode::from(2)

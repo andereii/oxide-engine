@@ -7,3 +7,4 @@ publish = false
 
 [dependencies]
 oxide-data = { path = "../crates/oxide-data" }
+serde_json = { workspace = true }
