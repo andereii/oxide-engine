@@ -36,6 +36,7 @@ name = "oxide"
 path = "src/main.rs"
 
 [dependencies]
+oxide-media = { path = "crates/oxide-media" }
 
 [profile.release]
 opt-level = 3

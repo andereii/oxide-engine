@@ -124,14 +124,25 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
 - **Decision:** ffmpeg + ffprobe are invoked as EXTERNAL COMMANDS from `oxide pack` /
   `xtask media-check` only (build-time tooling). They are NOT crate dependencies
   (`oxide-media` never links against libav*), and game/audio code paths are statically
-  forbidden from spawning them. `--check-tools` versions-guards them. For the pak
-  digest: `sha2` 0.10 (Apache/MIT, pure Rust, seconds of build cost; alternative:
+  forbidden from spawning them. `--check-tools` PRESENCE-guards both binaries and
+  prints their version lines; no minimum version is enforced (advisory only). For the
+  pak digest: `sha2` 0.10 (Apache/MIT, pure Rust, seconds of build cost; alternative:
   hand-rolled sha256 — rejected, pointless risk). Deterministic pak assembly uses the
-  existing `zip` 8.x (ADR-0009 features) in write mode.
+  existing `zip` 8.x (ADR-0009 features) in write mode with the zip `system` byte
+  pinned (amendment below).
 - **Consequences:** media gates fail with a clear `Tools` error when ffmpeg is absent
-  (tested SKIPPED in that environment, never silently green).
+  (test suites SKIP in that environment; the gate never passes silently). THIS
+  machine note: Fedora's `ffmpeg-free` lacks the HEVC/H264 decoders needed by the
+  shipped cutscene sources; a full RPMFusion ffmpeg 8.1.3 was installed OUTSIDE the
+  repo at `~/.local/lib/oxide-ffmpeg` with invoker wrappers at `~/.local/bin/ffmpeg`
+  and `~/.local/bin/ffprobe` (documented install; first in PATH on this machine).
 - **Revisit when:** a pure-Rust AV1/WebP encoder chain reaches release-tooling quality
   (plan §7.3's rav1d is decode-only; encode stays ffmpeg).
+- **Amendment (2026-11-05, reviewer):** zip 8.6 `SimpleFileOptions::default()` leaves
+  the archive `system` byte OS-dependent (Dos on Windows, Unix otherwise). The pak
+  writer pins it explicitly so pak bytes are host-independent at the container level;
+  byte-identity remains same-machine scoped (converted media may legitimately differ
+  across ffmpeg builds).
 
 ## ADR-0011 — assets-dist layout, total_after accounting, image never-grow fallback
 

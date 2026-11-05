@@ -3,6 +3,7 @@
 //! Truth source: AGENTS.md §2. A gate that is not implemented yet must exit 2
 //! with "not implemented yet", never 0. Gate changes require an ADR in docs/DECISIONS.md.
 
+mod media_check;
 mod parse_all;
 mod parse_atlas;
 
@@ -37,7 +38,9 @@ fn main() -> ExitCode {
         "test" => to_code(test(rest)),
         "parse-all" => to_code(parse_all::run(rest)),
         "parse-atlas" => to_code(parse_atlas::run(rest)),
-        "fixtures-conductor" | "replay" | "perf-budget" | "media-check" | "pack" => {
+        "media-check" => to_code(media_check::media_check(rest)),
+        "pack" => to_code(media_check::pack(rest)),
+        "fixtures-conductor" | "replay" | "perf-budget" => {
             eprintln!("{command}: not implemented yet");
             ExitCode::from(2)
         }

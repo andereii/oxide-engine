@@ -38,7 +38,7 @@ pub enum MediaError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntryKind { Audio { layer: AudioLayer }, Image, Video, Text, Font }
+pub enum EntryKind { Audio { layer: AudioLayer }, Image, Video, Text, Font, Skip }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioLayer { Inst, Voices, Sfx }   // targets 112k / 64k / 48k
@@ -74,7 +74,9 @@ impl Layout: layer/extension classification (pure, unit-tested):
     one of EXCLUDED_VIDEOS (exact stem match) -> ExcludeVideo. Video files outside videos/ -> Unknown.
   - `.json|.xml|.txt|.rb|.frag|.hxc|.fnt|.md|.yml|.srt` -> Text (deflate in pak only).
   - `.ttf|.otf` -> Font (copy + STORE).
-  - `.fla|.gitignore|.gitattributes|.git` -> Skip (reported count).
+  - `.fla|.gitignore|.gitattributes|.git` -> Skip (reported count). Walker rules:
+    symlinks are skipped (the assets tree is a real filesystem tree; symmetrical
+    loop protection for free), a `.git` DIRECTORY is skipped like a `.git` file.
   - anything else -> Err(Unknown).
 
 pub struct PackReport { /* counts + bytes + sha256 of pak, filled by run */ }
@@ -162,14 +164,31 @@ wanted (the full run is expensive; the structural property is the same code path
 - Images: decode source AND dist artefact via `ffmpeg ... -f rawvideo -pix_fmt rgba`
   and compare byte-for-byte in memory: identical or differing only in RGB where both
   alpha bytes are 0 (both counters printed).
-- Audio alignment: for every `Inst[-variant]` / `Voices[-char][-variant]` pair of a
-  song (both found in source), decode source inst/voices and dist inst/voices to
-  s16le mono 48 kHz, compute the first sample index above ±abs threshold (1024) and
-  compare the pair's RELATIVE delta; ok iff `|Δ_src − Δ_out| <= 128 samples` (≈ 2.7 ms).
-- Video: `ffmpeg -ssim` per remaining video between the scaled source and the output;
-  report the minimum.
+- Audio alignment (AMENDED 2026-11-05 after measurement): fixed-threshold onset
+  detection is NOT a valid alignment metric — real assets include gradual crescendos
+  (`milf/Inst.ogg` crawls across the threshold for ~53 ms; opus decorations shift the
+  crossing) which produce false 50 ms "drift". The metric is instead **relative
+  cross-correlation delay**: decode source and dist artefact to s16le mono 48 kHz,
+  decimate both by 6 (mean filter) to 8 kHz over the first 3 s, take the source peak
+  sample as the anchor, then correlate the source and dist windows for integer
+  delays in +/-512 samples at 8 kHz and refine +/-64 samples at 48 kHz around the
+  best coarse delay — the per-file delay is the refinement's argmax (normalized by
+  energy; a stem silent across the 6 s probe is re-probed uncapped around its
+  first/loudest late signal, not via a threshold fallback). Pair budget UNCHANGED:
+  `|delay_inst − delay_voices| <= 128 samples` (~2.7 ms) computed on source vs dist
+  delays — i.e. conversion must not change the relative stem alignment.
+- Audio alignment pairing: each `Voices[...].ogg` stem is verified against its matching
+  `Inst[-variant]` (exact variant suffix; otherwise the unvariant Inst). `checked`
+  counts every Voices stem found in both source and dist (126 on the real corpus;
+  `blazin/Inst` has no Voices counterpart and is duration-checked only).
+- Video: SSIM (`ffmpeg -ssim`) is computed for CONVERTED videos only; copies are
+  byte-compared like all copies (hash equality), so a copied video's fidelity is
+  its source's own.
 - `files_grew`: per source file cross-checked against its dist artefact (converted or
   copy). Copies are byte-compared (hash equality), converted must be strictly smaller.
+- Coverage floor: every CONVERTED artefact must have its check performed (duration /
+  pixel / ssim) — a conversion without a check fails the gate (`unverified > 0` is
+  non-zero exit), so an empty or mis-pointed `--in` cannot pass silently.
 
 ## 4. Fixtures (orchestrator-owned, committed)
 

@@ -177,3 +177,51 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
   32k quiet case, webp-source png, 3 videos incl. excluded-stem stub, fonts, text,
   hxc, fla skip stub). Tests using it are ffmpeg-guarded.
 - Next: delegate oxide-media (incl. `oxide pack` CLI + xtask media-check/pack).
+
+## 2026-11-05 — M3 media gate green (oxide-media + assets.pak)
+
+- Gate: `cargo xtask media-check --in ~/Descargas/fnf/Funkin/assets --out assets-dist`
+  → exit 0 (run once by the orchestrator, twice by the implementer — identical block
+  and identical pak sha256 all three times):
+  ```
+  audio  before: 505.1 MB  after: 216.6 MB  (converted 370, copied 61)
+  images before: 114.6 MB  after: 84.3 MB  (converted 633, kept png 53)
+  video  before: 143.6 MB  after: 29.0 MB  (converted 11, excluded 3)
+  text   before: 29.6 MB  after: 2.3 MB  (deflate in pak, 861 files)
+  fonts  before: 2.0 MB  after: 2.0 MB  (25 files)
+  skipped (non-runtime files): 6 (fla/git metadata)
+  mp3 dropped: 413 files, 477.7 MB
+  files_grew: 0            align_ok: 126/126     duration_ok: 370/370
+  video_ssim_min: 0.96 (threshold 0.93)          total_after: 334.3 MB (limit 350)
+  image_pixels_identical: 686/686  (pixels differing only where alpha==0: 130)
+  pak sha256: dc89a2f766e2f20c88e726d265f00ceeb182855096cda5194736ab4b9e5d5a13
+  excluded_videos: mobileRelease.mp4, riftCollabTrailer.mp4, boyfriendEverywhere.mp4
+  ```
+  total_after 334.3 MB ≤ 350 (no 350–380 ADR clause needed). assets-dist tree +
+  assets.pak (350,571,996 bytes) materialized; determinism proven structurally on
+  the mini fixture (byte-identical paks) AND across three independent full runs.
+- **Midmilestone finding, fixed metric:** the first full run was align_ok 121/126:
+  the fixed-threshold onset detector mis-measures gradual crescendos (measured on
+  `milf/Inst.ogg`: crossing drifts ~53 ms on the opus curve). Replaced by the
+  energy-normalized cross-correlation delay estimator (±512@8k coarse, ±64@48k
+  refine; pair budget unchanged ≤128 samples relative). No thresholds were relaxed;
+  contract §3 amended to describe the estimator (method change documented, numbers
+  unchanged). After the fix: 126/126 with the SAME conversions.
+- Reviewer cycle (needs-fix → fixed): copies now byte-compared (hash equality),
+  destructive output prep replaced by marker-guarded wipe (`assets-dist.marker`),
+  zip `system` byte pinned (ADR-0010 amendment), SSIM scoped to converted videos,
+  symlink/git-dir walker hardening, derived-key collision preflight, `oxide pack`
+  bare command implemented, coverage floor (converted artefacts must be checked).
+  Verdict after fixes: accepted (gate re-run green, same sha).
+- `cargo xtask verify` → exit 0 (100 tests / 0 failed; parse-all 432/432 unchanged;
+  oxide-atlas/font/vfs untouched — gate A/B/C still green).
+- Environment disclosure (outside the repo, for the human): Fedora's `ffmpeg-free`
+  lacks HEVC/H264 decoders needed by the shipped cutscene sources; a full RPMFusion
+  ffmpeg 8.1.3 was installed at `~/.local/lib/oxide-ffmpeg` with wrappers at
+  `~/.local/bin/{ffmpeg,ffprobe}` (documented in ADR-0010). The media gates require
+  a full ffmpeg build where HEVC cutscenes must convert.
+- Deferred: pak reading via VFS release mode (M8), pak as sole release payload (M9),
+  `--twice` full double-run on the real corpus (available as a flag, not a gate).
+- M3 status: gate green and committed.
+- Next: either M4 (clock+input) per the plan's order, or M7 (UI) if the human
+  prefers the §8.4 parallel allowance. Default: M4.

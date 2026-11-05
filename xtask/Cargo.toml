@@ -8,4 +8,8 @@ publish = false
 [dependencies]
 oxide-atlas = { path = "../crates/oxide-atlas" }
 oxide-data = { path = "../crates/oxide-data" }
+oxide-media = { path = "../crates/oxide-media" }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+zip = { version = "8.2", default-features = false, features = ["deflate-flate2", "deflate-flate2-zlib-rs"] }
