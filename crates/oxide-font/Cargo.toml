@@ -6,3 +6,5 @@ license.workspace = true
 publish = false
 
 [dependencies]
+oxide-atlas = { path = "../oxide-atlas" }
+thiserror = { workspace = true }

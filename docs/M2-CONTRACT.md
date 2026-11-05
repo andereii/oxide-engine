@@ -174,10 +174,17 @@ No kerning in Sparrow fonts (format has none) — API has none; kerning lives on
 
 ## 3. `crates/oxide-vfs`
 
-New deps (ADR-0008/0009): `notify = "8.2"` (Linux inotify backend; pure Rust, licence CC0-1.0),
-`zip = "8.2"` with `default-features = false, features = ["deflate-flate2"]` (pure-Rust
-flate2/miniz_oxide read path — no C build; disable aes/bzip2/lzma/zstd feature set). Case-exact lookup on every platform via name index built from
-`read_dir` / zip entry table — naive direct paths are NOT acceptable.
+New deps (ADR-0008/0009 as amended): `notify = "8.2"` (Linux inotify backend; pure Rust,
+licence CC0-1.0), `zip = "8.2"` with `default-features = false, features =
+["deflate-flate2", "deflate-flate2-zlib-rs"]` — zip 8.2+ declares `flate2` with
+`default-features = false` so an explicit backend is mandatory to compile (ADR-0009
+amendment); both `zlib-rs` (Zlib licence) and `miniz_oxide` are pure Rust, no C build.
+Case-exact lookup on every platform via name index built from `read_dir` / zip entry
+table — naive direct paths are NOT acceptable (this includes the manifest lookup and
+invalidate: event casing is never trusted; the index is always re-derived from
+`read_dir`). Mod roots are canonicalized on add (validates existence and stores the
+on-disk casing). Mod ids are caller-supplied (the loader owns naming; ADR-0008
+derivation rule applies to the future loader, not to this crate).
 
 ```rust
 #[derive(Debug, Error)]
@@ -238,7 +245,12 @@ Kind table (oracle `source/funkin/Paths.hx`; `Constants.EXT_SOUND = 'ogg'` non-w
 | Json  | `data/{key}`                     | `json`              |
 | Frag  | `shaders/{key}`                  | `frag`              |
 
-Song ids lowercase like Haxe `inst/voices/chart` do (`song.toLowerCase()`).
+Song ids lowercase like Haxe `inst/voices/chart` do (`song.toLowerCase()`): for
+Chart/Inst/Voices the segment before the first `/` (the song id) is lowercased, the
+remainder of the key is kept verbatim (Haxe builds `$id-chart[-variation]` with the
+variation passed as-is — no invented normalization). Manifest/zip reads are capped: the
+manifest is fetched through the same bounded-read primitive as content (unbounded reads
+are a mod-root hostility surface).
 
 The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A format.
 
@@ -267,7 +279,10 @@ The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A fo
   `A`=45x59, `B`=38x59, `maxHeight=59`, `caseAllowed=Upper` (names `A0000`/`B0000` match
   `^[A-Z]\d+$`, none matches `^[a-z]\d+$`, `-dash-0000` matches neither — oracle rule
   `containsUpper != containsLower`); `measure("AB")=(83,59)`,
-  `measure("A B")=(123,59)` (space=40), `measure("A\nB")=(38,118)`, missing glyph zero-width.
+  `measure("A B")=(123,59)` (space=40), `measure("A\nB")=(45,118)` (widest-line semantics:
+  each `\n` starts a new line; reported width = max over lines, here line 1 "A"=45 > "B"=38),
+  missing glyph zero-width; `measure("AA\nA")=(90,118)` discriminates widest-line from
+  last-line accumulation (the last-line value would be 45).
   Real-font checks (guarded by assets-dir presence): default=99 glyph prefixes,
   max height 70; bold=63 / 77; freeplay-clear=10 / 24; case: default=Both,
   bold=Upper, freeplay-clear=Both; oracle quirk kept verbatim: `glyph_prefix('&') =
@@ -275,16 +290,28 @@ The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A fo
   so `measure("&")` consumes zero advance — parity with AtlasText beats plausibility.
   Angel (`vcr-lite.fnt`): 90–char source trimmed to 5; `info.size=16 face="vcr-bmp"`,
   `lineHeight=18`, page file `vcr-bmp.png`; `measure("AB")=(20,18)`; glyph rect check
-  `validate() == Ok(…)`. Overflow fixture `angel-overflow.fnt` → `validate() ==
-  Err(GlyphOverflowsPage{ … })` and the xtask/media-check-owns-nothing integration test must
-  exit the test suite without weakening: the crate integration test asserts Err.
+  `validate() == Ok(…)`. Overflow fixture `angel-overflow.fnt` → `validate() == Err(GlyphOverflowsPage{ … })`
+  (crate integration test asserts the Err; that is the "exit 1 on overflow" check).
+  Angel `measure` uses the SAME widest-line semantics as Sparrow; discriminating case
+  `measure("AB\nC") = (20, 36)` (line 1 = 10+10; line 2 = 0 since `C` is unknown: a
+  last-line implementation reports 0, a sum-implementation reports 30 — decisive),
+  with a positive `(A,B)` kerning test also run across a newline to pin that the
+  kerning pair is not applied across lines.
+  Additional pinned decisions: negative `width`/`height` in a SubTexture frame →
+  `Malformed` (defensive; real data has none); glyph metrics take the LOWEST numeric
+  4-digit suffix per prefix (mirrors flixel `FlxFrame.sortFrames` numeric ordering, not
+  document order).
 - **Gate C** integration tests in `oxide-vfs` (runtime-built temp trees + committed
   `tests/fixtures/vfs/**`): (a) override precedence across two mods — last mod wins, both
   base and first-mod both shadowed; (b) zip mod via `zip` crate, manifest at archive root,
   traversal entry rejected (`..` and absolute), bad zip → clear Err, (c) case-exactness —
-  `Bf.PNG` does NOT resolve `bf.png` on any platform; (d) duplicate ids rejected;
-  (e) `invalidate(path)` re-reads changed file content (temp dir e2e, drives the exact-path
-  invalidation primitive); (f) malformed manifest fixture → `VfsError::Manifest`, not panic.
+  `Bf.PNG` does NOT resolve `bf.png` on any platform (also via invalidate events: a
+  differently-cased event path must not make an on-disk `bf.png` resolvable as `BF.PNG`);
+  (d) duplicate ids rejected;
+  (e) `invalidate(path)` re-reads changed file content AND (decisive part) a file created
+  AFTER the index cache was built does not resolve until `invalidate` is called on it —
+  the test must fail if `invalidate` is a no-op;
+  (f) malformed manifest fixture → `VfsError::Manifest`, not panic.
 
 ## 5. Deliberate deferrals
 

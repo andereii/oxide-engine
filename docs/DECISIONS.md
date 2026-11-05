@@ -110,8 +110,9 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
 - **Decision:** the shipped polymod git dependency states in
   `backends/PolymodAssetLibrary.hx`: *"order matters -- mod files will load from first to
   last, with last taking precedence"*. `oxide-vfs` resolves last-added-mod-first, then the
-  base assets directory. Mod id comes from the mod root directory name (zips: file stem);
-  duplicate ids are an error.
+  base assets directory. Mod id: the FUTURE game loader derives it from the mod root
+  directory name (zips: file stem, ADR-0008; the `oxide-vfs` API takes ids as caller-
+  supplied parameters, frozen contract §3). Duplicate ids are an error.
 - **Consequences:** overrides in examples behave identically in Rust. A first-wins
   interpretation would silently break every multi-mod setup with conflicting files.
 - **Revisit when:** polymod changes its documented precedence upstream.
@@ -124,9 +125,15 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   - `notify` version=8.2 (licence CC0-1.0, pure Rust using inotify on Linux); used only for
     "path changed → invalidate" events. Build cost: seconds (small dep tree:
     `event-listener`, `crossbeam-channel`, `*, inotify`).
-  - `zip` = 8.2 (MIT) with `default-features = false, features = ["deflate-flate2"]`
-    so the read path uses pure-Rust flate2/miniz_oxide — the default feature set would
-    pull zstd-sys/lzma/bzip2 (C build) which contradicts the no-native-deps promise.
+  - `zip` = 8.2 (MIT) with `default-features = false, features =
+    ["deflate-flate2", "deflate-flate2-zlib-rs"]` so the read path is pure Rust — the
+    default feature set would pull zstd-sys/lzma/bzip2 (C build) which contradicts the
+    no-native-deps promise. **Amendment (2026-11-05, reviewer-corrected):** as first
+    written the feature list (`deflate-flate2` alone) was unsatisfiable — zip 8.2 declares
+    `flate2` with `default-features = false`, so an explicit zlib backend is required for
+    the crate to compile. The chosen backend `zlib-rs` (Zlib licence, pure Rust) matches
+    the flate2 `zlib-rs` feature; no `cc`/`cmake`/`*-sys` C crates enter the lockfile
+    (verified by the M2 reviewer against `Cargo.lock`).
   - `oxide-atlas` adds **no** dependencies: the lenient XML scanner is hand-rolled because
     shipped Sparrow data is not std-well-formed (unescaped `<` / `&` inside attribute
     values); `xml` crates don't offer a "strict-ish but tolerant attrs" mode without

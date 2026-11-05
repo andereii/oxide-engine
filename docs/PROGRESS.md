@@ -98,3 +98,36 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
   parser entry points report `uri = "<inline>"`; xtask prints the real path on stderr.
 - `cargo xtask verify` → exit 0 (including parse-all 432/432 unchanged).
 - Next: delegate oxide-font and oxide-vfs (parallel; disjoint crates).
+
+## 2026-11-05 — M2 gates B and C green (oxide-font, oxide-vfs)
+
+- Gate B (`cargo xtask test` covers it): oxide-font 14 green — fixture-derived
+  (`micro-font.xml`: {A,B,-dash-}, A=45x59, B=38x59, maxH=59, case Upper,
+  measure AB=(83,59), "A B"=(123,59), "A\nB"=(45,118), "AA\nA"=(90,118);
+  `vcr-lite.fnt`: 5 chars faithful rows, AB=(20,18), rects fit 122x122 page,
+  kerning absent+kerning-present+cross-newline cases) and real-font checks
+  (default=99 prefixes/maxH 70/Both; bold=63/77/Upper; freeplay-clear=10/24/Both;
+  default measure AB=(83,70)). Overflow fixture → Err(GlyphOverflowsPage) asserted
+  (no-gate-weakening path: crate test).
+- Gate C: oxide-vfs 4 unit + 8 gate-C integration tests green, AND green under a
+  SYMLINKED TMPDIR (macOS-shape repro): (a) two-mod precedence last-wins; (b) zip mod,
+  root manifest, `..`/absolute rejection; (c) case-exact `Bf.PNG` ⇏ `bf.png`, index
+  enforced, event casing never enters the index; (d) duplicate ids; (e) decisive
+  invalidate: post-cache-created files/dirs not resolvable until invalidate (test fails
+  on no-op); (f) malformed manifest → `VfsError::Manifest`, no panic. Manifest reads
+  bounded to 1 MiB. Roots canonicalized at add.
+- Reviewer cycle (oxide-reviewer): verdict cycle = needs-fix → fixed (gate C(e) decisive,
+  case-exact manifest discovery, bounded reads, canonical roots, invalidate grounding,
+  widest-line angel measure, lowest-suffix glyph metrics, Chart song-id-only lowercase)
+  → confirmed accept after final invariants-e test + symlinked-TMPDIR pass. Reject
+  deviations: none outstanding; accepted decisions recorded (zip backend feature
+  amendment in ADR-0009; non-existent mod root = Io NotFound, documented; mod ids
+  caller-supplied per contract, ADR-0008 derivation belongs to the future loader).
+- Full final orchestrator re-run: `cargo xtask verify` exit 0, 74 tests passed / 0
+  failed; parse-atlas numbers identical to the frozen block.
+- Deferred to later milestones (M2 non-goals respected): Animate playback AN/SD→M5/M6
+  spike; Manifest Option-typing for absent fields (M8 modding hardening);
+  `assets.pak` base layer (M3/M9 `oxide pack`). No renderer, no window, no oxide-data
+  changes in M2.
+- M2 status: all three gates green; crates committed.
+- Next: M3 media (parallel allowance with M4-M6 per §8.4) — plan §7.9/§7.10 first.
