@@ -1,0 +1,7 @@
+{
+  "title": "Broken Manifest",
+  "contribu tors": "not-a-list",
+  42: true,
+  "api_version": "not-semver",
+  "license": ["license", "must", "not", "be", "an", "array", "to", "trip", "serde", "struct"]
+}

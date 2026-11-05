@@ -50,4 +50,23 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
   ```
 - Next: unchanged — M2 assets.
 
+## 2026-11-04 — M2 opened: contract + non-goals (no implementation yet)
 
+- M1 independently verified before opening: `cargo xtask verify` exit 0, parse-all
+  432/432, `tests/fixtures/broken` exit 1 (human).
+- **Non-goals (binding):** no renderer, no window, no game state (gates are headless and
+  numeric; screenshots prove nothing in M2). No Animate Atlas playback — parse the format
+  and assert structure only; playback is M5/M6. No new native dependencies. No touching
+  oxide-game / oxide-audio / oxide-input. No changes to oxide-data schemas (ADR only if
+  one is believed wrong, then stop).
+- Contract frozen in `docs/M2-CONTRACT.md`, derived from the real files and the Haxe
+  oracle; measured expectations for gate A: 266 xml visited (205 atlas-root + 61 flixel-ui
+  non-atlas xml), 8486 subtextures, 5684 trimmed (non-zero frame*), 4144 negative
+  frameX/Y, 198 rotated, 20 missing PNG refs; animate audit: 88 dirs, 6071 sprites,
+  0 failures. Packer files: none shipped (fixtures only).
+- New fixtures (orchestrator-owned, committed): tests/fixtures/atlas/{ok,broken,packer}/**,
+  tests/fixtures/fonts/{sparrow,angel,overflow}/**, tests/fixtures/vfs/**.
+- ADRs: 0007 (two font formats; Sparrow-glyph metric semantics from AtlasText.hx),
+  0008 (VFS precedence: last mod wins, per polymod source), 0009 (notify 8.2 + zip 8.2
+  feature-trimmed, no C; hand-rolled lenient XML scanner in oxide-atlas).
+- Next: delegate oxide-atlas to @oxide-impl-rust.

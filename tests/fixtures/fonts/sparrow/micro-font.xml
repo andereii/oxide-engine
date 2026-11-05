@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextureAtlas imagePath="micro-font.png">
+	<SubTexture name="A0000" x="2" y="2" width="45" height="59" />
+	<SubTexture name="A0001" x="50" y="2" width="45" height="59" />
+	<SubTexture name="B0000" x="97" y="2" width="38" height="59" />
+	<SubTexture name="-dash-0000" x="2" y="63" width="30" height="18" />
+</TextureAtlas>

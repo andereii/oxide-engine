@@ -1,0 +1,12 @@
+{
+  "title": "Test Mod Alpha",
+  "description": "Valid manifest fixture for oxide-vfs tests.",
+  "contributors": [
+    {
+      "name": "Oxide Test"
+    }
+  ],
+  "api_version": "0.8.0",
+  "mod_version": "1.0.0",
+  "license": "CC BY 4.0"
+}

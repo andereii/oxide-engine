@@ -83,6 +83,59 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
 - **Revisit when:** a modder layout legitimately deviates from these dir names
   (mods define their own roots; resolution happens above this layer).
 
+## ADR-0007 — Bitmap fonts come in two formats; Sparrow is the primary one
+
+- **Context / date:** 2026-11-04, M2 contract. The plan assumed the three bitmap fonts
+  (`preload/images/fonts/{bold,default,freeplay-clear}.xml`) carry BMFont-style
+  `xoffset/yoffset/xadvance` and `<info face size>`; inspection shows they are Sparrow
+  `TextureAtlas` files whose glyph frame names are `<char><4 digits>`
+  (`A0000`, `#0000`, `&0000`, `-dash-0000`). The only angel-code font in the assets is
+  `fonts/vcr-bmp.fnt` (`<info face size>`, `<common lineHeight>`, `<pages>/<page id file>`,
+  `<chars>/<char id x y width height xoffset yoffset xadvance page>`), loaded via
+  `FlxBitmapFont.fromAngelCode` in `PlayState.hx:812`.
+- **Decision:** `oxide-font` supports both, as separate types: `SparrowFont` (metrics derived
+  exactly like `source/funkin/ui/AtlasText.hx`: space=40, newline→`maxHeight` row advance,
+  glyph advance = first frame width, `caseAllowed` via `^[A-Z]\d+$`/`^[a-z]\d+$`) and
+  `AngelFont` (full angel-code attribute set incl. optional `<kernings>`; none exists in
+  shipped data). Neither format unifies into one struct — no invented normalization.
+- **Consequences:** gate assertions split per format; AtlasText's quirky glyph-prefix table
+  (e.g. `&` → `-andpersand-`) is replicated verbatim since gameplay text depends on it.
+- **Revisit when:** a third font format appears in modded data (mount through VFS by
+  extension, not by guesswork).
+
+## ADR-0008 — VFS mod-layer precedence follows Polymod: LAST mod wins
+
+- **Context / date:** 2026-11-04, M2 contract. Layer order for `oxide-vfs` was ambiguous
+  ("first mod wins" vs "last mod wins").
+- **Decision:** the shipped polymod git dependency states in
+  `backends/PolymodAssetLibrary.hx`: *"order matters -- mod files will load from first to
+  last, with last taking precedence"*. `oxide-vfs` resolves last-added-mod-first, then the
+  base assets directory. Mod id comes from the mod root directory name (zips: file stem);
+  duplicate ids are an error.
+- **Consequences:** overrides in examples behave identically in Rust. A first-wins
+  interpretation would silently break every multi-mod setup with conflicting files.
+- **Revisit when:** polymod changes its documented precedence upstream.
+
+## ADR-0009 — New dependencies for M2: notify 8.2, zip 8.2 (feature-trimmed)
+
+- **Context / date:** 2026-11-04, M2. `oxide-vfs` needs hot reload + zip mod support; the
+  plan mandates `notify`. No new native dependencies allowed this milestone.
+- **Decision:**
+  - `notify` version=8.2 (licence CC0-1.0, pure Rust using inotify on Linux); used only for
+    "path changed → invalidate" events. Build cost: seconds (small dep tree:
+    `event-listener`, `crossbeam-channel`, `*, inotify`).
+  - `zip` = 8.2 (MIT) with `default-features = false, features = ["deflate-flate2"]`
+    so the read path uses pure-Rust flate2/miniz_oxide — the default feature set would
+    pull zstd-sys/lzma/bzip2 (C build) which contradicts the no-native-deps promise.
+  - `oxide-atlas` adds **no** dependencies: the lenient XML scanner is hand-rolled because
+    shipped Sparrow data is not std-well-formed (unescaped `<` / `&` inside attribute
+    values); `xml` crates don't offer a "strict-ish but tolerant attrs" mode without
+    editing semantics.
+  - `serialize_json` deps in atlas: none — reuse `serde_json`/`thiserror` (already ADR-0001).
+- **Consequences:** Cargo.lock gains these crates; no `build.rs` codegen; also headless.
+- **Revisit when:** mod zips in the wild ship lzma/bzip2 compression (then an extra pure-
+  Rust decode feature is reconsidered with a fresh ADR).
+
 ## ADR-0006 — Metadata without `timeChanges` (permissive skip)
 
 - **Context / date:** 2026-11-04, M1 evolution (human bug report). Some metadata
