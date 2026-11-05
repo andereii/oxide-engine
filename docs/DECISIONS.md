@@ -117,6 +117,46 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   interpretation would silently break every multi-mod setup with conflicting files.
 - **Revisit when:** polymod changes its documented precedence upstream.
 
+## ADR-0010 — M3 media pipeline runs ffmpeg as an external binary; sha256 via `sha2`
+
+- **Context / date:** 2026-11-05, M3 contract. Audio/image/video conversion
+  (plan §7.4) needs real encoders; the promise "no DLLs on Windows" forbids linking.
+- **Decision:** ffmpeg + ffprobe are invoked as EXTERNAL COMMANDS from `oxide pack` /
+  `xtask media-check` only (build-time tooling). They are NOT crate dependencies
+  (`oxide-media` never links against libav*), and game/audio code paths are statically
+  forbidden from spawning them. `--check-tools` versions-guards them. For the pak
+  digest: `sha2` 0.10 (Apache/MIT, pure Rust, seconds of build cost; alternative:
+  hand-rolled sha256 — rejected, pointless risk). Deterministic pak assembly uses the
+  existing `zip` 8.x (ADR-0009 features) in write mode.
+- **Consequences:** media gates fail with a clear `Tools` error when ffmpeg is absent
+  (tested SKIPPED in that environment, never silently green).
+- **Revisit when:** a pure-Rust AV1/WebP encoder chain reaches release-tooling quality
+  (plan §7.3's rav1d is decode-only; encode stays ffmpeg).
+
+## ADR-0011 — assets-dist layout, total_after accounting, image never-grow fallback
+
+- **Context / date:** 2026-11-05, M3 contract. Plan §7.5 sizes the release at ~340 MB
+  with per-media-step numbers; the human gate demands `files_grew: 0` and
+  `total_after <= 350 MB`.
+- **Decision:**
+  1. `assets-dist/` carries ONLY media (+fonts); text lives exclusively in
+     `assets.pak` (deflate). The pak additionally STOREs the media
+     (seekable), so in release the pak can replace the whole dist tree (M9).
+  2. `total_after` counts media once (dist bytes minus the pak itself) plus the
+     compressed text (pak bytes minus stored media bytes) — i.e. every content byte
+     counted exactly once, matching §7.5's arithmetic.
+  3. Images follow the same never-grow rule as audio: if webp-lossless output
+     >= source bytes, the original PNG is kept (converted numbers still reported
+     separately). The gate counts a kept png as `copied`, and a resumed conversion
+     can never violate `files_grew: 0` by construction.
+  4. The three attract trailers (mobileRelease, riftCollabTrailer,
+     boyfriendEverywhere) are excluded from dist AND pak via an explicit stem list
+     (ADR line cross-referenced from the contract §1).
+- **Consequences:** this yields two artifact forms (loose tree + pak) with intentional
+  content duplication on disk until M9; the SIZE GATE counts bytes once.
+- **Revisit when:** the release layout is finalized (M9) or the 350–380 MB ADR clause
+  actually triggers.
+
 ## ADR-0009 — New dependencies for M2: notify 8.2, zip 8.2 (feature-trimmed)
 
 - **Context / date:** 2026-11-04, M2. `oxide-vfs` needs hot reload + zip mod support; the

@@ -131,3 +131,49 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
   changes in M2.
 - M2 status: all three gates green; crates committed.
 - Next: M3 media (parallel allowance with M4-M6 per §8.4) — plan §7.9/§7.10 first.
+
+## 2026-11-05 — M2 fixes (human review): `with_frame_attrs` + `frame_quad`
+
+- FIX 1: gate A label — `trimmed (non-zero frame*)` renamed to `with_frame_attrs`.
+  Measured ground truth: presence-of-any-frame-attr == any-non-zero count == 5684
+  (every carrying subtexture has a non-zero frame attr); the human's alternative
+  framings measured 4198 (frameX/frameY != 0) and 4838 (frameW/H differ from w/h) —
+  neither equals 5684, so the number was kept and the name made truthful. Gate A
+  re-run: `with_frame_attrs: 5684`, all other numbers unchanged, exit 0.
+- FIX 2: `oxide_atlas::{FrameQuad, frame_quad}` — flixel `fromSparrow` semantics:
+  dest_offset = (-frameX,-frameY); dest_size = frame* attrs or page dims (rotated &&
+  no frame attrs → swapped, pinned though 0 occurrences in data); atlas_rect swaps
+  w/h ONLY for rotated (sprite orientation). Tests: (a) untrimmed, (b) the
+  frameX=-10/frameY=-5 spec shape (hand-computed 120x210/10,5), (c) real-data-shaped
+  rotated frame (342,8,303,69 / 12,5 / 318,78); regression sweep over all 8486 real
+  subtextures asserting the rotated invariant, no panic. gate A block unaffected.
+- Data facts recorded for M5 renderer: all 198 rotated frames carry frame attrs
+  (`rotated && !trimmed` branch: 0 occurrences); frameWidth/Height never present as
+  "0" (3274 present-zero frameX/frameY only — offset case, semantics identical).
+- Next: M3 media contract — PLAN-ES.md §7.1–§7.7, tool availability probe, corpus
+  measurement.
+
+## 2026-11-05 — M3 opened: contract, ADRs, mini fixture
+
+- M3 scope per human brief + PLAN-ES.md §7.1–§7.7 (read this session): offline media
+  packer (`oxide-media` + `oxide pack` + `assets.pak` + assets-dist), build-time only,
+  ffmpeg as hard external binary (never linked; game/audio code never spawns it),
+  no runtime decoding, oxide-atlas/font/vfs untouched.
+- Corpus re-measured: 685 png (114 MB) / 432 json / 431 ogg (504 MB) / 413 mp3
+  (477 MB) / 266 xml / 114 hxc / 25 fonts / 12 frag / 14 videos (8 mp4 122 MB +
+  6 mkv 21 MB). ffmpeg 8.1.3 present with libsvtav1/libwebp/libopus (no libx264).
+- Probe findings: WebP-lossless pixel compare = identical;
+  bopeebo/Inst.ogg = 92 kbps → grows at 112k → copy rule validated;
+  voices/inst relative first-sample delta stable (−8..0 samples @48k);
+  SFX oggs as low as 13 kbps exist.
+- `docs/M3-CONTRACT.md` frozen: EntryKind/Disposition classification, never-grow
+  audio+image rules, EXCLUDED_VIDEOS exact-stem list, dist layout, totedinge
+  accounting (media once + compressed text), gate report block, exit conditions
+  (files_grew 0, align_ok n/n, duration_ok n/n, image n/n, ssim≥0.93, ≤350 MB),
+  determinism (sorted entries, fixed mtime 2000-01-01, sha2 digest).
+- ADR-0010 (ffmpeg external + `sha2` dep) and ADR-0011 (dist/pak layout +
+  total_after semantics). ADR numbering: existing 0009 letter-ordered, no gap.
+- Fixture `tests/fixtures/media/mini/**` committed (49 KB: ogg stems, SFX incl.
+  32k quiet case, webp-source png, 3 videos incl. excluded-stem stub, fonts, text,
+  hxc, fla skip stub). Tests using it are ffmpeg-guarded.
+- Next: delegate oxide-media (incl. `oxide pack` CLI + xtask media-check/pack).
