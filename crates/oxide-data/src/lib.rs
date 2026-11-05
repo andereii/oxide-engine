@@ -9,11 +9,12 @@ pub mod kind;
 pub mod level;
 pub mod metadata;
 pub mod notestyle;
+pub mod player;
 pub mod save;
 pub mod stage;
 
 pub use error::DataError;
-pub use kind::{DataKind, classify};
+pub use kind::{DataKind, classify, implied_kind};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -35,6 +36,7 @@ pub enum Typed {
     Stage(Box<stage::StageData>),
     Level(Box<level::LevelData>),
     Save(Box<save::SaveData>),
+    Player(Box<player::PlayerData>),
 }
 
 // `ParsedDocument` serializes its kind, so `DataKind` needs serde too. The
@@ -53,6 +55,7 @@ impl serde::Serialize for DataKind {
             Self::Stage => "Stage",
             Self::Level => "Level",
             Self::Save => "Save",
+            Self::Player => "Player",
             Self::Unknown => "Unknown",
         })
     }
@@ -71,6 +74,7 @@ impl<'de> serde::Deserialize<'de> for DataKind {
             "Stage",
             "Level",
             "Save",
+            "Player",
             "Unknown",
         ];
         let value = <String as serde::Deserialize>::deserialize(deserializer)?;
@@ -82,6 +86,7 @@ impl<'de> serde::Deserialize<'de> for DataKind {
             "Stage" => Ok(Self::Stage),
             "Level" => Ok(Self::Level),
             "Save" => Ok(Self::Save),
+            "Player" => Ok(Self::Player),
             "Unknown" => Ok(Self::Unknown),
             other => Err(<D::Error as serde::de::Error>::unknown_variant(
                 other, VARIANTS,
@@ -94,13 +99,31 @@ impl<'de> serde::Deserialize<'de> for DataKind {
 /// (`DataError::Parse` on parse failure, `DataError::NotUtf8` if not UTF-8),
 /// classifies, validates (`DataError::Schema` on failure).
 pub fn parse_any(bytes: &[u8]) -> Result<ParsedDocument, DataError> {
+    let root = parse_root(bytes)?;
+    let kind = classify(&root);
+    let typed = parse_payload(root, kind)?;
+    Ok(ParsedDocument { kind, typed })
+}
+
+/// BOM-aware, path-first parse. Classification: `implied_kind(path)` wins;
+/// otherwise shape-based `classify(root)`. Validation: the implied kind's
+/// typed parse IS the check, so a chart whose `notes` is an array fails with
+/// `DataError::Schema { kind: "chart", .. }`.
+pub fn parse_file(path: &std::path::Path, bytes: &[u8]) -> Result<ParsedDocument, DataError> {
+    let root = parse_root(bytes)?;
+    let kind = implied_kind(path).unwrap_or_else(|| classify(&root));
+    let typed = parse_payload(root, kind)?;
+    Ok(ParsedDocument { kind, typed })
+}
+
+fn parse_root(bytes: &[u8]) -> Result<Value, DataError> {
     let bytes = strip_bom(bytes);
     let text = std::str::from_utf8(bytes).map_err(|_| DataError::NotUtf8)?;
-    let root: Value =
-        serde_json::from_str(text).map_err(|error| DataError::Parse(error.to_string()))?;
-    let kind = classify(&root);
+    serde_json::from_str(text).map_err(|error| DataError::Parse(error.to_string()))
+}
 
-    let typed = match kind {
+fn parse_payload(root: Value, kind: DataKind) -> Result<Typed, DataError> {
+    Ok(match kind {
         DataKind::Unknown => Typed::Unknown(root),
         DataKind::Chart => Typed::Chart(Box::new(parse_typed(root, kind)?)),
         DataKind::Metadata => Typed::Metadata(Box::new(parse_typed(root, kind)?)),
@@ -109,9 +132,8 @@ pub fn parse_any(bytes: &[u8]) -> Result<ParsedDocument, DataError> {
         DataKind::Stage => Typed::Stage(Box::new(parse_typed(root, kind)?)),
         DataKind::Level => Typed::Level(Box::new(parse_typed(root, kind)?)),
         DataKind::Save => Typed::Save(Box::new(parse_typed(root, kind)?)),
-    };
-
-    Ok(ParsedDocument { kind, typed })
+        DataKind::Player => Typed::Player(Box::new(parse_typed(root, kind)?)),
+    })
 }
 
 fn strip_bom(bytes: &[u8]) -> &[u8] {

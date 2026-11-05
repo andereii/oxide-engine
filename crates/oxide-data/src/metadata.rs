@@ -19,8 +19,12 @@ pub struct Metadata {
     pub play_data: Option<PlayData>,
     #[serde(rename = "generatedBy", skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
-    #[serde(rename = "timeChanges", default)]
-    pub time_changes: Vec<TimeChange>,
+    #[serde(
+        rename = "timeChanges",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub time_changes: Option<Vec<TimeChange>>,
     #[serde(rename = "timeFormat", skip_serializing_if = "Option::is_none")]
     pub time_format: Option<String>,
     #[serde(rename = "looped", skip_serializing_if = "Option::is_none")]

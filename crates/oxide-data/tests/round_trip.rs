@@ -1,8 +1,11 @@
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use oxide_data::chart::SongEvent;
 use oxide_data::events::EventRegistry;
-use oxide_data::{DataError, DataKind, ParsedDocument, Typed, classify, parse_any};
+use oxide_data::{
+    DataError, DataKind, ParsedDocument, Typed, classify, implied_kind, parse_any, parse_file,
+};
 use serde_json::{Value, json};
 
 /// Numeric equivalence: `3 == 3.0`, as required by the frozen contract.
@@ -29,8 +32,8 @@ fn numeric_eq(left: &Value, right: &Value) -> bool {
     }
 }
 
-fn assert_round_trip(document: &ParsedDocument, source: &str) {
-    let actual = match &document.typed {
+fn serialized_typed(document: &ParsedDocument) -> Value {
+    match &document.typed {
         Typed::Chart(value) => serde_json::to_value(value.as_ref()),
         Typed::Metadata(value) => serde_json::to_value(value.as_ref()),
         Typed::NoteStyle(value) => serde_json::to_value(value.as_ref()),
@@ -38,9 +41,14 @@ fn assert_round_trip(document: &ParsedDocument, source: &str) {
         Typed::Stage(value) => serde_json::to_value(value.as_ref()),
         Typed::Level(value) => serde_json::to_value(value.as_ref()),
         Typed::Save(value) => serde_json::to_value(value.as_ref()),
+        Typed::Player(value) => serde_json::to_value(value.as_ref()),
         Typed::Unknown(value) => Ok(value.clone()),
     }
-    .expect("typed document should serialize");
+    .expect("typed document should serialize")
+}
+
+fn assert_round_trip(document: &ParsedDocument, source: &str) {
+    let actual = serialized_typed(document);
     let expected: Value = serde_json::from_str(source).expect("test source should be valid JSON");
     assert!(
         numeric_eq(&actual, &expected),
@@ -246,7 +254,14 @@ fn metadata_round_trip() {
         .and_then(|play_data| play_data.characters.as_ref())
         .expect("play data characters should be present");
     assert_eq!(characters.opponent.as_deref(), Some("dad"));
-    assert_eq!(metadata.time_changes[0].bpm, 100.0);
+    assert_eq!(
+        metadata
+            .time_changes
+            .as_ref()
+            .expect("time changes should be present")[0]
+            .bpm,
+        100.0
+    );
 
     assert_round_trip(
         &ParsedDocument {
@@ -269,7 +284,14 @@ fn legacy_metadata_parses_into_same_struct() {
     assert_eq!(metadata.song_name.as_deref(), Some("Freaky Menu"));
     assert_eq!(metadata.time_format.as_deref(), Some("ms"));
     assert_eq!(metadata.looped, Some(true));
-    assert_eq!(metadata.time_changes[0].bpm, 102.0);
+    assert_eq!(
+        metadata
+            .time_changes
+            .as_ref()
+            .expect("time changes should be present")[0]
+            .bpm,
+        102.0
+    );
     assert!(metadata.play_data.is_none());
 }
 
@@ -472,6 +494,7 @@ fn classify_covers_every_kind() {
     let stage = json!({ "version": "1.0.0", "name": "Main Stage", "props": [] });
     let level = json!({ "version": "1.0.0", "name": "Week 1", "props": [], "songs": [] });
     let save = json!({ "options": {}, "vars": {} });
+    let player = json!({ "version": "1.0.0", "name": "Boyfriend", "ownedChars": ["bf"] });
     let unknown = json!({ "version": "9.9.9", "something": true });
 
     assert_eq!(classify(&chart), DataKind::Chart);
@@ -481,6 +504,7 @@ fn classify_covers_every_kind() {
     assert_eq!(classify(&stage), DataKind::Stage);
     assert_eq!(classify(&level), DataKind::Level);
     assert_eq!(classify(&save), DataKind::Save);
+    assert_eq!(classify(&player), DataKind::Unknown);
     assert_eq!(classify(&unknown), DataKind::Unknown);
 }
 
@@ -493,6 +517,84 @@ fn parse_errors_are_typed() {
     match result {
         Err(DataError::Schema { kind, .. }) => assert_eq!(kind, "chart"),
         other => panic!("expected a schema error, got {other:?}"),
+    }
+}
+
+#[test]
+fn implied_kind_covers_layout_rules() {
+    let cases = [
+        (
+            "/assets/preload/data/songs/bopeebo/bopeebo-chart.json",
+            Some(DataKind::Chart),
+        ),
+        (
+            "/assets/preload/data/songs/bopeebo/bopeebo-metadata.json",
+            Some(DataKind::Metadata),
+        ),
+        (
+            "/assets/mods/my-mod/data/characters/bf.json",
+            Some(DataKind::Character),
+        ),
+        (
+            "/assets/preload/data/stages/mainStage.json",
+            Some(DataKind::Stage),
+        ),
+        (
+            "/assets/preload/data/levels/week1.json",
+            Some(DataKind::Level),
+        ),
+        (
+            "/assets/preload/data/notestyles/funkin.json",
+            Some(DataKind::NoteStyle),
+        ),
+        (
+            "/assets/preload/data/players/bf.json",
+            Some(DataKind::Player),
+        ),
+        ("/assets/scripts/characters/bf.json", None),
+        ("/assets/images/players/bf.json", None),
+        ("/assets/preload/data/songs/bopeebo/something.json", None),
+        ("/assets/preload/data/characters/sub/bf.json", None),
+        ("/assets/preload/data/other/file.json", None),
+        ("/assets/preload/data/characters.json", None),
+    ];
+
+    for (path, expected) in cases {
+        assert_eq!(implied_kind(Path::new(path)), expected, "path: {path}");
+    }
+}
+
+#[test]
+fn parse_file_implied_chart_rejects_array_notes() {
+    let path = Path::new("/assets/preload/data/songs/regression/regression-chart.json");
+    let bytes = br#"{
+        "version": "2.0.0",
+        "notes": [{ "t": 0, "d": 0 }],
+        "events": [],
+        "scrollSpeed": { "easy": 1, "normal": 1, "hard": 1 }
+    }"#;
+
+    match parse_file(path, bytes) {
+        Err(DataError::Schema { kind, .. }) => assert_eq!(kind, "chart"),
+        other => panic!("expected a schema error, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_file_implied_kind_wins_over_shape() {
+    let path = Path::new("/assets/preload/data/players/bf.json");
+    let bytes = br#"{
+        "version": "1.0.0",
+        "name": "Shape Character",
+        "assetPath": "characters/bf",
+        "animations": []
+    }"#;
+
+    let document = parse_file(path, bytes).expect("implied player should parse");
+    assert_eq!(document.kind, DataKind::Player);
+    match document.typed {
+        Typed::Player(player) => assert_eq!(player.name, "Shape Character"),
+        other => panic!("expected a typed player, got {other:?}"),
     }
 }
 
@@ -546,8 +648,59 @@ fn time_change_time_signature_round_trip() {
     let Typed::Metadata(metadata) = document.typed else {
         panic!("expected typed metadata");
     };
-    assert_eq!(metadata.time_changes[0].time_signature_num, Some(4));
-    assert_eq!(metadata.time_changes[0].time_signature_den, Some(4));
+    let time_change = &metadata
+        .time_changes
+        .as_ref()
+        .expect("time changes should be present")[0];
+    assert_eq!(time_change.time_signature_num, Some(4));
+    assert_eq!(time_change.time_signature_den, Some(4));
+}
+
+const METADATA_WITHOUT_TIME_CHANGES: &str = r#"{
+  "version": "2.2.4",
+  "songName": "No Time Changes",
+  "artist": "Artist"
+}"#;
+
+const METADATA_WITH_EMPTY_TIME_CHANGES: &str = r#"{
+  "version": "2.2.4",
+  "songName": "Empty Time Changes",
+  "artist": "Artist",
+  "timeChanges": []
+}"#;
+
+#[test]
+fn metadata_time_changes_presence_round_trip() {
+    let path = Path::new("/assets/preload/data/songs/no-time/no-time-metadata.json");
+
+    let document =
+        parse_file(path, METADATA_WITHOUT_TIME_CHANGES.as_bytes()).expect("metadata should parse");
+    assert_eq!(document.kind, DataKind::Metadata);
+    assert_round_trip(&document, METADATA_WITHOUT_TIME_CHANGES);
+
+    let Typed::Metadata(metadata) = document.typed else {
+        panic!("expected typed metadata");
+    };
+    assert_eq!(metadata.time_changes, None);
+    let value = serde_json::to_value(metadata.as_ref()).expect("metadata should serialize");
+    assert!(
+        !value
+            .as_object()
+            .expect("metadata object")
+            .contains_key("timeChanges")
+    );
+
+    let document = parse_file(path, METADATA_WITH_EMPTY_TIME_CHANGES.as_bytes())
+        .expect("metadata should parse");
+    assert_eq!(document.kind, DataKind::Metadata);
+    assert_round_trip(&document, METADATA_WITH_EMPTY_TIME_CHANGES);
+
+    let Typed::Metadata(metadata) = document.typed else {
+        panic!("expected typed metadata");
+    };
+    assert_eq!(metadata.time_changes, Some(Vec::new()));
+    let value = serde_json::to_value(metadata.as_ref()).expect("metadata should serialize");
+    assert_eq!(value.get("timeChanges"), Some(&json!([])));
 }
 
 const STAGE_WITH_EMPTY_ANIMATIONS: &str = r#"{
@@ -682,10 +835,12 @@ fn animation_frame_indices_and_asset_path_round_trip() {
     assert_eq!(animation.render_type.as_deref(), Some("sparrow"));
 }
 
+const LIVE_ASSETS: &str = "/home/alex/Descargas/fnf/Funkin/assets";
 const LIVE_CHART: &str =
     "/home/alex/Descargas/fnf/Funkin/assets/preload/data/songs/bopeebo/bopeebo-chart.json";
 const LIVE_SENPAI: &str =
     "/home/alex/Descargas/fnf/Funkin/assets/preload/data/characters/senpai.json";
+const LIVE_PLAYER: &str = "/home/alex/Descargas/fnf/Funkin/assets/preload/data/players/bf.json";
 
 #[test]
 fn real_bopeebo_chart_smoke() {
@@ -695,7 +850,8 @@ fn real_bopeebo_chart_smoke() {
     }
 
     let bytes = std::fs::read(LIVE_CHART).expect("live bopeebo chart should be readable");
-    let document = parse_any(&bytes).expect("live bopeebo chart should parse");
+    let document =
+        parse_file(Path::new(LIVE_CHART), &bytes).expect("live bopeebo chart should parse");
     assert_eq!(document.kind, DataKind::Chart);
 
     let Typed::Chart(chart) = document.typed else {
@@ -716,7 +872,8 @@ fn real_senpai_character_smoke() {
     }
 
     let bytes = std::fs::read(LIVE_SENPAI).expect("live senpai character should be readable");
-    let document = parse_any(&bytes).expect("live senpai character should parse");
+    let document =
+        parse_file(Path::new(LIVE_SENPAI), &bytes).expect("live senpai character should parse");
     assert_eq!(document.kind, DataKind::Character);
 
     let Typed::Character(character) = document.typed else {
@@ -727,4 +884,178 @@ fn real_senpai_character_smoke() {
     assert_eq!(character.is_pixel, Some(true));
     assert_eq!(character.scale, Some(6.0));
     assert_eq!(character.animations.len(), 5);
+}
+
+#[test]
+fn real_bf_player_round_trip_via_parse_file() {
+    if !Path::new(LIVE_PLAYER).exists() {
+        eprintln!(
+            "skipping real_bf_player_round_trip_via_parse_file: {LIVE_PLAYER} does not exist"
+        );
+        return;
+    }
+
+    let bytes = std::fs::read(LIVE_PLAYER).expect("live bf player should be readable");
+    let source = std::str::from_utf8(&bytes).expect("live bf player should be UTF-8");
+    let document = parse_file(Path::new(LIVE_PLAYER), &bytes).expect("live bf player should parse");
+    assert_eq!(document.kind, DataKind::Player);
+    assert_round_trip(&document, source);
+
+    let Typed::Player(player) = document.typed else {
+        panic!("expected typed player");
+    };
+    assert_eq!(player.version, "1.0.0");
+    assert_eq!(player.name, "Boyfriend");
+    assert_eq!(player.owned_chars.len(), 6);
+    assert_eq!(player.owned_chars[0], "bf");
+    assert!(player.show_unowned_chars);
+    assert!(player.unlocked);
+    assert_eq!(player.freeplay_style.as_deref(), Some("bf"));
+    assert_eq!(player.sticker_pack.as_deref(), Some("standard-bf"));
+    assert!(player.freeplay_dj.is_some());
+    assert!(player.char_select.is_some());
+    assert!(player.results.is_some());
+}
+
+#[test]
+fn real_assets_smoke_via_parse_file() {
+    let root = Path::new(LIVE_ASSETS);
+    if !root.exists() {
+        eprintln!("skipping real_assets_smoke_via_parse_file: {LIVE_ASSETS} does not exist");
+        return;
+    }
+
+    let cases = [
+        (
+            "preload/data/songs/bopeebo/bopeebo-chart.json",
+            DataKind::Chart,
+        ),
+        (
+            "preload/data/songs/bopeebo/bopeebo-metadata.json",
+            DataKind::Metadata,
+        ),
+        ("preload/data/characters/senpai.json", DataKind::Character),
+        ("preload/data/stages/mainStage.json", DataKind::Stage),
+        ("preload/data/levels/week1.json", DataKind::Level),
+        ("preload/data/notestyles/funkin.json", DataKind::NoteStyle),
+        ("preload/data/players/bf.json", DataKind::Player),
+    ];
+
+    for (relative, expected) in cases {
+        let path = root.join(relative);
+        if !path.exists() {
+            eprintln!("skipping missing real asset: {}", path.display());
+            continue;
+        }
+        let bytes = std::fs::read(&path).expect("real asset should be readable");
+        let document = parse_file(&path, &bytes)
+            .unwrap_or_else(|error| panic!("{}: {error:?}", path.display()));
+        assert_eq!(document.kind, expected, "path: {}", path.display());
+    }
+}
+
+fn kind_label(kind: DataKind) -> &'static str {
+    match kind {
+        DataKind::Chart => "chart",
+        DataKind::Metadata => "metadata",
+        DataKind::NoteStyle => "notestyle",
+        DataKind::Character => "character",
+        DataKind::Stage => "stage",
+        DataKind::Level => "level",
+        DataKind::Save => "save",
+        DataKind::Player => "player",
+        DataKind::Unknown => "unknown",
+    }
+}
+
+fn collect_json_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_json_files(&path, out);
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+fn real_assets_all_round_trip_via_parse_file() {
+    let root = Path::new(LIVE_ASSETS);
+    if !root.exists() {
+        eprintln!(
+            "skipping real_assets_all_round_trip_via_parse_file: {LIVE_ASSETS} does not exist"
+        );
+        return;
+    }
+
+    let mut files = Vec::new();
+    collect_json_files(root, &mut files);
+    files.sort();
+    assert_eq!(files.len(), 432, "unexpected real asset JSON count");
+
+    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut failures = Vec::new();
+
+    for path in &files {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                failures.push(format!("{}: read error: {error}", path.display()));
+                continue;
+            }
+        };
+        let source = match std::str::from_utf8(&bytes) {
+            Ok(source) => source,
+            Err(error) => {
+                failures.push(format!("{}: not UTF-8: {error}", path.display()));
+                continue;
+            }
+        };
+        let document = match parse_file(path, &bytes) {
+            Ok(document) => document,
+            Err(error) => {
+                failures.push(format!("{}: {error:?}", path.display()));
+                continue;
+            }
+        };
+        *counts.entry(kind_label(document.kind)).or_default() += 1;
+
+        let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
+        let expected: Value = match serde_json::from_str(source) {
+            Ok(expected) => expected,
+            Err(error) => {
+                failures.push(format!("{}: reparse error: {error}", path.display()));
+                continue;
+            }
+        };
+        let actual = serialized_typed(&document);
+        let matches = if matches!(document.typed, Typed::Unknown(_)) {
+            actual == expected
+        } else {
+            numeric_eq(&actual, &expected)
+        };
+        if !matches {
+            failures.push(format!("{}: round-trip mismatch", path.display()));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} round-trip failures:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(counts.get("player"), Some(&2));
+    assert_eq!(counts.get("unknown"), Some(&203));
+    assert_eq!(counts.values().sum::<usize>(), 432);
+    eprintln!("real-assets counts: {counts:?}");
 }

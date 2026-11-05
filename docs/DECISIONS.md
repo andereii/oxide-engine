@@ -54,7 +54,6 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   as the field-name source.
 
 ## ADR-0004 — parse-all kind taxonomy is shape-based, not directory-based
-
 - **Context / date:** 2026-11-04, M1. The plan (§1) claims "43 characters"; a shape-based
   classifier sorts 55 files into the character kind (includes `isPixel` text-anims and
   per-directory variants) and 3 dialogue boxes into unknown after the `text` guard.
@@ -63,3 +62,36 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   total and 61/61/21 subtotals match the plan; per-kind counts are documented in PROGRESS.md.
 - **Consequences:** the gate measures parseability, not an editorial character census.
 - **Revisit when:** M2/M5 needs an exact character registry count (registry, not classifier).
+
+## ADR-0005 — Path-first classification with strict shape validation (supersedes 0004)
+
+- **Context / date:** 2026-11-04, M1 evolution (human bug report). Shape-based
+  `classify` could silently accept a malformed chart (a `"notes"` array) because
+  nothing anchored a file to a kind. Measured guards: every real chart lives under
+  `*/songs/`; all `*/data/characters/*.json` validate as characters.
+- **Decision:** `oxide_data::parse_file(path, bytes)` classifies path-first:
+  `songs/*-chart*` ⇢ Chart, `songs/*-metadata*` ⇢ Metadata, exact `data/<characters|
+  stages|levels|notestyles|players>` parent pairs ⇢ Character/Stage/Level/NoteStyle/
+  Player. Only files with no implied kind fall back to shape classification. An
+  implied kind whose shape does not validate fails with `DataError::Schema` (gate:
+  `tests/fixtures/broken` exits 1, wired as an xtask integration test). This
+  *strengthens* the gate, no fixture or threshold weakened.
+- **Consequences:** two-player files (`data/players/*`) become a new `Player` kind
+  (schema grounded in Haxe `PlayerData.hx`; complex nested stamps stay verbatim
+  `Value` same policy as ADR-0003). Real-assets table shifts: player 2, unknown 203,
+  totals unchanged 432/432.
+- **Revisit when:** a modder layout legitimately deviates from these dir names
+  (mods define their own roots; resolution happens above this layer).
+
+## ADR-0006 — Metadata without `timeChanges` (permissive skip)
+
+- **Context / date:** 2026-11-04, M1 evolution (human bug report). Some metadata
+  files may lack `timeChanges` entirely.
+- **Options:** strict (require the key) vs permissive (default empty, omit on serialize).
+- **Decision:** permissive for this one field, documented: absent key ⇢ empty
+  `Vec` decode ⇢ key absent on serialize; a present-but-empty `[]` still serializes
+  as `[]`. Rationale: charts always validate strongly through `timeChanges`-bearing
+  metadata at gameplay time (M4 conductor gate), so early parse leniency here does
+  not hide errors that matter.
+- **Revisit when:** M4 finds real charts whose metadata lacks `timeChanges`
+  (then strictness moves into the conductor preflight, not the parser).

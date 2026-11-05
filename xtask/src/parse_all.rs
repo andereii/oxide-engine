@@ -5,7 +5,7 @@
 //! path and error, and overall `ok/failed/total`. Exit code 0 only if every
 //! file parses and round-trips.
 
-use oxide_data::{DataKind, ParsedDocument, Typed, parse_any};
+use oxide_data::{DataKind, ParsedDocument, Typed, parse_file};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -98,14 +98,23 @@ fn check_file(path: &Path) -> Result<String, (String, String)> {
         Ok(b) => b,
         Err(err) => return Err(("unreadable".into(), format!("read error: {err}"))),
     };
-    match parse_any(&bytes) {
+    match parse_file(path, &bytes) {
         Ok(parsed) => {
             if let Err(err) = verify_round_trip(&parsed, &bytes) {
                 return Err((kind_name(parsed.kind).to_string(), err));
             }
             Ok(kind_name(parsed.kind).to_string())
         }
-        Err(err) => Err(("parse".into(), err.to_string())),
+        Err(err) => Err((failure_kind_name(&err), err.to_string())),
+    }
+}
+
+/// The kind to attribute a failure to. Schema errors carry the kind
+/// (path-implied or shape-classified); anything earlier is a plain parse.
+fn failure_kind_name(err: &oxide_data::DataError) -> String {
+    match err {
+        oxide_data::DataError::Schema { kind, .. } => (*kind).to_string(),
+        _ => "parse".to_string(),
     }
 }
 
@@ -118,6 +127,7 @@ fn kind_name(kind: DataKind) -> &'static str {
         DataKind::Stage => "stage",
         DataKind::Level => "level",
         DataKind::Save => "save",
+        DataKind::Player => "player",
         DataKind::Unknown => "unknown",
     }
 }
@@ -168,6 +178,7 @@ fn typed_payload_value(parsed: &ParsedDocument) -> Result<Value, String> {
         Typed::Stage(x) => serde_json::to_value(x.as_ref()),
         Typed::Level(x) => serde_json::to_value(x.as_ref()),
         Typed::Save(x) => serde_json::to_value(x.as_ref()),
+        Typed::Player(x) => serde_json::to_value(x.as_ref()),
     }
     .map_err(|e| e.to_string())
 }
@@ -222,7 +233,7 @@ fn print_first_diff(path: &Path) {
             return;
         }
     };
-    match parse_any(&bytes) {
+    match parse_file(path, &bytes) {
         Ok(parsed) => {
             let reparsed: Value = match parse_raw(&bytes) {
                 Ok(v) => v,

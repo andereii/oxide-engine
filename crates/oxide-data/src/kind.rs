@@ -10,6 +10,7 @@ pub enum DataKind {
     Stage,
     Level,
     Save,
+    Player,
     Unknown,
 }
 
@@ -23,8 +24,54 @@ impl DataKind {
             Self::Stage => "stage",
             Self::Level => "level",
             Self::Save => "save",
+            Self::Player => "player",
             Self::Unknown => "unknown",
         }
+    }
+}
+
+/// The kind a path implies by V-Slice layout convention. Only *exact*
+/// dir-segment pairs `data/<dir>` terminate in a kind; `scripts/<dir>` and
+/// `images/<dir>` never imply one.
+pub fn implied_kind(path: &std::path::Path) -> Option<DataKind> {
+    let file_name = path.file_name()?.to_str()?;
+    let in_songs = path
+        .components()
+        .any(|component| component.as_os_str().to_str() == Some("songs"));
+
+    if in_songs && file_name.contains("-chart") {
+        return Some(DataKind::Chart);
+    }
+    if in_songs && file_name.contains("-metadata") {
+        return Some(DataKind::Metadata);
+    }
+
+    let parent = path.parent()?;
+    let directory = parent.file_name()?.to_str()?;
+    if let Some(grandparent) = parent.parent().and_then(|path| path.file_name())
+        && grandparent.to_str() == Some("data")
+        && let Some(kind) = kind_for_data_directory(directory)
+    {
+        return Some(kind);
+    }
+
+    // Also accept a directory-shaped path ending in `data/<dir>`.
+    let leaf = path.file_name()?.to_str()?;
+    if parent.file_name().and_then(|name| name.to_str()) == Some("data") {
+        return kind_for_data_directory(leaf);
+    }
+
+    None
+}
+
+fn kind_for_data_directory(directory: &str) -> Option<DataKind> {
+    match directory {
+        "characters" => Some(DataKind::Character),
+        "stages" => Some(DataKind::Stage),
+        "levels" => Some(DataKind::Level),
+        "notestyles" => Some(DataKind::NoteStyle),
+        "players" => Some(DataKind::Player),
+        _ => None,
     }
 }
 
