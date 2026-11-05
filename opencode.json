@@ -1,22 +1,17 @@
 {
   "$schema": "https://opencode.ai/config.json",
 
-  // opencode 2.x (V2 schema): `permissions` is an array of {action, resource, effect}.
-  // Last matching rule wins, so broad allows come first and specific denies last.
+  // opencode 2.2.5: `subagent_depth` is not supported in this line, and agent
+  // frontmatter only accepts description/mode/model/steps/permissions
+  // (`temperature` and `fallback_models` are silently ignored -> chains live here).
   "default_agent": "oxide-orchestrator",
-  "subagent_depth": 1,
 
-  // Session titles / compaction summaries do not need Argon.
   "small_model": "opencode-go/deepseek-v4.1-flash",
 
-  // Automatic model fallback (plugin 0.3.1, supports opencode v2).
-  // Per-agent chains live in each agent's frontmatter (`fallback_models:`).
   "plugins": [
     {
       "package": "opencode-runtime-fallback",
       "options": {
-        // Quota/permission failures are not in the plugin defaults (429/500/502/503/504).
-        // 402 and 403 are what "out of budget" usually looks like.
         "retry_on_errors": [402, 403, 429, 500, 502, 503, 504, 529],
         "retryable_error_patterns": [
           "quota",
@@ -24,16 +19,31 @@
           "billing\\s+suspended",
           "usage\\s+limit",
           "credit\\s+balance",
-          "out\\s+of\\s+credits"
+          "out\\s+of\\s+credits",
+          "endpoint is unavailable",
+          "upstream request failed",
+          "model.{0,20}not.{0,10}(found|available)"
         ],
-        // Monthly quota does not recover in 60s; transient 429s do. 5 min is the compromise.
         "cooldown_seconds": 300,
-        // TTFT: reasoning tokens count as activity, so `#max` does not trip it.
         "timeout_seconds": 120,
         "max_fallback_attempts": 3,
         "notify_on_fallback": true,
-        // Keep foreground subagent calls waiting through a fallback instead of failing.
-        "foreground_task_fallback": true
+        "foreground_task_fallback": true,
+
+        "agents": {
+          "oxide-orchestrator": {
+            "fallback_models": ["xai/grok-4.7", "opencode-go/deepseek-v4.1-flash#max"]
+          },
+          "oxide-orchestrator-grok": {
+            "fallback_models": ["opencode-go/gemini-4-argon", "opencode-go/deepseek-v4.1-flash#max"]
+          },
+          "oxide-impl-rust": {
+            "fallback_models": ["xai/grok-4.7"]
+          },
+          "oxide-reviewer": {
+            "fallback_models": ["xai/grok-4.7"]
+          }
+        }
       }
     }
   ],

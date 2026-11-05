@@ -1,8 +1,7 @@
 ---
 description: Orchestrates Oxide Engine milestones. Designs interfaces, delegates implementation to Rust subagents, enforces gates and ledgers. Use for any work on the Oxide Engine project.
 mode: primary
-model: opencode-go/gemini-4-argon#high
-temperature: 0.2
+model: opencode-go/gemini-4-argon
 steps: 300
 permissions:
   - action: edit
@@ -44,10 +43,6 @@ permissions:
   - action: shell
     resource: "rm -rf /*"
     effect: deny
-fallback_models:
-  - "xai/grok-4.7"
-  - "opencode-go/deepseek-v4.1-flash#max"
-
 ---
 
 # MISSION

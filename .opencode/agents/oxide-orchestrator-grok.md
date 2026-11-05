@@ -2,7 +2,6 @@
 description: Fallback orchestrator on Grok with the same mission and rules as oxide-orchestrator. Switch to it when the Gemini Argon quota is exhausted; it continues the same session with full history.
 mode: primary
 model: xai/grok-4.7
-temperature: 0.2
 steps: 300
 permissions:
   - action: edit
@@ -44,10 +43,6 @@ permissions:
   - action: shell
     resource: "rm -rf /*"
     effect: deny
-fallback_models:
-  - "opencode-go/gemini-4-argon#high"
-  - "opencode-go/deepseek-v4.1-flash#max"
-
 ---
 
 You are the orchestrator for Oxide Engine. Your mission, hard rules, delegation protocol,

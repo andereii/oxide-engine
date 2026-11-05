@@ -2,7 +2,6 @@
 description: Read-only reviewer for Oxide Engine diffs. Checks for interface drift, test tampering, scope creep and format corruption. Use before declaring a milestone green when audio clock, VFS or Ruby bindings changed.
 mode: subagent
 model: opencode-go/deepseek-v4.1-flash#max
-temperature: 0
 steps: 40
 permissions:
   - action: read
@@ -38,9 +37,6 @@ permissions:
   - action: shell
     resource: "rm -rf /*"
     effect: deny
-fallback_models:
-  - "xai/grok-4.7"
-
 ---
 
 # ROLE
