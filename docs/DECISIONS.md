@@ -206,3 +206,22 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   not hide errors that matter.
 - **Revisit when:** M4 finds real charts whose metadata lacks `timeChanges`
   (then strictness moves into the conductor preflight, not the parser).
+
+## ADR-0012 — kira 0.12 as the audio clock (default features OFF; simulation backend)
+
+- **Context / date:** 2026-11-05, M4 contract §2. The plan (§3) pins Kira plus
+  symphonia/libopus as the audio stack; M4 only needs the CLOCK primitive ("Kira
+  Clock as single source of truth"), not sound playback or decoding.
+- **Decision:** `kira 0.12.6` (licence MIT OR Apache-2.0, pure Rust) in
+  `crates/oxide-audio` with `default-features = false`: the default build uses kira's
+  mock/SIMULATION backend (1000 Hz tick, pure Rust deps, ~6 s cold build, no C/C++)
+  so CI and the M4 gates need no OS audio. An opt-in `real-audio` feature enables
+  `kira/cpal` (cpal → ALSA native on Linux) for M5 playback; it stays off until then.
+  API notes in code: kira's `ClockHandle` is not `Clone` (owns command writers), so
+  the crate exposes a cloneable `Arc`-shared wrapper; `set_start_offset_ms` is
+  interior-mutable (`&self` per contract). Alternative considered: hand-rolled tick
+  clock (rejected: kira ships the real-audio path for M5 and its clock simulation
+  models the exact per-buffer tick publication the game will run on).
+- **Consequences:** no native dependency this milestone even with the audio crate;
+  Cargo.lock gains ~7 pure-Rust crates.
+- **Revisit when:** M5 attaches real sounds (cpal/ALSA backend gets its own ADR line).

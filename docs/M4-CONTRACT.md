@@ -39,6 +39,12 @@ the runtime decoder work starts, M5+; this milestone uses symphonia behind
      stepLengthMs, 4)`.
   6. `currentStep/Beat/Measure = floor(…Time)`; dispatch onStep/Beat/MeasureHit iff
      the integer CHANGED (L490-503).
+- AMENDED 2026-11-05 (implementer discovery, parity with the installed runtime):
+  `FlxMath.roundDecimal` in the shipped HaxeFlixel (`.haxelib/flixel/git/flixel/math/
+  FlxMath.hx:68-76`) is `Math.fround(value * mult) / mult` — a **f32 rounding escape**
+  — not `Math.round`. The oracle and the Rust port replicate fround EXACTLY (everything
+  else stays f64; this is the one place the game leaves f64). At the gate tolerance
+  (1 ms) the difference from half-away rounding is invisible, but parity is parity.
 - `mapTimeChanges` (L549-600): sort by `timeStamp` ascending (SongDataUtils
   L267-275, `FlxSort.ASCENDING` of `a.timeStamp` values); negative `timeStamp`
   clamped to 0 with `beatTime = 0`; for `timeStamp > 0`:
@@ -83,6 +89,10 @@ Rules of the oracle:
   per method (`// funkin/Conductor.hx:L176-182` style), including roundDecimal
   semantics (`FlxMath.roundDecimal = Math.round(value*10^d)/10^d`, clamping f64).
 - It must NOT modify the game repo (never write inside `~/Descargas/fnf/Funkin`).
+- AMENDED 2026-11-05: rounding in the runner is f32-escape `Math.fround(v * mult) /`
+  `mult` (see §0; on Neko the stdlib `math_fround` is absent, so `OracleConductor.fround`
+  uses the IEEE binary32 Bytes round-trip — same round-to-nearest-even conversion the
+  hxcpp build gets).
 - Fixture format (JSON Lines, one file per chart file):
   `tests/fixtures/conductor/<chart-id>.jsonl`; `<chart-id>` = song dir + chart file
   suffix, e.g. `bopeebo-default-easy.jsonl`... determinism: EXACTLY one timeline per

@@ -1,0 +1,13 @@
+# Committed Haxe oracle build script (M4).
+#
+# Target: Neko (installed at /usr/bin/neko on the reference machine; HashLink is
+# not installed, and the interpreter is also supported by the command in the
+# README). The compiled module lands in /tmp/opencode/oracle-build/ so the
+# repository never carries a generated binary.
+#
+#   mkdir -p /tmp/opencode/oracle-build
+#   haxe build.hxml
+#   neko /tmp/opencode/oracle-build/oracle.n --assets <assets> --out <fixtures>
+-cp src
+-main Main
+-neko /tmp/opencode/oracle-build/oracle.n
