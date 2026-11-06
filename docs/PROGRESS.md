@@ -248,3 +248,33 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
   (pixels differing only where alpha==0): 166,216,170. `align_ok` etc. unchanged
   (126/126, duration 370/370, ssim 0.96, total_after 334.2 MB ≤ 350, files_grew 0).
 - `cargo xtask verify` exit 0.
+
+## 2026-11-05 — M4 phase 1: oracle fixtures + oxide-audio core
+
+- **Oracle tooling (committed, `tools/oracle/`)**: self-contained Haxe (Neko)
+  instrumented runner — `OracleConductor.hx` transcribes `source/funkin/Conductor.hx`
+  method-by-method with line citations from `Verbatim.hx` (30 entries); reads the real
+  chart/metadata pairs (discovery covers the `preload/data/songs/` layout with
+  `songs/` fallback), ffprobe-probes `Inst.ogg` for `music.length`, simulates
+  PlayState's phase shapes (pre-roll `update(pos,false)`, playback `playing=true` with
+  the clamp branch active) on a 1 ms grid, and emits one JSONL per chart file with the
+  frozen field order.
+- **Fixtures**: `tests/fixtures/conductor/` = 61 chart timelines + `_smoke.jsonl`
+  (hand-crafted 7/8 micro-chart for unit tests). Byte-identical determinism proven by
+  `snapshot_validate.sh` (builds twice, regenerates twice, compares with the committed
+  set): whole-set sha256
+  2a6045cb8cdcbe260f994b505dddff8353a8edff227764347f5293bdf6013da6 identical.
+- **roundDecimal amendment** (parity with the installed runtime, recorded in
+  M4-CONTRACT §0/§1): shipped HaxeFlixel computes roundDecimal via
+  `Math.fround(v*mult)/mult` — a f32 escape; on Neko the stdlib fround is missing, so
+  the oracle uses the IEEE binary32 Bytes round-trip; both the oracle and
+  `oxide-audio::conductor` implement it identically.
+- **`crates/oxide-audio` core**: `conductor.rs` (pure f64 port: map_time_changes with
+  round-4 beat recomputation, update with playing-clamp + offsets + step-0 dispatch
+  rule + step→beat→measure dispatch order, six time-conversion functions); 15 tests
+  green incl. the Conductor.hx class-doc length checklist (4/4, 7/8, 15/16, 3/2 at 120
+  BPM). `clock.rs`: kira 0.12 wrapper (default features OFF = simulation backend,
+  1000 Hz; opt-in `real-audio` feature for M5) — ADR-0012.
+- `cargo xtask verify` exit 0.
+- Next: M4 chapter 2 — `crates/oxide-input` (evdev/uinput + jitter probe), then wire
+  `cargo xtask fixtures-conductor` (61-chart comparison) and `cargo xtask replay`.
