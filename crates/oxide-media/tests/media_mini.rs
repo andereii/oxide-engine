@@ -53,20 +53,23 @@ fn assert_fixture_counts(report: &PackReport) {
     assert_eq!(report.video_copied, 0);
     assert_eq!(report.video_converted_checked, report.video_converted);
     assert_eq!(report.video_excluded, 1);
-    assert_eq!(report.text_files, 3);
+    assert_eq!(report.text_files, 2);
     assert_eq!(report.font_files, 1);
     assert_eq!(report.skipped, 1);
+    assert_eq!(report.hxc_excluded, 1);
+    assert_eq!(report.hxc_bytes, 45);
     assert_eq!(report.mp3_dropped, 0);
     assert_eq!(report.files_grew, 0);
     assert_eq!(report.align_ok, 1);
     assert_eq!(report.align_checked, 1);
     assert_eq!(report.duration_checked, 0);
-    assert_eq!(report.image_ok, 1);
-    assert_eq!(report.image_checked, 1);
     assert_eq!(report.image_converted_checked, report.images_converted);
-    assert_eq!(report.image_alpha_only, 1);
+    assert_eq!(report.visible_pixels_identical, report.visible_pixels_total);
+    assert!(report.visible_pixels_total > 0);
+    assert!(report.alpha_zero_rgb_diff > 0);
+    assert!(!report.visible_check_failed);
     assert!(report.video_ssim_min >= 0.93);
-    assert_eq!(report.pak_entries, 11);
+    assert_eq!(report.pak_entries, 10);
 }
 
 #[test]
@@ -114,10 +117,7 @@ fn pack_is_byte_deterministic_and_policies_hold() {
             entry.name()
         );
         assert_eq!(entry.get_metadata().system, zip::System::Unix);
-        let expected = if entry.name().ends_with(".json")
-            || entry.name().ends_with(".hxc")
-            || entry.name().ends_with(".txt")
-        {
+        let expected = if entry.name().ends_with(".json") || entry.name().ends_with(".txt") {
             CompressionMethod::Deflated
         } else {
             CompressionMethod::Stored
@@ -132,6 +132,10 @@ fn pack_is_byte_deterministic_and_policies_hold() {
     assert!(
         names.windows(2).all(|pair| pair[0] < pair[1]),
         "pak entries must be sorted: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name.ends_with(".hxc")),
+        "hxc files must not enter the pak"
     );
 
     let _ = std::fs::remove_dir_all(root);
@@ -158,9 +162,83 @@ fn output_prep_requires_marker() {
     std::fs::create_dir_all(&empty).expect("create empty dir");
     oxide_media::pack(&fixture(), &empty, 2).expect("empty output dir is allowed");
     assert!(empty.join(oxide_media::DIST_MARKER).is_file());
-    let marker = std::fs::read_to_string(empty.join(oxide_media::DIST_MARKER)).expect("marker");
-    assert_eq!(marker, "{\"oxide_assets_dist\":1}\n");
+    let marker_text =
+        std::fs::read_to_string(empty.join(oxide_media::DIST_MARKER)).expect("marker");
+    let marker: serde_json::Value = serde_json::from_str(&marker_text).expect("marker JSON");
+    assert_eq!(marker["format"], "oxide-assets-dist");
+    assert_eq!(marker["version"], 1);
+    assert!(marker["pak_sha256"].as_str().is_some());
+    let owned = marker["owned"].as_array().expect("owned list");
+    assert!(owned.iter().any(|path| path == "assets.pak"));
+    assert!(owned.iter().any(|path| path == "images/micro.webp"));
     oxide_media::pack(&fixture(), &empty, 2).expect("marked output dir is replaceable");
+
+    let invalid = root.join("invalid-marker");
+    std::fs::create_dir_all(&invalid).expect("create invalid marker dir");
+    std::fs::write(invalid.join("notes.txt"), "keep").expect("write notes");
+    std::fs::write(invalid.join(oxide_media::DIST_MARKER), "not json").expect("write marker");
+    match oxide_media::pack(&fixture(), &invalid, 2) {
+        Err(MediaError::Verify(message)) => {
+            assert!(message.contains("refusing to wipe"), "{message}");
+        }
+        other => panic!("expected invalid marker refusal, got {other:?}"),
+    }
+    assert!(invalid.join("notes.txt").is_file());
+
+    let foreign_version = root.join("foreign-version");
+    std::fs::create_dir_all(&foreign_version).expect("create foreign version dir");
+    std::fs::write(foreign_version.join("notes.txt"), "keep").expect("write notes");
+    std::fs::write(
+        foreign_version.join(oxide_media::DIST_MARKER),
+        "{\"format\":\"other\",\"version\":1,\"owned\":[],\"pak_sha256\":\"\"}",
+    )
+    .expect("write foreign marker");
+    match oxide_media::pack(&fixture(), &foreign_version, 2) {
+        Err(MediaError::Verify(message)) => {
+            assert!(message.contains("refusing to wipe"), "{message}");
+        }
+        other => panic!("expected foreign marker refusal, got {other:?}"),
+    }
+    assert!(foreign_version.join("notes.txt").is_file());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn durable_output_preserves_foreign_files_and_removes_stale_artifacts() {
+    if !tools_available() {
+        return;
+    }
+    let root = temp_dir("durable");
+    let out = root.join("out");
+    let first = oxide_media::pack(&fixture(), &out, 2).expect("first pack");
+    let first_sha = first.pak_sha256.clone();
+
+    std::fs::write(out.join("notes.txt"), "foreign note").expect("write foreign note");
+    let second = oxide_media::pack(&fixture(), &out, 2).expect("second pack");
+    assert_eq!(second.pak_sha256, first_sha, "repack must be deterministic");
+    assert!(out.join("notes.txt").is_file(), "foreign note must survive");
+    assert!(out.join("sounds/quiet.ogg").is_file());
+
+    let reduced_input = root.join("reduced");
+    std::fs::create_dir_all(reduced_input.join("data")).expect("create reduced input");
+    std::fs::write(reduced_input.join("data/micro.json"), "{}").expect("write reduced input");
+    oxide_media::pack(&reduced_input, &out, 2).expect("reduced pack");
+    assert!(out.join("notes.txt").is_file(), "foreign note must survive");
+    assert!(
+        !out.join("sounds/quiet.ogg").exists(),
+        "stale previous artefact must be deleted"
+    );
+    assert!(
+        !out.join("images/micro.webp").exists(),
+        "stale previous artefact must be deleted"
+    );
+    assert!(out.join("assets.pak").is_file());
+
+    let third = oxide_media::pack(&fixture(), &out, 2).expect("restored pack");
+    assert_eq!(third.pak_sha256, first_sha);
+    assert!(out.join("notes.txt").is_file());
+    assert!(out.join("sounds/quiet.ogg").is_file());
 
     let _ = std::fs::remove_dir_all(root);
 }

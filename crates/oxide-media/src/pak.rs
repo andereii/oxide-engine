@@ -5,13 +5,19 @@
 
 use std::fs::File;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, System, ZipWriter};
 
 use crate::MediaError;
+
+pub const DIST_MARKER: &str = "assets-dist.marker";
+pub(crate) const PAK_NAME: &str = "assets.pak";
+const MARKER_FORMAT: &str = "oxide-assets-dist";
+const MARKER_VERSION: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PakMethod {
@@ -95,6 +101,89 @@ pub(crate) fn write_pak(
         },
         digest,
     ))
+}
+
+pub(crate) fn write_marker(
+    out_dir: &Path,
+    owned: &[String],
+    pak_sha256: &str,
+) -> Result<(), MediaError> {
+    let mut owned = owned.to_vec();
+    owned.sort();
+    let value = json!({
+        "format": MARKER_FORMAT,
+        "version": MARKER_VERSION,
+        "owned": owned,
+        "pak_sha256": pak_sha256,
+    });
+    let mut text = serde_json::to_string(&value)
+        .map_err(|error| MediaError::Verify(format!("marker JSON: {error}")))?;
+    text.push('\n');
+    std::fs::write(out_dir.join(DIST_MARKER), text)?;
+    Ok(())
+}
+
+/// Reads the owned paths from a marker. `None` means missing, unreadable or a
+/// foreign marker version; callers must refuse to touch the directory then.
+pub(crate) fn read_marker_owned(out_dir: &Path) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(out_dir.join(DIST_MARKER)).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    if value.get("format")?.as_str()? != MARKER_FORMAT {
+        return None;
+    }
+    if value.get("version")?.as_u64()? != MARKER_VERSION {
+        return None;
+    }
+    value.get("pak_sha256")?.as_str()?;
+    let owned = value.get("owned")?.as_array()?;
+    let mut paths = Vec::with_capacity(owned.len());
+    for item in owned {
+        paths.push(item.as_str()?.to_string());
+    }
+    Some(paths)
+}
+
+/// Deletes only the files named by a valid marker, leaving foreign content and
+/// the directory itself intact. `assets.pak` is also removed defensively.
+pub(crate) fn remove_owned(out_dir: &Path, owned: &[String]) -> Result<(), MediaError> {
+    for rel in owned {
+        let path = owned_path(out_dir, rel).ok_or_else(|| {
+            MediaError::Verify(format!("marker contains an unsafe owned path: {rel}"))
+        })?;
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => std::fs::remove_file(&path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let pak = out_dir.join(PAK_NAME);
+    match std::fs::symlink_metadata(&pak) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => std::fs::remove_file(&pak)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+fn owned_path(out_dir: &Path, rel: &str) -> Option<PathBuf> {
+    let path = Path::new(rel);
+    if path.is_absolute() {
+        return None;
+    }
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => relative.push(part),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    Some(out_dir.join(relative))
 }
 
 fn sha256_file(path: &Path) -> Result<String, MediaError> {

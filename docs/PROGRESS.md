@@ -225,3 +225,26 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
 - M3 status: gate green and committed.
 - Next: either M4 (clock+input) per the plan's order, or M7 (UI) if the human
   prefers the §8.4 parallel allowance. Default: M4.
+
+## 2026-11-05 — M2/M3 cleanups (human rules): hxc excluded, visible-pixel metric, durable dist
+
+- `assets-dist` is now a durable repo-local, gitignored artifact: regenerated at
+  `<repo>/assets-dist/` with `cargo xtask pack --in ~/Descargas/fnf/Funkin/assets
+  --out assets-dist` (equivalent `cargo run --bin oxide -- pack ...`). Later runs
+  delete ONLY files the previous pack owned (recorded in `assets-dist.marker`);
+  foreign files inside the dir survive; foreign non-marker dirs are refused.
+  Two consecutive full runs byte-identical (`BLOCKS_IDENTICAL`, `PAK_BYTES_IDENTICAL`).
+  The artifact currently sits at `/home/alex/Documentos/OxideEngine/oxengine/assets-dist/`
+  with `assets.pak` (sha 11abb4ad…) — usable by M4/M5 gates.
+- `*.hxc` (114 files, 0.4 MB) excluded from dist AND pak: the engine cannot execute
+  HScript (out of scope per §10; shipped modding is Ruby/mruby). New report line
+  `hxc excluded: 114 files, 0.4 MB`; pak sha256 rotated to 11abb4ad…; text group
+  now 747 files / 2.2 MB. Decision: they do NOT ship "for reference" — the upstream
+  Haxe source in `~/Descargas/fnf/Funkin/source` already holds every script, and the
+  release payload should not carry unreachable code.
+- Metric rename in gate + code + contract: `image_pixels_identical` →
+  `visible_pixels_identical` (source alpha > 0; must be byte-identical). Real value:
+  539,040,413/539,040,413 identical; separate informational counter
+  (pixels differing only where alpha==0): 166,216,170. `align_ok` etc. unchanged
+  (126/126, duration 370/370, ssim 0.96, total_after 334.2 MB ≤ 350, files_grew 0).
+- `cargo xtask verify` exit 0.

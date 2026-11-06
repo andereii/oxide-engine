@@ -89,13 +89,14 @@ fn mini_media_check_is_deterministic_and_well_formed() {
     assert_eq!(line_value(&first_stdout, "align_ok: "), "1/1");
     assert_eq!(line_value(&first_stdout, "duration_ok: "), "0/0");
     assert_eq!(
-        line_value(&first_stdout, "image_pixels_identical: "),
-        "1/1   (pixels differing only where alpha==0: 1)"
+        line_value(&first_stdout, "visible_pixels_identical: "),
+        "43/43   (pixels differing only where alpha==0: 20)"
     );
     assert!(first_stdout.contains("(converted 0, copied 4)"));
     assert!(first_stdout.contains("(converted 1, kept png 0)"));
     assert!(first_stdout.contains("(converted 2, excluded 1)"));
-    assert!(first_stdout.contains("deflate in pak, 3 files"));
+    assert!(first_stdout.contains("deflate in pak, 2 files"));
+    assert!(first_stdout.contains("hxc excluded: 1 files, 0.0 MB"));
     assert!(first_stdout.contains("mp3 dropped: 0 files"));
     assert!(first_stdout.contains("threshold 0.93"));
     assert!(first_stdout.contains("total_after: "));
@@ -123,9 +124,7 @@ fn mini_media_check_is_deterministic_and_well_formed() {
         assert_eq!((time.year(), time.month(), time.day()), (2000, 1, 1));
         assert_eq!((time.hour(), time.minute(), time.second()), (0, 0, 0));
         assert_eq!(entry.get_metadata().system, zip::System::Unix);
-        let text = entry.name().ends_with(".json")
-            || entry.name().ends_with(".hxc")
-            || entry.name().ends_with(".txt");
+        let text = entry.name().ends_with(".json") || entry.name().ends_with(".txt");
         assert_eq!(
             entry.compression(),
             if text {
@@ -138,6 +137,10 @@ fn mini_media_check_is_deterministic_and_well_formed() {
         );
     }
     assert!(names.windows(2).all(|pair| pair[0] < pair[1]), "{names:?}");
+    assert!(
+        !names.iter().any(|name| name.ends_with(".hxc")),
+        "{names:?}"
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -189,5 +192,78 @@ fn twice_run_cleans_its_temporary_output() {
     let mut repeated = output.clone().into_os_string();
     repeated.push(".twice");
     assert!(!PathBuf::from(repeated).exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn durable_output_keeps_foreign_files_and_removes_stale_artifacts() {
+    if !tools_available() {
+        return;
+    }
+    let root = temp_dir("durable");
+    let output = root.join("dist");
+
+    let first = run_media_check(&output);
+    assert!(first.status.success(), "first media-check failed");
+    let first_stdout = String::from_utf8_lossy(&first.stdout).to_string();
+    let first_pak = std::fs::read(output.join("assets.pak")).expect("first pak");
+    let first_sha = line_value(&first_stdout, "pak sha256: ").trim().to_string();
+    assert!(output.join("assets-dist.marker").is_file());
+
+    let second = run_media_check(&output);
+    assert!(second.status.success(), "second media-check failed");
+    let second_stdout = String::from_utf8_lossy(&second.stdout).to_string();
+    assert_eq!(
+        first_stdout, second_stdout,
+        "repacking the same input must print the same block"
+    );
+    let second_pak = std::fs::read(output.join("assets.pak")).expect("second pak");
+    assert_eq!(first_pak, second_pak, "pak bytes must be identical");
+
+    std::fs::write(output.join("notes.txt"), "foreign note").expect("write foreign note");
+    let third = run_media_check(&output);
+    assert!(third.status.success(), "third media-check failed");
+    assert!(
+        output.join("notes.txt").is_file(),
+        "foreign note must survive"
+    );
+    let third_stdout = String::from_utf8_lossy(&third.stdout);
+    assert_eq!(
+        line_value(&third_stdout, "pak sha256: ").trim(),
+        first_sha,
+        "artifacts must be overwritten deterministically"
+    );
+
+    let reduced = root.join("reduced");
+    std::fs::create_dir_all(reduced.join("data")).expect("create reduced input");
+    std::fs::write(reduced.join("data/micro.json"), "{}").expect("write reduced input");
+    let pack = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .arg("pack")
+        .arg("--in")
+        .arg(&reduced)
+        .arg("--out")
+        .arg(&output)
+        .output()
+        .expect("spawn xtask pack");
+    assert!(
+        pack.status.success(),
+        "reduced pack failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&pack.stdout),
+        String::from_utf8_lossy(&pack.stderr)
+    );
+    assert!(
+        output.join("notes.txt").is_file(),
+        "foreign note must survive"
+    );
+    assert!(
+        !output.join("sounds/quiet.ogg").exists(),
+        "stale artefact from the previous plan must be deleted"
+    );
+    assert!(
+        !output.join("images/micro.webp").exists(),
+        "stale artefact from the previous plan must be deleted"
+    );
+    assert!(output.join("assets.pak").is_file());
+
     let _ = std::fs::remove_dir_all(root);
 }

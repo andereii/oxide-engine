@@ -110,7 +110,8 @@ fn report_passes(report: &PackReport) -> bool {
         && report.files_grew == 0
         && report.align_ok == report.align_checked
         && report.duration_ok == report.duration_checked
-        && report.image_ok == report.image_checked
+        && !report.visible_check_failed
+        && report.visible_pixels_identical == report.visible_pixels_total
         && report.video_ssim_min >= SSIM_THRESHOLD
         && report.total_after <= TOTAL_AFTER_LIMIT
 }
@@ -154,6 +155,11 @@ fn print_report(report: &PackReport) {
         report.skipped
     );
     println!(
+        "hxc excluded: {} files, {:.1} MB",
+        report.hxc_excluded,
+        mib(report.hxc_bytes)
+    );
+    println!(
         "mp3 dropped: {} files, {:.1} MB",
         report.mp3_dropped,
         mib(report.mp3_bytes)
@@ -169,8 +175,8 @@ fn print_report(report: &PackReport) {
         report.video_ssim_min
     );
     println!(
-        "image_pixels_identical: {}/{}   (pixels differing only where alpha==0: {})",
-        report.image_ok, report.image_checked, report.image_alpha_only
+        "visible_pixels_identical: {}/{}   (pixels differing only where alpha==0: {})",
+        report.visible_pixels_identical, report.visible_pixels_total, report.alpha_zero_rgb_diff
     );
     println!("total_after: {:.1} MB (limit 350)", mib(report.total_after));
     let excluded: Vec<String> = oxide_media::EXCLUDED_VIDEOS

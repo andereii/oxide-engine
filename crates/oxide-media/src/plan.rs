@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use crate::{AudioLayer, Disposition, EntryKind, MediaError, Plan, PlanEntry};
 
-const TEXT_EXTENSIONS: [&str; 10] = [
-    "json", "xml", "txt", "rb", "frag", "hxc", "fnt", "md", "yml", "srt",
+const TEXT_EXTENSIONS: [&str; 9] = [
+    "json", "xml", "txt", "rb", "frag", "fnt", "md", "yml", "srt",
 ];
 
 impl Plan {
@@ -140,6 +140,7 @@ fn classify(rel: &str) -> Result<(EntryKind, Disposition), String> {
                 Ok((EntryKind::Video, Disposition::ConvertVideo))
             }
         }
+        "hxc" => Ok((EntryKind::Text, Disposition::ExcludeHxc)),
         "ttf" | "otf" => Ok((EntryKind::Font, Disposition::CopyFont)),
         other if TEXT_EXTENSIONS.contains(&other) => Ok((EntryKind::Text, Disposition::TextOnly)),
         _ => Err(ext),
@@ -300,6 +301,14 @@ mod tests {
                 "{rel}"
             );
         }
+    }
+
+    #[test]
+    fn hxc_is_excluded_not_packed() {
+        assert_eq!(
+            kind_of("script/module.hxc"),
+            (EntryKind::Text, Disposition::ExcludeHxc)
+        );
     }
 
     #[test]

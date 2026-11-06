@@ -72,7 +72,10 @@ impl Layout: layer/extension classification (pure, unit-tested):
     every other .ogg -> Audio{Sfx} (48k). `.mp3` anywhere -> DropMp3.
   - `.png|.jpg|.jpeg` -> Image (webp lossless). `.mp4|.mkv|.webm` under videos/ -> Video;
     one of EXCLUDED_VIDEOS (exact stem match) -> ExcludeVideo. Video files outside videos/ -> Unknown.
-  - `.json|.xml|.txt|.rb|.frag|.hxc|.fnt|.md|.yml|.srt` -> Text (deflate in pak only).
+  - `.json|.xml|.txt|.rb|.frag|.fnt|.md|.yml|.srt` -> Text (deflate in pak only).
+  - `.hxc` -> ExcludeHxc (AMENDED 2026-11-05, human rule: the engine cannot execute
+    HScript — shipped modding API is Ruby (mruby) — so the 114 shipped `.hxc` files
+    are excluded from dist AND pak and counted in their own report line).
   - `.ttf|.otf` -> Font (copy + STORE).
   - `.fla|.gitignore|.gitattributes|.git` -> Skip (reported count). Walker rules:
     symlinks are skipped (the assets tree is a real filesystem tree; symmetrical
@@ -115,8 +118,16 @@ Mirrors the assets root:
 - text: ABSENT from the loose tree, present only in `assets.pak` (Deflated);
 - fonts: copied loose (a loose dist tree must be a self-sufficient VFS root) AND STOREd
   in the pak;
-- `assets.pak` itself is written at `<out>/assets.pak` holding the text (Deflated) AND
+- `assets.pak` itself is written at `<out>/assets.pak` and holds the text (Deflated) AND
   every media + font entry (STORE), keyed by the same rel paths as dist.
+- **Durable, repo-local output** (AMENDED 2026-11-05, human rule): the default out
+  dir is `<repo>/assets-dist/`, gitignored. A later `oxide pack` run deletes ONLY
+  files it wrote on the previous run (the marker records the previous pack's owned
+  paths and the pak name) — a foreign file inside the dir survives; a foreign
+  non-marker dir is still refused. Tooling keeps the artifact on disk so downstream
+  gates (M4/M5) can read it; regenerate with:
+  `cargo xtask pack --in ~/Descargas/fnf/Funkin/assets --out assets-dist`
+  (equivalently `cargo run --bin oxide -- pack --in ... --out assets-dist`).
 
 `total_after` semantics (gate): bytes of the dist tree EXCLUDING assets.pak itself,
 plus the pak bytes MINUS the media bytes it stores (i.e. media counted once, text
@@ -135,21 +146,26 @@ video  before: <B> MB  after: <B> MB  (converted <n>, excluded <n>)
 text   before: <B> MB  after: <B> MB  (deflate in pak, <n> files)
 fonts  before: <B> MB  after: <B> MB  (<n> files)
 skipped (non-runtime files): <n> (fla/git metadata)
+hxc excluded: <n> files, <B> MB
 mp3 dropped: <n> files, <B> MB
 files_grew: 0
 align_ok: <checked>/<checked>
 duration_ok: <checked>/<checked>
 video_ssim_min: <x.xx> (threshold 0.93)
-image_pixels_identical: <n>/<n>   (pixels differing only where alpha==0: <m>)
+visible_pixels_identical: <n>/<n>   (pixels differing only where alpha==0: <m>)
 total_after: <X> MB (limit 350)
 excluded_videos: mobileRelease.mp4, riftCollabTrailer.mp4, boyfriendEverywhere.mp4
 pak sha256: <hex>
 ```
 
 Exit 0 iff: `files_grew == 0`, `align_ok == n/n`, `duration_ok == n/n`,
-`image_pixels_identical == n/n`, `video_ssim_min >= 0.93`, `total_after <= 350 MB`.
-If total_after lands in (350, 380]: still print true numbers, exit non-zero, and the
-orchestrator writes the ADR (per the human rule).
+`visible_pixels_identical == n/n`, `video_ssim_min >= 0.93`, `total_after <= 350 MB`.
+`visible_pixels_identical` (RENAMED 2026-11-05; previously frozen as
+`image_pixels_identical`) counts pixels the RENDERER will ever see, i.e. pixels whose
+source alpha channel is > 0: they must be byte-identical to the source RGBA. The
+alpha==0 neighbour counter is informational only (those pixels are invisible; WebP
+lossless may differ in their RGB). If `total_after` lands in (350, 380]: still print
+true numbers, exit non-zero, and the orchestrator writes the ADR (per the human rule).
 
 `cargo xtask pack --in <assets> --out <assets-dist>` (default: repo-relative
 `assets-dist/`) runs the packer once and prints the sha256 + entry count.

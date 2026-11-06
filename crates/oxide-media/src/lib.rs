@@ -18,7 +18,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
 pub use convert::{Tools, check_tools};
-use pak::{PakInput, PakMethod};
+pub use pak::DIST_MARKER;
+use pak::{PAK_NAME, PakInput, PakMethod};
 use thiserror::Error;
 
 /// Attract trailers that are never packed (exact stems, not globs).
@@ -27,11 +28,6 @@ pub const EXCLUDED_VIDEOS: [&str; 3] =
 
 /// Byte limit for `total_after` (350 MiB, matching the plan's units).
 pub const TOTAL_AFTER_LIMIT: u64 = 350 * 1024 * 1024;
-
-/// Marker proving that an existing output directory was produced by this
-/// packer and may be replaced.
-pub const DIST_MARKER: &str = "assets-dist.marker";
-const DIST_MARKER_CONTENT: &str = "{\"oxide_assets_dist\":1}\n";
 
 #[derive(Debug, Error)]
 pub enum MediaError {
@@ -90,6 +86,7 @@ pub enum Disposition {
     CopyFont,
     DropMp3,
     ExcludeVideo,
+    ExcludeHxc,
     TextOnly,
     Skip,
 }
@@ -141,6 +138,8 @@ pub struct PackReport {
     pub fonts_after: u64,
     pub font_files: u64,
     pub skipped: u64,
+    pub hxc_excluded: u64,
+    pub hxc_bytes: u64,
     pub mp3_dropped: u64,
     pub mp3_bytes: u64,
     pub files_grew: u64,
@@ -150,10 +149,11 @@ pub struct PackReport {
     pub duration_ok: u64,
     pub video_ssim_min: f64,
     pub video_converted_checked: u64,
-    pub image_checked: u64,
     pub image_converted_checked: u64,
-    pub image_ok: u64,
-    pub image_alpha_only: u64,
+    pub visible_pixels_identical: u64,
+    pub visible_pixels_total: u64,
+    pub alpha_zero_rgb_diff: u64,
+    pub visible_check_failed: bool,
     pub total_after: u64,
 }
 
@@ -210,6 +210,8 @@ fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, M
     let mut text_before = 0u64;
     let mut fonts_before = 0u64;
     let mut skipped = 0u64;
+    let mut hxc_excluded = 0u64;
+    let mut hxc_bytes = 0u64;
     let mut mp3_dropped = 0u64;
     let mut mp3_bytes = 0u64;
     let mut video_excluded = 0u64;
@@ -227,7 +229,11 @@ fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, M
             }
             EntryKind::Image => images_before += file_len(in_dir, &entry.rel)?,
             EntryKind::Video => video_before += file_len(in_dir, &entry.rel)?,
-            EntryKind::Text => text_before += file_len(in_dir, &entry.rel)?,
+            EntryKind::Text => {
+                if entry.disposition == Disposition::TextOnly {
+                    text_before += file_len(in_dir, &entry.rel)?;
+                }
+            }
             EntryKind::Font => fonts_before += file_len(in_dir, &entry.rel)?,
             EntryKind::Audio { .. } | EntryKind::Skip => {}
         }
@@ -240,6 +246,10 @@ fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, M
             Disposition::DropMp3 => {
                 mp3_dropped += 1;
                 mp3_bytes += file_len(in_dir, &entry.rel)?;
+            }
+            Disposition::ExcludeHxc => {
+                hxc_excluded += 1;
+                hxc_bytes += file_len(in_dir, &entry.rel)?;
             }
             Disposition::Skip => skipped += 1,
             Disposition::CopyAudio | Disposition::CopyImage | Disposition::TextOnly => {}
@@ -317,13 +327,18 @@ fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, M
         });
     }
 
-    let pak_path = out_dir.join("assets.pak");
+    let pak_path = out_dir.join(PAK_NAME);
     let (pak, pak_sha256) = pak::write_pak(&pak_path, pak_inputs)?;
     let text_after = pak.bytes.saturating_sub(pak.stored_bytes);
 
     let dist_bytes = tree_bytes_excluding(out_dir, &pak_path)?;
     let total_after = dist_bytes + pak.bytes - pak.stored_bytes;
-    std::fs::write(out_dir.join(DIST_MARKER), DIST_MARKER_CONTENT)?;
+    let mut owned: Vec<String> = artifacts
+        .values()
+        .map(|artifact| artifact.key_rel.clone())
+        .collect();
+    owned.push(PAK_NAME.to_string());
+    pak::write_marker(out_dir, &owned, &pak_sha256)?;
 
     let report = PackReport {
         tools,
@@ -351,6 +366,8 @@ fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, M
         fonts_after,
         font_files,
         skipped,
+        hxc_excluded,
+        hxc_bytes,
         mp3_dropped,
         mp3_bytes,
         files_grew,
@@ -360,10 +377,11 @@ fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, M
         duration_ok: 0,
         video_ssim_min: 1.0,
         video_converted_checked: 0,
-        image_checked: 0,
         image_converted_checked: 0,
-        image_ok: 0,
-        image_alpha_only: 0,
+        visible_pixels_identical: 0,
+        visible_pixels_total: 0,
+        alpha_zero_rgb_diff: 0,
+        visible_check_failed: false,
         total_after,
     };
 
@@ -389,21 +407,24 @@ fn prepare_output(in_dir: &Path, out_dir: &Path) -> Result<(), MediaError> {
         )));
     }
     if out_dir.exists() {
+        let refusal = || {
+            MediaError::Verify(format!(
+                "refusing to wipe {}: not an assets-dist output (delete it or point --out elsewhere)",
+                out_dir.display()
+            ))
+        };
         if !out_dir.is_dir() {
-            return Err(MediaError::Verify(format!(
-                "refusing to wipe {}: not an assets-dist output (delete it or point --out elsewhere)",
-                out_dir.display()
-            )));
+            return Err(refusal());
         }
-        let mut entries = std::fs::read_dir(out_dir)?;
-        if entries.next().transpose()?.is_some() && !out_dir.join(DIST_MARKER).is_file() {
-            return Err(MediaError::Verify(format!(
-                "refusing to wipe {}: not an assets-dist output (delete it or point --out elsewhere)",
-                out_dir.display()
-            )));
-        }
-        if out_dir.join(DIST_MARKER).is_file() {
-            std::fs::remove_dir_all(out_dir)?;
+        let marker = out_dir.join(DIST_MARKER);
+        if marker.is_file() {
+            let owned = pak::read_marker_owned(out_dir).ok_or_else(refusal)?;
+            pak::remove_owned(out_dir, &owned)?;
+        } else {
+            let mut entries = std::fs::read_dir(out_dir)?;
+            if entries.next().transpose()?.is_some() {
+                return Err(refusal());
+            }
         }
     }
     std::fs::create_dir_all(out_dir)?;
@@ -630,6 +651,7 @@ fn derived_key(entry: &PlanEntry) -> Option<String> {
         }
         Disposition::DropMp3
         | Disposition::ExcludeVideo
+        | Disposition::ExcludeHxc
         | Disposition::TextOnly
         | Disposition::Skip => None,
     }
@@ -711,6 +733,7 @@ fn file_len(root: &Path, rel: &str) -> Result<u64, MediaError> {
 }
 
 fn tree_bytes_excluding(root: &Path, excluded: &Path) -> Result<u64, MediaError> {
+    let marker = root.join(DIST_MARKER);
     let mut total = 0u64;
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
@@ -719,7 +742,7 @@ fn tree_bytes_excluding(root: &Path, excluded: &Path) -> Result<u64, MediaError>
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.is_file() && path != excluded {
+            } else if path.is_file() && path != excluded && path != marker {
                 total += entry.metadata()?.len();
             }
         }
@@ -755,17 +778,15 @@ fn verify_images(
             .ok_or_else(|| MediaError::Verify(format!("no image artifact for {}", entry.rel)))?;
         let source = verify::raw_rgba(&in_dir.join(&entry.rel))?;
         let output = verify::raw_rgba(&out_dir.join(&artifact.key_rel))?;
-        report.image_checked += 1;
         if !artifact.copied {
             report.image_converted_checked += 1;
         }
-        match verify::compare_rgba(&source, &output) {
-            None => report.image_ok += 1,
-            Some(true) => {
-                report.image_ok += 1;
-                report.image_alpha_only += 1;
-            }
-            Some(false) => {}
+        let comparison = verify::compare_visible_pixels(&source, &output);
+        report.visible_pixels_identical += comparison.visible_identical;
+        report.visible_pixels_total += comparison.visible_total;
+        report.alpha_zero_rgb_diff += comparison.alpha_zero_rgb_diff;
+        if comparison.failed {
+            report.visible_check_failed = true;
         }
     }
     Ok(())

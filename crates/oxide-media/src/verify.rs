@@ -38,27 +38,40 @@ pub(crate) fn raw_rgba(path: &Path) -> Result<Vec<u8>, MediaError> {
     Ok(output.stdout)
 }
 
-/// Compares two RGBA buffers. Returns `None` when the files are identical,
-/// `Some(true)` when they differ only in RGB where both alphas are zero, and
-/// `Some(false)` for any visible difference.
-pub(crate) fn compare_rgba(left: &[u8], right: &[u8]) -> Option<bool> {
-    if left == right {
-        return None;
+/// Outcome of comparing source and dist RGBA buffers for the visible-pixel
+/// metric. Only pixels whose *source* alpha is non-zero are visible; those must
+/// be byte-identical. Differences under source alpha zero are informational.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PixelCompare {
+    pub visible_identical: u64,
+    pub visible_total: u64,
+    pub alpha_zero_rgb_diff: u64,
+    pub failed: bool,
+}
+
+pub(crate) fn compare_visible_pixels(source: &[u8], output: &[u8]) -> PixelCompare {
+    let mut result = PixelCompare::default();
+    if source.len() != output.len() || !source.len().is_multiple_of(4) {
+        result.failed = true;
+        return result;
     }
-    if left.len() != right.len() || !left.len().is_multiple_of(4) {
-        return Some(false);
-    }
-    let (left_pixels, _) = left.as_chunks::<4>();
-    let (right_pixels, _) = right.as_chunks::<4>();
-    for (pixel_left, pixel_right) in left_pixels.iter().zip(right_pixels) {
-        if pixel_left[3] != pixel_right[3] {
-            return Some(false);
+    let (source_pixels, _) = source.as_chunks::<4>();
+    let (output_pixels, _) = output.as_chunks::<4>();
+    for (source_pixel, output_pixel) in source_pixels.iter().zip(output_pixels) {
+        if source_pixel[3] > 0 {
+            result.visible_total += 1;
+            if source_pixel == output_pixel {
+                result.visible_identical += 1;
+            }
+        } else if source_pixel != output_pixel {
+            if output_pixel[3] == 0 {
+                result.alpha_zero_rgb_diff += 1;
+            } else {
+                result.failed = true;
+            }
         }
-        if pixel_left[..3] != pixel_right[..3] && pixel_left[3] != 0 {
-            return Some(false);
-        }
     }
-    Some(true)
+    result
 }
 
 /// Decodes a media file to mono 48 kHz s16le, optionally capped to `limit`
@@ -359,8 +372,8 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        ONSET_THRESHOLD, ONSET_WINDOW, compare_rgba, estimate_delay, estimate_delay_from_pcm,
-        parse_ssim,
+        ONSET_THRESHOLD, ONSET_WINDOW, compare_visible_pixels, estimate_delay,
+        estimate_delay_from_pcm, parse_ssim,
     };
 
     fn tools_available() -> bool {
@@ -450,18 +463,34 @@ mod tests {
 
     #[test]
     fn identical_buffers_are_identical() {
-        assert_eq!(compare_rgba(&[1, 2, 3, 4], &[1, 2, 3, 4]), None);
+        let result = compare_visible_pixels(&[1, 2, 3, 4], &[1, 2, 3, 4]);
+        assert_eq!(result.visible_total, 1);
+        assert_eq!(result.visible_identical, 1);
+        assert_eq!(result.alpha_zero_rgb_diff, 0);
+        assert!(!result.failed);
     }
 
     #[test]
-    fn hidden_rgb_differences_are_allowed() {
-        assert_eq!(compare_rgba(&[0, 0, 0, 0], &[255, 128, 64, 0]), Some(true));
+    fn hidden_rgb_differences_are_counted_but_not_visible() {
+        let result = compare_visible_pixels(&[0, 0, 0, 0], &[255, 128, 64, 0]);
+        assert_eq!(result.visible_total, 0);
+        assert_eq!(result.visible_identical, 0);
+        assert_eq!(result.alpha_zero_rgb_diff, 1);
+        assert!(!result.failed);
     }
 
     #[test]
     fn visible_differences_are_rejected() {
-        assert_eq!(compare_rgba(&[1, 2, 3, 4], &[1, 2, 3, 5]), Some(false));
-        assert_eq!(compare_rgba(&[1, 2, 3, 4], &[9, 2, 3, 4]), Some(false));
+        for output in [[1, 2, 3, 5], [9, 2, 3, 4]] {
+            let result = compare_visible_pixels(&[1, 2, 3, 4], &output);
+            assert_eq!(result.visible_total, 1);
+            assert_eq!(result.visible_identical, 0);
+            assert!(!result.failed);
+        }
+        let appearance = compare_visible_pixels(&[1, 2, 3, 0], &[1, 2, 3, 4]);
+        assert!(appearance.failed);
+        let size_mismatch = compare_visible_pixels(&[1, 2, 3, 4], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert!(size_mismatch.failed);
     }
 
     #[test]
