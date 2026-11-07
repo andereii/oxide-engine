@@ -6,3 +6,5 @@ license.workspace = true
 publish = false
 
 [dependencies]
+evdev = { workspace = true }
+thiserror = { workspace = true }

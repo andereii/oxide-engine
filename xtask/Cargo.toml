@@ -6,8 +6,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
+oxide-audio = { path = "../crates/oxide-audio" }
 oxide-atlas = { path = "../crates/oxide-atlas" }
 oxide-data = { path = "../crates/oxide-data" }
+oxide-input = { path = "../crates/oxide-input" }
 oxide-media = { path = "../crates/oxide-media" }
 serde_json = { workspace = true }
 
