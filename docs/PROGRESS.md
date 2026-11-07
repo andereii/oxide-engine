@@ -702,3 +702,19 @@ the ledger commit that follows this block.
   claimed (shared worktree).
 - Next step: approval #3 — M5 phase-2b: stage/character/strumline rendering and
   animation groundwork toward `render_diff` and `perf_budget` vertical slice.
+
+## 2026-11-07 — M5 phase-2a follow-up batch committed (human approval #1 executed)
+
+- Human approved committing the phase-2a follow-up batch (tools/oracle/note*,
+  tests/fixtures/note-native/, crates/oxide-game, xtask, docs/) to the local
+  branch (no push). Committed as `a59ea65` ("m5(phase-2a): native
+  note-reference probe + hold-mirror/miss corrections (ADR-0019)"; 99 files,
+  +292992/−451 lines). No push, no history rewrite; orchestrator-coordinated
+  Git write.
+- Pre-commit evidence on the exact tree content: `python3 tools/workflow.py
+  run --timeout 1800 -- cargo xtask verify --profile quick` exit 0
+  (fmt/clippy/tests pass; quick = NOT milestone acceptance), workflow lint
+  PASS, workflow unit suite 48 OK.
+- Immediate next objective (human approval #3): M5 phase 2b/3 — mainStage
+  stage sprites, bf/dad/gf character rendering/animation, strumline
+  note/sustain rendering, then wire `render_diff` and `perf_budget` gates.
