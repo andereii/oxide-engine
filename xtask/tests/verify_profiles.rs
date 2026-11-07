@@ -223,16 +223,38 @@ fn invalid_release_options_still_list_all_pending_obligations() {
         "fuzz_parsers",
     ];
     not_implemented.sort_unstable();
-    for id in [
-        "conductor_native_reference",
-        "replay",
-        "input_jitter",
-    ] {
+    let not_implemented = [
+        "render_diff",
+        "perf_budget",
+        "full_chart_gameplay",
+        "ui_save_e2e",
+        "ruby_mods",
+        "release_binaries",
+        "release_size",
+        "reproducibility",
+        "fuzz_parsers",
+    ];
+    for id in not_implemented {
         let gate = gates
             .iter()
             .find(|gate| gate["id"] == id)
             .expect("required pending gate");
         assert_eq!(gate["status"], "not_implemented", "{id}");
+    }
+    // The three wired M4 obligations must not be `not_implemented` anymore:
+    // they are executable, fail-closed gates. With unmet invocation-level
+    // preconditions they report blocked (never a pass) with diagnostics.
+    for id in ["conductor_native_reference", "replay", "input_jitter"] {
+        let gate = gates
+            .iter()
+            .find(|gate| gate["id"] == id)
+            .expect("wired obligation gate");
+        assert_eq!(gate["status"], "blocked", "{id}");
+        let errors = gate["prerequisite_errors"].as_array().expect("errors");
+        assert!(
+            !errors.is_empty(),
+            "{id} must carry a fail-closed diagnostic"
+        );
     }
     let ci = gates
         .iter()

@@ -11,6 +11,8 @@ oxide-atlas = { path = "../crates/oxide-atlas" }
 oxide-data = { path = "../crates/oxide-data" }
 oxide-input = { path = "../crates/oxide-input" }
 oxide-media = { path = "../crates/oxide-media" }
+serde = { workspace = true }
+sha2 = "0.10"
 serde_json = { workspace = true }
 
 [dev-dependencies]

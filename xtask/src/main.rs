@@ -4,10 +4,12 @@
 //! with "not implemented yet", never 0. Gate changes require an ADR in docs/DECISIONS.md.
 
 mod conductor_check;
+mod conductor_native_check;
 mod input_jitter;
 mod media_check;
 mod parse_all;
 mod parse_atlas;
+mod replay;
 mod verify;
 
 use std::process::{Command, ExitCode};
@@ -19,7 +21,7 @@ fn main() -> ExitCode {
         None => {
             eprintln!("usage: cargo xtask <command> [args]");
             eprintln!(
-                "commands: verify [--help] | fmt | clippy | test | parse-all | parse-atlas | fixtures-conductor | render-diff | perf-budget | media-check | pack"
+                "commands: verify [--help] | fmt | clippy | test | parse-all | parse-atlas | fixtures-conductor | conductor-native | replay | input-jitter | render-diff | perf-budget | media-check | pack"
             );
             return ExitCode::from(2);
         }
@@ -33,9 +35,11 @@ fn main() -> ExitCode {
         "parse-all" => to_code(parse_all::run(rest)),
         "parse-atlas" => to_code(parse_atlas::run(rest)),
         "media-check" => to_code(media_check::media_check(rest)),
+        "input-jitter" => input_jitter::run(rest),
+        "conductor-native" => conductor_native_check::run(rest),
         "pack" => to_code(media_check::pack(rest)),
         "fixtures-conductor" => to_code(conductor_check::run(rest)),
-        "input-jitter" => input_jitter::run(rest),
+        "replay" => replay::run(rest),
         "perf-budget" | "render-diff" => {
             eprintln!("{command}: not implemented yet");
             ExitCode::from(2)

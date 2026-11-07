@@ -1325,7 +1325,9 @@ dependencies = [
  "oxide-data",
  "oxide-input",
  "oxide-media",
+ "serde",
  "serde_json",
+ "sha2",
  "zip",
 ]
 
