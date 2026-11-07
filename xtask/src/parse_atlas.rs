@@ -3,7 +3,8 @@
 //! Walks an assets directory and reports Sparrow XML, TexturePacker JSON and
 //! Animate Atlas counts. The stdout block is frozen (docs/M2-CONTRACT.md §4);
 //! per-file diagnostics go to stderr so the block stays machine-readable.
-//! Exit code 0 only when no atlas or animate file failed.
+//! Exit code 0 requires candidates, no Sparrow/Packer/Animate failures, and
+//! the measured reference inventory when `--corpus` is requested.
 
 use std::path::{Path, PathBuf};
 
@@ -12,13 +13,14 @@ use oxide_atlas::{AtlasError, parse_animate, parse_packer, parse_sparrow};
 /// Default assets root: the FNF reference implementation checkout.
 const DEFAULT_ASSETS: &str = "~/Descargas/fnf/Funkin/assets";
 
-/// Runs the gate; `false` when any atlas or animate file failed (or the assets
-/// directory is missing / unreadable).
+/// Runs the gate; `false` for missing/unreadable or candidate-empty input, any
+/// atlas failure, or an incomplete `--corpus` inventory.
 pub fn run(rest: &[String]) -> bool {
+    let corpus = rest.iter().any(|arg| arg == "--corpus");
     let dir = match rest.iter().position(|arg| arg == "--dir") {
         Some(index) => match rest.get(index + 1) {
-            Some(value) => value.clone(),
-            None => {
+            Some(value) if !value.is_empty() && !value.starts_with("--") => value.clone(),
+            _ => {
                 eprintln!("parse-atlas: --dir requires a value");
                 return false;
             }
@@ -32,7 +34,10 @@ pub fn run(rest: &[String]) -> bool {
     }
 
     let mut files = Vec::new();
-    collect_files(&root, &mut files);
+    if let Err(error) = collect_files(&root, &mut files) {
+        eprintln!("parse-atlas: {error}");
+        return false;
+    }
     files.sort();
 
     let mut xml_visited = 0u64;
@@ -109,17 +114,27 @@ pub fn run(rest: &[String]) -> bool {
                 }
             }
         } else if extension == Some("json") {
-            // Only files whose shape has a `frames` key are TexturePacker
-            // candidates; every other JSON belongs to oxide-data.
+            // Valid JSON without `frames` belongs to oxide-data. A failed read
+            // or malformed JSON cannot safely be ruled out as a candidate.
             match read_text(path) {
-                Ok(text) if looks_like_packer(&text) => match parse_packer(&text) {
-                    Ok(_) => packer_ok += 1,
+                Ok(text) => match looks_like_packer(&text) {
+                    Ok(true) => match parse_packer(&text) {
+                        Ok(_) => packer_ok += 1,
+                        Err(err) => {
+                            packer_failed += 1;
+                            eprintln!("packer failed: {}: {err}", path.display());
+                        }
+                    },
+                    Ok(false) => {}
                     Err(err) => {
                         packer_failed += 1;
-                        eprintln!("packer failed: {}: {err}", path.display());
+                        eprintln!("packer candidate failed: {}: {err}", path.display());
                     }
                 },
-                Ok(_) | Err(_) => {}
+                Err(err) => {
+                    packer_failed += 1;
+                    eprintln!("packer candidate failed: {}: {err}", path.display());
+                }
             }
         }
     }
@@ -138,7 +153,27 @@ pub fn run(rest: &[String]) -> bool {
     );
     println!("animate ok {animate_ok} failed {animate_failed} sprites {animate_sprites}");
 
-    atlas_failed == 0 && animate_failed == 0
+    let nonempty = xml_visited + packer_ok + packer_failed + animate_ok + animate_failed > 0;
+    if !nonempty {
+        eprintln!("parse-atlas: no atlas candidates found: {}", root.display());
+    }
+    let mut inventory_ok = true;
+    if corpus {
+        for (category, actual, expected) in [
+            ("XML visited", xml_visited, 266),
+            ("Sparrow", atlas_ok, 205),
+            ("non-atlas XML", non_atlas, 61),
+            ("Animate", animate_ok, 88),
+        ] {
+            if actual != expected {
+                eprintln!(
+                    "parse-atlas: corpus inventory: expected {expected} {category}, found {actual}"
+                );
+                inventory_ok = false;
+            }
+        }
+    }
+    nonempty && inventory_ok && atlas_failed == 0 && packer_failed == 0 && animate_failed == 0
 }
 
 fn read_text(path: &Path) -> Result<String, String> {
@@ -147,12 +182,9 @@ fn read_text(path: &Path) -> Result<String, String> {
     Ok(text.strip_prefix('\u{FEFF}').unwrap_or(&text).to_string())
 }
 
-fn looks_like_packer(text: &str) -> bool {
-    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
-    serde_json::from_str::<serde_json::Value>(text)
-        .ok()
-        .and_then(|value| value.get("frames").map(|_| ()))
-        .is_some()
+fn looks_like_packer(text: &str) -> Result<bool, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(text)?;
+    Ok(value.get("frames").is_some())
 }
 
 fn image_ref_exists(xml_path: &Path, image_path: &str) -> bool {
@@ -160,19 +192,22 @@ fn image_ref_exists(xml_path: &Path, image_path: &str) -> bool {
     parent.join(image_path).exists()
 }
 
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| format!("cannot read directory {}: {error}", dir.display()))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("cannot read entry in {}: {error}", dir.display()))?;
         let path = entry.path();
-        if path.is_dir() {
-            collect_files(&path, out);
+        let metadata = std::fs::metadata(&path)
+            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        if metadata.is_dir() {
+            collect_files(&path, out)?;
         } else {
             out.push(path);
         }
     }
+    Ok(())
 }
 
 fn expand_tilde(path: &str) -> PathBuf {

@@ -1,6 +1,7 @@
 //! `frame_quad` trimming geometry: hand-computed fixture/inline cases plus a
 //! real-assets invariant sweep. The crate itself performs no I/O; this test
-//! reads committed fixtures and (when present) the reference assets.
+//! reads committed fixtures; explicitly included real-asset tests require
+//! OXIDE_ASSETS_ROOT to point to the reference assets directory.
 
 use std::path::{Path, PathBuf};
 
@@ -93,11 +94,9 @@ fn frame_quad_rotated_without_frame_attrs_swaps_dest_size() {
 }
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_asset_frame_quads_hold_the_rotated_invariant() {
-    let Some(root) = real_assets_dir() else {
-        eprintln!("skipping real-asset frame_quad sweep: reference assets not present");
-        return;
-    };
+    let root = real_assets_root();
 
     let mut files = Vec::new();
     collect_xml(&root, &mut files);
@@ -135,20 +134,30 @@ fn real_asset_frame_quads_hold_the_rotated_invariant() {
     assert_eq!(rotated, 198, "audited rotated subtexture total changed");
 }
 
-fn real_assets_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let dir = PathBuf::from(home).join("Descargas/fnf/Funkin/assets");
-    dir.is_dir().then_some(dir)
+fn real_assets_root() -> PathBuf {
+    let root = PathBuf::from(
+        std::env::var_os("OXIDE_ASSETS_ROOT")
+            .filter(|value| !value.is_empty())
+            .expect("set OXIDE_ASSETS_ROOT to the reference assets directory"),
+    );
+    assert!(
+        root.is_dir(),
+        "OXIDE_ASSETS_ROOT must point to an existing assets directory: {}",
+        root.display()
+    );
+    root
 }
 
 fn collect_xml(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("read directory {}: {error}", dir.display()));
+    for entry in entries {
+        let entry =
+            entry.unwrap_or_else(|error| panic!("read entry in {}: {error}", dir.display()));
         let path = entry.path();
-        if path.is_dir() {
+        let metadata = std::fs::metadata(&path)
+            .unwrap_or_else(|error| panic!("inspect {}: {error}", path.display()));
+        if metadata.is_dir() {
             collect_xml(&path, out);
         } else if path.extension().and_then(|ext| ext.to_str()) == Some("xml") {
             out.push(path);

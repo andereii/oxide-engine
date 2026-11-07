@@ -6,7 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use oxide_media::{PackReport, TOTAL_AFTER_LIMIT, check_tools, mib};
+use oxide_media::{
+    AudioLayer, Disposition, EntryKind, PackReport, Plan, TOTAL_AFTER_LIMIT, check_tools, mib,
+    voice_pairings,
+};
 
 const DEFAULT_ASSETS: &str = "~/Descargas/fnf/Funkin/assets";
 const DEFAULT_DIST: &str = "assets-dist";
@@ -19,6 +22,7 @@ struct Options {
     output: PathBuf,
     jobs: usize,
     twice: bool,
+    corpus: bool,
 }
 
 pub fn media_check(rest: &[String]) -> bool {
@@ -29,6 +33,20 @@ pub fn media_check(rest: &[String]) -> bool {
             return false;
         }
     };
+
+    let plan = match Plan::build(&options.input) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("media-check: {error}");
+            return false;
+        }
+    };
+    if options.corpus
+        && let Err(error) = check_corpus_inventory(&options.input, &plan)
+    {
+        eprintln!("media-check: corpus inventory: {error}");
+        return false;
+    }
 
     println!(
         "media-check: {} -> {}",
@@ -53,7 +71,7 @@ pub fn media_check(rest: &[String]) -> bool {
     };
     print_report(&report);
 
-    let mut ok = report_passes(&report);
+    let mut ok = report_passes(&report, options.corpus);
 
     if options.twice
         && let Err(error) = repeat_run(&options, &report)
@@ -72,6 +90,10 @@ pub fn pack(rest: &[String]) -> bool {
             return false;
         }
     };
+    if options.corpus {
+        eprintln!("pack: --corpus is only supported by media-check");
+        return false;
+    }
     println!(
         "pack: {} -> {}",
         options.input.display(),
@@ -90,23 +112,115 @@ pub fn pack(rest: &[String]) -> bool {
     }
 }
 
-fn report_passes(report: &PackReport) -> bool {
-    let audio_unverified = report
-        .audio_converted
-        .saturating_sub(report.duration_checked);
-    let image_unverified = report
-        .images_converted
-        .saturating_sub(report.image_converted_checked);
-    let video_unverified = report
-        .video_converted
-        .saturating_sub(report.video_converted_checked);
-    let coverage_ok = audio_unverified == 0 && image_unverified == 0 && video_unverified == 0;
+fn check_corpus_inventory(root: &Path, plan: &Plan) -> Result<(), String> {
+    for required in [
+        "songs",
+        "preload/images",
+        "preload/data",
+        "videos/videos",
+        "fonts",
+    ] {
+        if !root.join(required).is_dir() {
+            return Err(format!("missing mandatory directory: {required}"));
+        }
+    }
+    let mut counts = std::collections::BTreeMap::new();
+    for entry in plan.entries() {
+        let category = match (entry.kind, entry.disposition) {
+            (
+                EntryKind::Audio {
+                    layer: AudioLayer::Inst,
+                },
+                Disposition::ConvertAudio,
+            ) => "Inst",
+            (
+                EntryKind::Audio {
+                    layer: AudioLayer::Voices,
+                },
+                Disposition::ConvertAudio,
+            ) => "Voices",
+            (
+                EntryKind::Audio {
+                    layer: AudioLayer::Sfx,
+                },
+                Disposition::ConvertAudio,
+            ) => "SFX",
+            (_, Disposition::ConvertImage) => "images",
+            (_, Disposition::ConvertVideo) => "runtime videos",
+            (_, Disposition::ExcludeVideo) => "excluded videos",
+            (_, Disposition::TextOnly) => "text",
+            (_, Disposition::CopyFont) => "fonts",
+            (_, Disposition::ExcludeHxc) => "HXC",
+            (_, Disposition::DropMp3) => "MP3",
+            _ => continue,
+        };
+        *counts.entry(category).or_insert(0usize) += 1;
+    }
+    for (category, expected) in [
+        ("Inst", 62),
+        ("Voices", 126),
+        ("SFX", 243),
+        ("images", 686),
+        ("runtime videos", 11),
+        ("excluded videos", 3),
+        ("text", 747),
+        ("fonts", 25),
+        ("HXC", 114),
+        ("MP3", 413),
+    ] {
+        let actual = counts.get(category).copied().unwrap_or(0);
+        if actual != expected {
+            return Err(format!("expected {expected} {category}, found {actual}"));
+        }
+    }
+    let pairings = voice_pairings(plan.entries());
+    if let Some(unpaired) = pairings
+        .iter()
+        .find(|pairing| pairing.instrumental.is_none())
+    {
+        return Err(format!(
+            "unpaired Voices stem: {} (no matching Inst in the same song)",
+            unpaired.voices
+        ));
+    }
+    if pairings.len() != 126 {
+        return Err(format!(
+            "expected 126 Voices/Inst pairs, found {}",
+            pairings.len()
+        ));
+    }
+    Ok(())
+}
+
+fn report_passes(report: &PackReport, corpus: bool) -> bool {
+    let coverage_ok = report.duration_checked == report.audio_converted
+        && report.image_converted_checked == report.images_converted
+        && report.video_converted_checked == report.video_converted;
     if !coverage_ok {
         eprintln!(
-            "media-check: coverage floor failed: audio {audio_unverified} unverified, images {image_unverified} unverified, video {video_unverified} unverified"
+            "media-check: coverage floor failed: checked/converted audio {}/{}, images {}/{}, video {}/{}",
+            report.duration_checked,
+            report.audio_converted,
+            report.image_converted_checked,
+            report.images_converted,
+            report.video_converted_checked,
+            report.video_converted,
+        );
+    }
+    let corpus_coverage_ok = !corpus
+        || (report.audio_converted > 0
+            && report.images_converted > 0
+            && report.video_converted > 0
+            && report.align_checked == 126
+            && report.visible_pixels_total > 0);
+    if !corpus_coverage_ok {
+        eprintln!(
+            "media-check: corpus coverage requires audio/image/video conversions, 126 stem pairs and visible pixels"
         );
     }
     coverage_ok
+        && corpus_coverage_ok
+        && report.pak_entries > 0
         && report.files_grew == 0
         && report.align_ok == report.align_checked
         && report.duration_ok == report.duration_checked
@@ -230,6 +344,7 @@ fn parse(rest: &[String]) -> Result<Options, String> {
     let mut output = None;
     let mut jobs = DEFAULT_JOBS;
     let mut twice = false;
+    let mut corpus = false;
     let mut index = 0;
     while let Some(argument) = rest.get(index) {
         match argument.as_str() {
@@ -259,6 +374,10 @@ fn parse(rest: &[String]) -> Result<Options, String> {
                 }
                 index += 2;
             }
+            "--corpus" => {
+                corpus = true;
+                index += 1;
+            }
             "--twice" => {
                 twice = true;
                 index += 1;
@@ -273,6 +392,7 @@ fn parse(rest: &[String]) -> Result<Options, String> {
         output,
         jobs,
         twice,
+        corpus,
     })
 }
 
@@ -291,4 +411,114 @@ fn expand_tilde(path: &str) -> PathBuf {
         return PathBuf::from(home).join(rest);
     }
     PathBuf::from(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn covered_report() -> PackReport {
+        PackReport {
+            tools: oxide_media::Tools {
+                ffmpeg_version: String::new(),
+                ffprobe_version: String::new(),
+            },
+            plan_entries: 1,
+            pak_entries: 1,
+            pak_bytes: 0,
+            pak_sha256: String::new(),
+            audio_before: 0,
+            audio_after: 0,
+            audio_converted: 1,
+            audio_copied: 0,
+            images_before: 0,
+            images_after: 0,
+            images_converted: 1,
+            images_kept: 0,
+            video_before: 0,
+            video_after: 0,
+            video_converted: 1,
+            video_copied: 0,
+            video_excluded: 0,
+            text_before: 0,
+            text_after: 0,
+            text_files: 0,
+            fonts_before: 0,
+            fonts_after: 0,
+            font_files: 0,
+            skipped: 0,
+            hxc_excluded: 0,
+            hxc_bytes: 0,
+            mp3_dropped: 0,
+            mp3_bytes: 0,
+            files_grew: 0,
+            align_checked: 126,
+            align_ok: 126,
+            duration_checked: 1,
+            duration_ok: 1,
+            video_ssim_min: 1.0,
+            video_converted_checked: 1,
+            image_converted_checked: 1,
+            visible_pixels_identical: 1,
+            visible_pixels_total: 1,
+            alpha_zero_rgb_diff: 0,
+            visible_check_failed: false,
+            total_after: 0,
+        }
+    }
+
+    #[test]
+    fn corpus_requires_positive_coverage_for_each_category() {
+        let covered = covered_report();
+        assert!(report_passes(&covered, true));
+        for category in ["audio", "images", "video", "alignment", "pixels"] {
+            let mut report = covered.clone();
+            match category {
+                "audio" => {
+                    report.audio_converted = 0;
+                    report.duration_checked = 0;
+                    report.duration_ok = 0;
+                }
+                "images" => {
+                    report.images_converted = 0;
+                    report.image_converted_checked = 0;
+                }
+                "video" => {
+                    report.video_converted = 0;
+                    report.video_converted_checked = 0;
+                }
+                "alignment" => {
+                    report.align_checked = 0;
+                    report.align_ok = 0;
+                }
+                "pixels" => {
+                    report.visible_pixels_total = 0;
+                    report.visible_pixels_identical = 0;
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                report_passes(&report, false),
+                "small mods may lack {category}"
+            );
+            assert!(!report_passes(&report, true), "missing corpus {category}");
+        }
+    }
+
+    #[test]
+    fn every_conversion_requires_its_check() {
+        for category in ["audio", "images", "video"] {
+            let mut report = covered_report();
+            match category {
+                "audio" => report.duration_checked = 0,
+                "images" => report.image_converted_checked = 0,
+                "video" => report.video_converted_checked = 0,
+                _ => unreachable!(),
+            }
+            assert!(!report_passes(&report, false), "unchecked {category}");
+        }
+        let mut report = covered_report();
+        report.pak_entries = 0;
+        assert!(!report_passes(&report, false), "empty report must not pass");
+    }
 }

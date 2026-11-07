@@ -18,6 +18,7 @@ class Verbatim {
   public static final PLAY_STATE:String = "source/funkin/play/PlayState.hx";
   public static final FLX_MATH:String = ".haxelib/flixel/git/flixel/math/FlxMath.hx";
   public static final PREFERENCES:String = "source/funkin/Preferences.hx";
+  public static final HX_MATH:String = ".haxelib/hxcpp/git/include/hxMath.h";
 
   public static final CITATIONS:Array<Citation> = [
     {file: CONDUCTOR, range: "L21-46", what: "time-signature naming doc (beats are denominator notes)"},
@@ -48,7 +49,8 @@ class Verbatim {
     {file: PLAY_STATE, range: "L1142-1158", what: "countdown update shape and song-start condition"},
     {file: PLAY_STATE, range: "L1172-1180", what: "playback update shape, music.time + combinedOffset"},
     {file: PLAY_STATE, range: "L2634-2665", what: "startSong(): playing=true and music.time = startTimestamp"},
-    {file: FLX_MATH, range: "L68-76", what: "roundDecimal = Math.fround(value * mult) / mult (f32 escape, amendment 2026-11-05)"},
+    {file: FLX_MATH, range: "L68-76", what: "roundDecimal = Math.fround(value * mult) / mult"},
+    {file: HX_MATH, range: "L28", what: "native fround = std::floor(x + 0.5), Float-valued integer (ADR-0014)"},
     {file: PREFERENCES, range: "L317-322", what: "globalOffset defaults to 0 without a save"}
   ];
 

@@ -1,8 +1,7 @@
-//! Gate B: committed font fixtures plus guarded checks against the real
-//! shipped Sparrow fonts.
+//! Gate B: portable font fixtures and explicit real-Sparrow acceptance checks.
 //!
-//! The real-asset checks skip (with a notice) when the assets directory is not
-//! present, so a checkout without the Haxe game still stays green.
+//! Real assets require OXIDE_ASSETS_ROOT and --include-ignored. Missing assets
+//! then fail instead of being counted as a successful check.
 
 use std::path::{Path, PathBuf};
 
@@ -228,10 +227,10 @@ fn angel_malformed_input_is_a_font_error() {
     assert!(matches!(err, FontError::Malformed { .. }));
 }
 
-fn real_fonts_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let dir = PathBuf::from(home).join("Descargas/fnf/Funkin/assets/preload/images/fonts");
-    dir.is_dir().then_some(dir)
+fn real_fonts_dir() -> PathBuf {
+    let assets = std::env::var_os("OXIDE_ASSETS_ROOT")
+        .expect("set OXIDE_ASSETS_ROOT to the reference assets directory for real-font checks");
+    PathBuf::from(assets).join("preload/images/fonts")
 }
 
 fn load_real_font(dir: &Path, name: &str) -> SparrowFont {
@@ -244,21 +243,9 @@ fn load_real_font(dir: &Path, name: &str) -> SparrowFont {
 }
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_sparrow_fonts_match_the_audited_counts() {
-    let Some(dir) = real_fonts_dir() else {
-        eprintln!("skipping real-font checks: Sparrow assets directory not present");
-        return;
-    };
-
-    for name in ["bold.xml", "default.xml", "freeplay-clear.xml"] {
-        if !dir.join(name).is_file() {
-            eprintln!(
-                "skipping real-font checks: {} not present",
-                dir.join(name).display()
-            );
-            return;
-        }
-    }
+    let dir = real_fonts_dir();
 
     let default = load_real_font(&dir, "default.xml");
     assert_eq!(default.glyphs.len(), 99);

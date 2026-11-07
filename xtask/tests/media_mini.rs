@@ -26,15 +26,13 @@ fn temp_dir(tag: &str) -> PathBuf {
     path
 }
 
-fn tools_available() -> bool {
-    let ffmpeg = Command::new("ffmpeg").arg("-version").output();
-    let ffprobe = Command::new("ffprobe").arg("-version").output();
-    match (ffmpeg, ffprobe) {
-        (Ok(first), Ok(second)) if first.status.success() && second.status.success() => true,
-        _ => {
-            eprintln!("skipping xtask media-check test: ffmpeg/ffprobe missing");
-            false
-        }
+fn require_tools() {
+    for tool in ["ffmpeg", "ffprobe"] {
+        let output = Command::new(tool)
+            .arg("-version")
+            .output()
+            .unwrap_or_else(|error| panic!("milestone acceptance requires {tool}: {error}"));
+        assert!(output.status.success(), "{tool} -version failed");
     }
 }
 
@@ -49,6 +47,36 @@ fn run_media_check(output: &Path) -> Output {
         .expect("spawn xtask")
 }
 
+fn assert_audio_artifacts(output: &Path) {
+    for stem in ["Inst", "Voices-bf"] {
+        let relative = format!("songs/synthetic/{stem}");
+        let source = fixture().join(format!("{relative}.ogg"));
+        let converted = output.join(format!("{relative}.opus"));
+        assert!(
+            converted.is_file(),
+            "missing conversion: {}",
+            converted.display()
+        );
+        assert!(
+            std::fs::metadata(converted).unwrap().len() < std::fs::metadata(source).unwrap().len(),
+            "synthetic audio must shrink, not fall back to a copy"
+        );
+        assert!(!output.join(format!("{relative}.ogg")).exists());
+    }
+    for relative in [
+        "songs/testsong/Inst.ogg",
+        "songs/testsong/Voices-bf.ogg",
+        "sounds/beep.ogg",
+        "sounds/quiet.ogg",
+    ] {
+        assert_eq!(
+            std::fs::read(fixture().join(relative)).unwrap(),
+            std::fs::read(output.join(relative)).unwrap(),
+            "low-bitrate audio must be byte-copied: {relative}"
+        );
+    }
+}
+
 fn line_value<'a>(stdout: &'a str, prefix: &str) -> &'a str {
     stdout
         .lines()
@@ -57,10 +85,9 @@ fn line_value<'a>(stdout: &'a str, prefix: &str) -> &'a str {
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn mini_media_check_is_deterministic_and_well_formed() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("determinism");
     let first_dir = root.join("first");
     let second_dir = root.join("second");
@@ -86,13 +113,13 @@ fn mini_media_check_is_deterministic_and_well_formed() {
     assert!(first_stdout.contains("tools: "));
     assert!(first_stdout.contains("audio  before: "));
     assert_eq!(line_value(&first_stdout, "files_grew: "), "0");
-    assert_eq!(line_value(&first_stdout, "align_ok: "), "1/1");
-    assert_eq!(line_value(&first_stdout, "duration_ok: "), "0/0");
+    assert_eq!(line_value(&first_stdout, "align_ok: "), "2/2");
+    assert_eq!(line_value(&first_stdout, "duration_ok: "), "2/2");
     assert_eq!(
         line_value(&first_stdout, "visible_pixels_identical: "),
         "43/43   (pixels differing only where alpha==0: 20)"
     );
-    assert!(first_stdout.contains("(converted 0, copied 4)"));
+    assert!(first_stdout.contains("(converted 2, copied 4)"));
     assert!(first_stdout.contains("(converted 1, kept png 0)"));
     assert!(first_stdout.contains("(converted 2, excluded 1)"));
     assert!(first_stdout.contains("deflate in pak, 2 files"));
@@ -103,6 +130,8 @@ fn mini_media_check_is_deterministic_and_well_formed() {
     assert!(first_stdout.contains(
         "excluded_videos: mobileRelease.mp4, riftCollabTrailer.mp4, boyfriendEverywhere.mp4"
     ));
+    assert_audio_artifacts(&first_dir);
+    assert_audio_artifacts(&second_dir);
     let first_sha = line_value(&first_stdout, "pak sha256: ").trim();
     let second_sha = line_value(&second_stdout, "pak sha256: ").trim();
     assert_eq!(first_sha, second_sha, "sha256 must be stable");
@@ -146,10 +175,9 @@ fn mini_media_check_is_deterministic_and_well_formed() {
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn media_check_refuses_foreign_output_directory() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("foreign");
     let foreign = root.join("foreign");
     std::fs::create_dir_all(&foreign).expect("create foreign dir");
@@ -166,10 +194,9 @@ fn media_check_refuses_foreign_output_directory() {
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn twice_run_cleans_its_temporary_output() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("twice");
     let output = root.join("dist");
     let result = Command::new(env!("CARGO_BIN_EXE_xtask"))
@@ -196,10 +223,9 @@ fn twice_run_cleans_its_temporary_output() {
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn durable_output_keeps_foreign_files_and_removes_stale_artifacts() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("durable");
     let output = root.join("dist");
 

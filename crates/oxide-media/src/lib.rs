@@ -20,6 +20,7 @@ use std::sync::mpsc;
 pub use convert::{Tools, check_tools};
 pub use pak::DIST_MARKER;
 use pak::{PAK_NAME, PakInput, PakMethod};
+pub use plan::{VoicePairing, voice_pairings};
 use thiserror::Error;
 
 /// Attract trailers that are never packed (exact stems, not globs).
@@ -199,9 +200,23 @@ pub fn pack_and_verify(
 }
 
 fn pack_internal(in_dir: &Path, out_dir: &Path, jobs: usize) -> Result<Packed, MediaError> {
-    let tools = check_tools()?;
     let plan = Plan::build(in_dir)?;
+    if !plan.entries().iter().any(|entry| {
+        matches!(
+            entry.disposition,
+            Disposition::ConvertAudio
+                | Disposition::ConvertImage
+                | Disposition::ConvertVideo
+                | Disposition::CopyFont
+                | Disposition::TextOnly
+        )
+    }) {
+        return Err(MediaError::Verify(
+            "source corpus has no runtime assets".into(),
+        ));
+    }
     preflight_output_collisions(&plan)?;
+    let tools = check_tools()?;
     prepare_output(in_dir, out_dir)?;
 
     let mut audio_before = 0u64;
@@ -799,85 +814,32 @@ fn verify_alignment(
     out_dir: &Path,
     report: &mut PackReport,
 ) -> Result<(), MediaError> {
-    #[derive(Default)]
-    struct SongStems {
-        inst: Vec<(String, Stem)>,
-        voices: Vec<(String, Stem)>,
-    }
-
-    struct Stem {
-        key_rel: String,
-        variant: String,
-    }
-
-    let mut songs: BTreeMap<String, SongStems> = BTreeMap::new();
-    for entry in plan.entries() {
-        let EntryKind::Audio { layer } = entry.kind else {
-            continue;
-        };
-        if layer == AudioLayer::Sfx {
-            continue;
-        }
-        let Some(artifact) = artifacts.get(&entry.rel) else {
-            continue;
-        };
-        let parts: Vec<&str> = entry.rel.split('/').collect();
-        if parts.len() != 3 {
-            continue;
-        }
-        let song = parts[1].to_string();
-        let stem = parts[2]
-            .rsplit_once('.')
-            .map(|(stem, _)| stem)
-            .unwrap_or(parts[2]);
-        let (prefix, variant) = if layer == AudioLayer::Inst {
-            ("Inst", stem.strip_prefix("Inst").unwrap_or(""))
-        } else {
-            ("Voices", stem.strip_prefix("Voices").unwrap_or(""))
-        };
-        if !stem.starts_with(prefix) {
-            continue;
-        }
-        let stem = Stem {
-            key_rel: artifact.key_rel.clone(),
-            variant: variant.to_string(),
-        };
-        let slot = songs.entry(song).or_default();
-        if layer == AudioLayer::Inst {
-            slot.inst.push((entry.rel.clone(), stem));
-        } else {
-            slot.voices.push((entry.rel.clone(), stem));
-        }
-    }
-
+    let available = plan
+        .entries()
+        .iter()
+        .filter(|entry| artifacts.contains_key(&entry.rel));
     let mut delays: BTreeMap<String, i64> = BTreeMap::new();
-    for stems in songs.values() {
-        for (voices_rel, voices_stem) in &stems.voices {
-            let Some((inst_rel, inst_stem)) = stems
-                .inst
-                .iter()
-                .filter(|(_, inst)| {
-                    inst.variant.is_empty()
-                        || voices_stem.variant == inst.variant
-                        || voices_stem.variant.ends_with(&inst.variant)
-                })
-                .max_by_key(|(_, inst)| inst.variant.len())
-            else {
-                continue;
-            };
-            let delay_inst =
-                stem_delay(&mut delays, in_dir, out_dir, inst_rel, &inst_stem.key_rel)?;
-            let delay_voices = stem_delay(
-                &mut delays,
-                in_dir,
-                out_dir,
-                voices_rel,
-                &voices_stem.key_rel,
-            )?;
-            report.align_checked += 1;
-            if delay_inst.abs_diff(delay_voices) <= 128 {
-                report.align_ok += 1;
-            }
+    for pairing in voice_pairings(available) {
+        let Some(inst_rel) = pairing.instrumental else {
+            continue;
+        };
+        let delay_inst = stem_delay(
+            &mut delays,
+            in_dir,
+            out_dir,
+            inst_rel,
+            &artifacts[inst_rel].key_rel,
+        )?;
+        let delay_voices = stem_delay(
+            &mut delays,
+            in_dir,
+            out_dir,
+            pairing.voices,
+            &artifacts[pairing.voices].key_rel,
+        )?;
+        report.align_checked += 1;
+        if delay_inst.abs_diff(delay_voices) <= 128 {
+            report.align_ok += 1;
         }
     }
     Ok(())

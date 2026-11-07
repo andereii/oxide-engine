@@ -1,0 +1,808 @@
+{
+  "authority": "ADR-0014; native utility parity, model-only full timelines",
+  "changed_fields_by_matching_event": {
+    "beat": 1,
+    "beatTime": 45063,
+    "input": 127,
+    "measureTime": 569,
+    "sim": 127,
+    "songPosition": 127,
+    "step": 1,
+    "stepTime": 45063
+  },
+  "changed_files": 41,
+  "files": [
+    {
+      "after_sha256": "81a6935a107cbd6fbf7f76c1cd4aab620eaee3f32948c875e66cfec3c339ae6b",
+      "before_sha256": "9b6e73f8eeb87d7a53655784f74779b62fda4472aab9dfcd49074a18febd60dd",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1647,
+        "input": 1,
+        "measureTime": 14,
+        "sim": 1,
+        "songPosition": 1,
+        "stepTime": 1647
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "2hot-default.jsonl",
+      "rows": 1941
+    },
+    {
+      "after_sha256": "fd27be95e4c0ef72924a0394ccac1dfc6bfc09647140783a168978088dc36b57",
+      "before_sha256": "fd27be95e4c0ef72924a0394ccac1dfc6bfc09647140783a168978088dc36b57",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "_smoke.jsonl",
+      "rows": 111
+    },
+    {
+      "after_sha256": "41f9b65f066706172530dd5b6f8a91fd39de5b32bd48cc347d10abcb896d8058",
+      "before_sha256": "d635ce46bcf46be57647fd6b5150890f507e5823589e044ec875da9c1152a42f",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1036,
+        "input": 2,
+        "measureTime": 2,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1036
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "blammed-default.jsonl",
+      "rows": 1573
+    },
+    {
+      "after_sha256": "f377591a6f74f04d160880723aeee7767648f43509986c1b1591cb61fc48de7f",
+      "before_sha256": "108e8017d137d014a3a77afc30f5e467d5aac88b7a2d7841d4bc10d80705c191",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1322,
+        "input": 2,
+        "measureTime": 18,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1322
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "blammed-erect.jsonl",
+      "rows": 1620
+    },
+    {
+      "after_sha256": "41f9b65f066706172530dd5b6f8a91fd39de5b32bd48cc347d10abcb896d8058",
+      "before_sha256": "d635ce46bcf46be57647fd6b5150890f507e5823589e044ec875da9c1152a42f",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1036,
+        "input": 2,
+        "measureTime": 2,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1036
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "blammed-pico.jsonl",
+      "rows": 1573
+    },
+    {
+      "after_sha256": "333555c91673a62ba81800af029075d6b3a87b543061b6bf2579fcc939584588",
+      "before_sha256": "7cef406a98a9fe5a6e32b44fcfde516089225d438a6f63800877d682f254bf62",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 580,
+        "input": 33,
+        "measureTime": 33,
+        "sim": 33,
+        "songPosition": 33,
+        "stepTime": 580
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "blazin-default.jsonl",
+      "rows": 1959
+    },
+    {
+      "after_sha256": "06f937634aec2bb469013ce552f1a38b81d885c82c68aad28305395f47bc3e24",
+      "before_sha256": "06f937634aec2bb469013ce552f1a38b81d885c82c68aad28305395f47bc3e24",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "bopeebo-default.jsonl",
+      "rows": 744
+    },
+    {
+      "after_sha256": "b30eca97ef4b863775e17255734c08b31e2cd841caf16c9743461c37910f103d",
+      "before_sha256": "aa84a20361cfa031d8dfc1992dbb8e7e61c966180c1c7ed38d80f11cc4220bd3",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 493,
+        "stepTime": 493
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "bopeebo-erect.jsonl",
+      "rows": 907
+    },
+    {
+      "after_sha256": "06f937634aec2bb469013ce552f1a38b81d885c82c68aad28305395f47bc3e24",
+      "before_sha256": "06f937634aec2bb469013ce552f1a38b81d885c82c68aad28305395f47bc3e24",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "bopeebo-pico.jsonl",
+      "rows": 744
+    },
+    {
+      "after_sha256": "d05d8bd51ebce7b5c79f3db45acb0de641b3587330a44aa976066d02225bd3a0",
+      "before_sha256": "d05d8bd51ebce7b5c79f3db45acb0de641b3587330a44aa976066d02225bd3a0",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "cocoa-default.jsonl",
+      "rows": 1017
+    },
+    {
+      "after_sha256": "6111573a100604a0ca6c3052b553dae9e73470b5b74a0b07bef400c8153e80ef",
+      "before_sha256": "20ea6917a839cc26eb20c9d9af60c80972e2addeee761e9816ac515bb2bab024",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 948,
+        "input": 2,
+        "measureTime": 2,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 948
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "cocoa-erect.jsonl",
+      "rows": 1746
+    },
+    {
+      "after_sha256": "d05d8bd51ebce7b5c79f3db45acb0de641b3587330a44aa976066d02225bd3a0",
+      "before_sha256": "d05d8bd51ebce7b5c79f3db45acb0de641b3587330a44aa976066d02225bd3a0",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "cocoa-pico.jsonl",
+      "rows": 1017
+    },
+    {
+      "after_sha256": "f2a1951ae82ce7fddccad06548e6a863dd011db4080bc2fcf38b0e0ac8de16cf",
+      "before_sha256": "2a2cd6b887ee1e3bdf59bf3924c7e1d911ce1493cb12b91c9972f3c41a9b29a6",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 233,
+        "stepTime": 233
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "dadbattle-default.jsonl",
+      "rows": 1437
+    },
+    {
+      "after_sha256": "fb0b4ee52e3a69b0bd071b416bbac846297138aa9b9c5d5ed8c63e70eb48c944",
+      "before_sha256": "8bdfa3801b58e77f767b97360738ef939960d7db3bc38329901ed4e0ea446cad",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1220,
+        "input": 1,
+        "measureTime": 17,
+        "sim": 1,
+        "songPosition": 1,
+        "stepTime": 1220
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "dadbattle-erect.jsonl",
+      "rows": 1513
+    },
+    {
+      "after_sha256": "f2a1951ae82ce7fddccad06548e6a863dd011db4080bc2fcf38b0e0ac8de16cf",
+      "before_sha256": "2a2cd6b887ee1e3bdf59bf3924c7e1d911ce1493cb12b91c9972f3c41a9b29a6",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 233,
+        "stepTime": 233
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "dadbattle-pico.jsonl",
+      "rows": 1437
+    },
+    {
+      "after_sha256": "178a00e9801979c04c585ae877aca2b7f11bbf695c55bfeba5bae06e96ddddb9",
+      "before_sha256": "2e5aaa05bfd2d59fa8f8927f59203880d08950f2e31afb7538b37565f3f1116e",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1550,
+        "input": 2,
+        "measureTime": 21,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1550
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "darnell-bf.jsonl",
+      "rows": 1749
+    },
+    {
+      "after_sha256": "178a00e9801979c04c585ae877aca2b7f11bbf695c55bfeba5bae06e96ddddb9",
+      "before_sha256": "2e5aaa05bfd2d59fa8f8927f59203880d08950f2e31afb7538b37565f3f1116e",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1550,
+        "input": 2,
+        "measureTime": 21,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1550
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "darnell-default.jsonl",
+      "rows": 1749
+    },
+    {
+      "after_sha256": "178a00e9801979c04c585ae877aca2b7f11bbf695c55bfeba5bae06e96ddddb9",
+      "before_sha256": "2e5aaa05bfd2d59fa8f8927f59203880d08950f2e31afb7538b37565f3f1116e",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1550,
+        "input": 2,
+        "measureTime": 21,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1550
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "darnell-erect.jsonl",
+      "rows": 1749
+    },
+    {
+      "after_sha256": "59118b1cee14f1cd486507c16a7fcb8c39c2671d58285301c0d4285145fa11ce",
+      "before_sha256": "59118b1cee14f1cd486507c16a7fcb8c39c2671d58285301c0d4285145fa11ce",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "eggnog-default.jsonl",
+      "rows": 1279
+    },
+    {
+      "after_sha256": "20aeb66b7b207bab0af29541e94bf1ea0cf1a4739a80c9997e887e83f7c1c5ab",
+      "before_sha256": "4e9a601ec94cdcb0062ff26eaf6b97dbb96cb957b718d0109ff82f9602549b26",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 740,
+        "measureTime": 13,
+        "stepTime": 740
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "eggnog-erect.jsonl",
+      "rows": 1195
+    },
+    {
+      "after_sha256": "59118b1cee14f1cd486507c16a7fcb8c39c2671d58285301c0d4285145fa11ce",
+      "before_sha256": "59118b1cee14f1cd486507c16a7fcb8c39c2671d58285301c0d4285145fa11ce",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "eggnog-pico.jsonl",
+      "rows": 1279
+    },
+    {
+      "after_sha256": "e515c024f795875f97102a677123d5fd6bceaff3053adfba03af08b69861a20b",
+      "before_sha256": "e515c024f795875f97102a677123d5fd6bceaff3053adfba03af08b69861a20b",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "fresh-default.jsonl",
+      "rows": 912
+    },
+    {
+      "after_sha256": "5a3ac188cecb52dbdee0446b0030d6ff28386ffb508df9593ac44ce1f675f8f3",
+      "before_sha256": "5a3ac188cecb52dbdee0446b0030d6ff28386ffb508df9593ac44ce1f675f8f3",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "fresh-erect.jsonl",
+      "rows": 948
+    },
+    {
+      "after_sha256": "e515c024f795875f97102a677123d5fd6bceaff3053adfba03af08b69861a20b",
+      "before_sha256": "e515c024f795875f97102a677123d5fd6bceaff3053adfba03af08b69861a20b",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "fresh-pico.jsonl",
+      "rows": 912
+    },
+    {
+      "after_sha256": "7021612f718f70e3f47a16ed4d64e0ed6c6af8c063a689f9d01deee089c6f27f",
+      "before_sha256": "5b4908f03042fba2dd06b92ad6d786ca9dc3854f966627592148b763991e259d",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 2102,
+        "input": 4,
+        "measureTime": 28,
+        "sim": 4,
+        "songPosition": 4,
+        "stepTime": 2102
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "guns-default.jsonl",
+      "rows": 2303
+    },
+    {
+      "after_sha256": "7021612f718f70e3f47a16ed4d64e0ed6c6af8c063a689f9d01deee089c6f27f",
+      "before_sha256": "5b4908f03042fba2dd06b92ad6d786ca9dc3854f966627592148b763991e259d",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 2102,
+        "input": 4,
+        "measureTime": 28,
+        "sim": 4,
+        "songPosition": 4,
+        "stepTime": 2102
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "guns-pico.jsonl",
+      "rows": 2303
+    },
+    {
+      "after_sha256": "f8655a533ca20769fd5820c44c8d8cb69e4a607e7ff9f9da5281cf5773701bf6",
+      "before_sha256": "f8655a533ca20769fd5820c44c8d8cb69e4a607e7ff9f9da5281cf5773701bf6",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "high-default.jsonl",
+      "rows": 1185
+    },
+    {
+      "after_sha256": "f8655a533ca20769fd5820c44c8d8cb69e4a607e7ff9f9da5281cf5773701bf6",
+      "before_sha256": "f8655a533ca20769fd5820c44c8d8cb69e4a607e7ff9f9da5281cf5773701bf6",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "high-erect.jsonl",
+      "rows": 1185
+    },
+    {
+      "after_sha256": "de5f99202f439f0b86d272c19c7151b07c1d510d6f62ff3219d8794f6978574e",
+      "before_sha256": "e135e9a90f2afe6132daeca550ef33d0652b899bf8bc25954cd94c0690251639",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1135,
+        "measureTime": 16,
+        "stepTime": 1135
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "lit-up-bf.jsonl",
+      "rows": 1791
+    },
+    {
+      "after_sha256": "de5f99202f439f0b86d272c19c7151b07c1d510d6f62ff3219d8794f6978574e",
+      "before_sha256": "e135e9a90f2afe6132daeca550ef33d0652b899bf8bc25954cd94c0690251639",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1135,
+        "measureTime": 16,
+        "stepTime": 1135
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "lit-up-default.jsonl",
+      "rows": 1791
+    },
+    {
+      "after_sha256": "7726974a5e79100ff27c388c6d88a4bb1979208f4703bcc0dd50beb7dc85a2e8",
+      "before_sha256": "26677df1a85bafdf83111cfeed8577ae2147f97ca389b3281c6d1ad6572ff112",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 603,
+        "input": 35,
+        "measureTime": 35,
+        "sim": 35,
+        "songPosition": 35,
+        "stepTime": 603
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "milf-default.jsonl",
+      "rows": 1993
+    },
+    {
+      "after_sha256": "4d43217889db120b3b34c9a669651c03fd158ba9071bfe99aa04f3ddf9ceb81f",
+      "before_sha256": "5d174ba63dce776307680e28e474c7448402522c7f3c98e5f35ec87fdff6dd35",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beat": 1,
+        "beatTime": 1574,
+        "input": 15,
+        "measureTime": 32,
+        "sim": 15,
+        "songPosition": 15,
+        "step": 1,
+        "stepTime": 1574
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "monster-default.jsonl",
+      "rows": 1689
+    },
+    {
+      "after_sha256": "0f2d3e9aae6f8f5fbd7003ae9717ea8151e9366f229dc944ee39a6b584d61f2b",
+      "before_sha256": "84564afccec343cafd9e06690ed5ff5ed97ed645ce0ca182eb678575731b5346",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1230,
+        "input": 3,
+        "measureTime": 18,
+        "sim": 3,
+        "songPosition": 3,
+        "stepTime": 1230
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "philly-nice-default.jsonl",
+      "rows": 1531
+    },
+    {
+      "after_sha256": "0f2d3e9aae6f8f5fbd7003ae9717ea8151e9366f229dc944ee39a6b584d61f2b",
+      "before_sha256": "84564afccec343cafd9e06690ed5ff5ed97ed645ce0ca182eb678575731b5346",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1230,
+        "input": 3,
+        "measureTime": 18,
+        "sim": 3,
+        "songPosition": 3,
+        "stepTime": 1230
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "philly-nice-erect.jsonl",
+      "rows": 1531
+    },
+    {
+      "after_sha256": "0f2d3e9aae6f8f5fbd7003ae9717ea8151e9366f229dc944ee39a6b584d61f2b",
+      "before_sha256": "84564afccec343cafd9e06690ed5ff5ed97ed645ce0ca182eb678575731b5346",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1230,
+        "input": 3,
+        "measureTime": 18,
+        "sim": 3,
+        "songPosition": 3,
+        "stepTime": 1230
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "philly-nice-pico.jsonl",
+      "rows": 1531
+    },
+    {
+      "after_sha256": "e74f8c280762572e0fa03e1ebe9022b559b8f8a0f634626a7f755f4ed9896e70",
+      "before_sha256": "e74f8c280762572e0fa03e1ebe9022b559b8f8a0f634626a7f755f4ed9896e70",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "pico-default.jsonl",
+      "rows": 1143
+    },
+    {
+      "after_sha256": "821d96a856bfdc1b64870dddc9080528bdb96ce171d7a460e6f5ccef79880600",
+      "before_sha256": "961cf2d4d59beb92037a1e9546cba9a008ef87c028296248ef6c7aa05697d35b",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 537,
+        "stepTime": 537
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "pico-erect.jsonl",
+      "rows": 1232
+    },
+    {
+      "after_sha256": "e74f8c280762572e0fa03e1ebe9022b559b8f8a0f634626a7f755f4ed9896e70",
+      "before_sha256": "e74f8c280762572e0fa03e1ebe9022b559b8f8a0f634626a7f755f4ed9896e70",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "pico-pico.jsonl",
+      "rows": 1143
+    },
+    {
+      "after_sha256": "14d0ff7d11e4a2e05923059d278760c4487388a6c2efa170055818181e1701e0",
+      "before_sha256": "14d0ff7d11e4a2e05923059d278760c4487388a6c2efa170055818181e1701e0",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "roses-default.jsonl",
+      "rows": 996
+    },
+    {
+      "after_sha256": "9125bdb73d800475757283968b16a09790d70c4fef44397d7a93692007d5c993",
+      "before_sha256": "f086350222c98d173748a08f89dc87475ed6a57e40ea07fff158d9db411c15e7",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 606,
+        "measureTime": 16,
+        "stepTime": 606
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "roses-erect.jsonl",
+      "rows": 1060
+    },
+    {
+      "after_sha256": "14d0ff7d11e4a2e05923059d278760c4487388a6c2efa170055818181e1701e0",
+      "before_sha256": "14d0ff7d11e4a2e05923059d278760c4487388a6c2efa170055818181e1701e0",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "roses-pico.jsonl",
+      "rows": 996
+    },
+    {
+      "after_sha256": "0f00d4c847b64fe55053846fcd9444c89c322c9a9d563d26156e1c0400cf39dc",
+      "before_sha256": "f064c8b72ae2f50eddb1411af4f77f9e4a57db22e14fd50be3dc19674d3d01f5",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 722,
+        "measureTime": 15,
+        "stepTime": 722
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "satin-panties-default.jsonl",
+      "rows": 954
+    },
+    {
+      "after_sha256": "edddce4279c82d703e0e893232ffc0e17a457b3400b4698e085596c46193ca07",
+      "before_sha256": "97d2b379a8e63d503fb493b47833b70feee372dcdaf3799033f25a8838384e8d",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 643,
+        "stepTime": 643
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "satin-panties-erect.jsonl",
+      "rows": 1164
+    },
+    {
+      "after_sha256": "a115104c85a3877b4471552312c7ee2aa69d591f4d2d7e343fa033716b21a670",
+      "before_sha256": "a115104c85a3877b4471552312c7ee2aa69d591f4d2d7e343fa033716b21a670",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "senpai-default.jsonl",
+      "rows": 1266
+    },
+    {
+      "after_sha256": "b9e0ca684bb0aaef05a4d91d3c2054ad127d99fe977618e4e9d94a266b1c67b0",
+      "before_sha256": "5e463af6938ee820c7941c226fe0db46fbc0c0fb4b2997f21a7cf64ff82ed6e5",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1129,
+        "measureTime": 17,
+        "stepTime": 1129
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "senpai-erect.jsonl",
+      "rows": 1387
+    },
+    {
+      "after_sha256": "a115104c85a3877b4471552312c7ee2aa69d591f4d2d7e343fa033716b21a670",
+      "before_sha256": "a115104c85a3877b4471552312c7ee2aa69d591f4d2d7e343fa033716b21a670",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "senpai-pico.jsonl",
+      "rows": 1266
+    },
+    {
+      "after_sha256": "374c5b7e0955a76d52882f5655a64cd8e6e573fb03794abcc614eb3ce8696242",
+      "before_sha256": "831c2a45da592217269ab933b4c8dfd5d199cd80cbe2086bf42a887b1d3e91d9",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 808,
+        "stepTime": 808
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "south-default.jsonl",
+      "rows": 1311
+    },
+    {
+      "after_sha256": "60db31eefccfca9f66fa04f83c89a7039fa46a82ac6ad2bbebdf8ced3dbcb79b",
+      "before_sha256": "85e3f07858b9a20e17ff898aba01da1d9c68e5dd912c63f1bb171b52a269f2fc",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 931,
+        "stepTime": 931
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "south-erect.jsonl",
+      "rows": 1403
+    },
+    {
+      "after_sha256": "374c5b7e0955a76d52882f5655a64cd8e6e573fb03794abcc614eb3ce8696242",
+      "before_sha256": "831c2a45da592217269ab933b4c8dfd5d199cd80cbe2086bf42a887b1d3e91d9",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 808,
+        "stepTime": 808
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "south-pico.jsonl",
+      "rows": 1311
+    },
+    {
+      "after_sha256": "bd527bfc2ba16cdcf24ccaec3edd3768909f0a843a10f8e0e4897a105e3fafa5",
+      "before_sha256": "1ea77b64c6b0e035fab7e28cecf838d4e93cf0b99e52b9c2af6a23cdb11b5bf8",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1606,
+        "input": 1,
+        "measureTime": 18,
+        "sim": 1,
+        "songPosition": 1,
+        "stepTime": 1606
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "spaghetti-default.jsonl",
+      "rows": 1722
+    },
+    {
+      "after_sha256": "56ac3643aafaf3e559f14bb4be00241798a2ca8119fd3f178c870a1667c8cb2b",
+      "before_sha256": "56ac3643aafaf3e559f14bb4be00241798a2ca8119fd3f178c870a1667c8cb2b",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "spookeez-default.jsonl",
+      "rows": 1329
+    },
+    {
+      "after_sha256": "17e0bd3a60b21abaf9347241eb5cdb1acb40644f270b45b3c1f30f0c43b73d57",
+      "before_sha256": "64d61b5a6303e1467d95bf4697c720d5201ad766abb854787998726f44dcdcfd",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1209,
+        "measureTime": 16,
+        "stepTime": 1209
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "spookeez-erect.jsonl",
+      "rows": 1469
+    },
+    {
+      "after_sha256": "56ac3643aafaf3e559f14bb4be00241798a2ca8119fd3f178c870a1667c8cb2b",
+      "before_sha256": "56ac3643aafaf3e559f14bb4be00241798a2ca8119fd3f178c870a1667c8cb2b",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "spookeez-pico.jsonl",
+      "rows": 1329
+    },
+    {
+      "after_sha256": "5bef28a0adc1f1e68a062b3b6b30ab57c22df4553f2a7d7cbce3bc75ce9d76cc",
+      "before_sha256": "7e5a45375bec510cdb9323421ec6914a0d46c5458905aacd411296499863ee10",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1677,
+        "input": 1,
+        "measureTime": 19,
+        "sim": 1,
+        "songPosition": 1,
+        "stepTime": 1677
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "stress-default.jsonl",
+      "rows": 1959
+    },
+    {
+      "after_sha256": "5bef28a0adc1f1e68a062b3b6b30ab57c22df4553f2a7d7cbce3bc75ce9d76cc",
+      "before_sha256": "7e5a45375bec510cdb9323421ec6914a0d46c5458905aacd411296499863ee10",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1677,
+        "input": 1,
+        "measureTime": 19,
+        "sim": 1,
+        "songPosition": 1,
+        "stepTime": 1677
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "stress-pico.jsonl",
+      "rows": 1959
+    },
+    {
+      "after_sha256": "aaeed0d638edc4261d405937ee5b48a73bf556df3c3099a7f5cf2ccd4af608ec",
+      "before_sha256": "fff4f840ab35c1242ef48ade0585a9b3f2a3f0f015e26b606c1083149417cc76",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1442,
+        "input": 3,
+        "measureTime": 19,
+        "sim": 3,
+        "songPosition": 3,
+        "stepTime": 1442
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "thorns-default.jsonl",
+      "rows": 1749
+    },
+    {
+      "after_sha256": "aaeed0d638edc4261d405937ee5b48a73bf556df3c3099a7f5cf2ccd4af608ec",
+      "before_sha256": "fff4f840ab35c1242ef48ade0585a9b3f2a3f0f015e26b606c1083149417cc76",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1442,
+        "input": 3,
+        "measureTime": 19,
+        "sim": 3,
+        "songPosition": 3,
+        "stepTime": 1442
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "thorns-erect.jsonl",
+      "rows": 1749
+    },
+    {
+      "after_sha256": "0d2ce30788dcf669379531d0ffe512a201010250ba3e1b44829e3d4ae05729bc",
+      "before_sha256": "0d2ce30788dcf669379531d0ffe512a201010250ba3e1b44829e3d4ae05729bc",
+      "changed": false,
+      "changed_fields_by_matching_event": {},
+      "max_event_input_shift_ms": 0,
+      "name": "tutorial-default.jsonl",
+      "rows": 618
+    },
+    {
+      "after_sha256": "8636f68f291b445f137818ac7ada0aa77f76706038e7c2ad8acb90a1ce5558d8",
+      "before_sha256": "b49d582e6a2c1319e310eda2b92869189b7aee6581ff6c35e2642c9ec904daa6",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 468,
+        "measureTime": 10,
+        "stepTime": 468
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "ugh-default.jsonl",
+      "rows": 1240
+    },
+    {
+      "after_sha256": "22b6c92858425a2789a5f7b0f9ab8b56ad086e80ba2cb9948a26fc66ab1e3a99",
+      "before_sha256": "b5e8dcd958faec84990e5d8027012d2ab429d87a2e447aa66db21611b2d6170c",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1045,
+        "measureTime": 16,
+        "stepTime": 1045
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "ugh-erect.jsonl",
+      "rows": 1317
+    },
+    {
+      "after_sha256": "8636f68f291b445f137818ac7ada0aa77f76706038e7c2ad8acb90a1ce5558d8",
+      "before_sha256": "b49d582e6a2c1319e310eda2b92869189b7aee6581ff6c35e2642c9ec904daa6",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 468,
+        "measureTime": 10,
+        "stepTime": 468
+      },
+      "max_event_input_shift_ms": 0,
+      "name": "ugh-pico.jsonl",
+      "rows": 1240
+    },
+    {
+      "after_sha256": "665e696504fe8b69a612f986c576884de24c07c50defd5a5d09e445ba91148cc",
+      "before_sha256": "5c13ccf9e546cc6d97fc2431acd845d7bfefb3262a34e6121482a7eda8ff87c3",
+      "changed": true,
+      "changed_fields_by_matching_event": {
+        "beatTime": 1366,
+        "input": 2,
+        "measureTime": 2,
+        "sim": 2,
+        "songPosition": 2,
+        "stepTime": 1366
+      },
+      "max_event_input_shift_ms": 1,
+      "name": "winter-horrorland-default.jsonl",
+      "rows": 1875
+    }
+  ],
+  "global_event_order_changed": [
+    "monster-default.jsonl"
+  ],
+  "max_event_input_shift_ms": 1,
+  "new_rows": 86131,
+  "old_rows": 86131,
+  "per_kind_counts_and_index_sequences": "unchanged in all 62 files"
+}

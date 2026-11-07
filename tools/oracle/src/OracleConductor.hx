@@ -1,4 +1,3 @@
-import haxe.io.Bytes;
 
 /**
  * Standalone, instrumented transcription of `funkin.Conductor` (Haxe oracle).
@@ -9,10 +8,9 @@ import haxe.io.Bytes;
  * method carries a `// = funkin/...:Lx-y` citation; the same ranges are listed
  * in `Verbatim.hx` and hashed by `snapshot_validate.sh`.
  *
- * `FlxMath.roundDecimal` is transcribed exactly as the installed HaxeFlixel
- * implements it: `Math.fround(value * 10^d) / 10^d` (the one f32 rounding
- * escape in the timing path; docs/M4-CONTRACT.md §0 amendment 2026-11-05).
- * All other maths remain f64.
+ * The full timeline is a model, not an independent execution of the game.
+ * Only utility rounding has native runtime/real-class probe evidence here.
+ * See tools/oracle/BEHAVIOR.md and ADR-0014 for the evidence boundary.
  */
 class OracleConductor {
   // = funkin/util/Constants.hx:L368 (SECS_PER_MIN = 60)
@@ -151,28 +149,16 @@ class OracleConductor {
    *   for (i in 0...Precision) mult *= 10;
    *   return Math.fround(Value * mult) / mult;
    *
-   * `Math.fround` is the one f32 escape in the game's timing path (amendment
-   * 2026-11-05 to docs/M4-CONTRACT.md §0); everything else stays f64.
-   *
-   * Haxe's own `Math.fround` is NOT used directly: on Neko 2.4.1 / --interp the
-   * stdlib `math_fround` symbol is missing and the target silently falls back
-   * to `Math.round` (an Int), which would not reproduce the game. The
-   * `Bytes.setFloat`/`getFloat` round-trip below is the same IEEE-754 binary32
-   * conversion that `Math.fround` performs on the game's hxcpp runtime.
+   * hxcpp include/hxMath.h:28 defines fround as std::floor(x + 0.5),
+   * NOT a binary32 cast. Native real-FlxMath evidence: RealRoundProbe.hx.
+   * Use ffloor to retain a Float-valued integer on Neko too; its fround
+   * fallback is Int-valued and can overflow for scaled late-song steps.
    */
   public static function roundDecimal(value:Float, precision:Int):Float {
     var mult:Float = 1.0;
     for (i in 0...precision) mult *= 10.0;
 
-    return fround(value * mult) / mult;
-  }
-
-  static var f32Scratch:Bytes = Bytes.alloc(4);
-
-  /** IEEE-754 binary32 round-to-nearest-even, identical to Math.fround. */
-  static function fround(value:Float):Float {
-    f32Scratch.setFloat(0, value);
-    return f32Scratch.getFloat(0);
+    return Math.ffloor(value * mult + 0.5) / mult;
   }
 
   // = funkin/Conductor.hx:L549-600

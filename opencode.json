@@ -18,6 +18,8 @@
           "out\\s+of\\s+credits",
           "endpoint is unavailable",
           "upstream request failed",
+          "prefill_cap_refused",
+          "cell is at capacity",
           "model.{0,20}not.{0,10}(found|available)"
         ],
         "cooldown_seconds": 1800,
@@ -27,9 +29,8 @@
         "foreground_task_fallback": true,
 
         "fallback_models": [
-          "xai/grok-4.7",
           "opencode-go/deepseek-v4.1-flash#max",
-          "opencode-go/gemini-4-argon"
+          "xai/grok-4.7#xhigh"
         ]
       }
     }

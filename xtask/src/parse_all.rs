@@ -13,15 +13,16 @@ use std::path::{Path, PathBuf};
 /// Default assets root: the FNF reference implementation checkout.
 const DEFAULT_ASSETS: &str = "~/Descargas/fnf/Funkin/assets";
 
-/// Runs the gate; false when any JSON fails to parse, validate or round-trip
-/// (or the assets directory is missing / unreadable).
+/// Runs the gate; false for missing/unreadable or JSON-empty input, any parse,
+/// validation or round-trip failure, or an incomplete `--corpus` inventory.
 pub fn run(rest: &[String]) -> bool {
     let show_diff = rest.iter().any(|a| a == "--diff");
     let show_all = rest.iter().any(|a| a == "--all");
+    let corpus = rest.iter().any(|a| a == "--corpus");
     let dir = match rest.iter().position(|a| a == "--dir") {
         Some(i) => match rest.get(i + 1) {
-            Some(d) => d.clone(),
-            None => {
+            Some(d) if !d.is_empty() && !d.starts_with("--") => d.clone(),
+            _ => {
                 eprintln!("parse-all: --dir requires a value");
                 return false;
             }
@@ -35,8 +36,15 @@ pub fn run(rest: &[String]) -> bool {
     }
 
     let mut files: Vec<PathBuf> = Vec::new();
-    collect_json(&root, &mut files);
+    if let Err(error) = collect_json(&root, &mut files) {
+        eprintln!("parse-all: {error}");
+        return false;
+    }
     files.sort();
+    if files.is_empty() {
+        eprintln!("parse-all: no JSON files found: {}", root.display());
+        return false;
+    }
 
     let mut by_kind: BTreeMap<String, KindStats> = BTreeMap::new();
     let mut failure_count = 0usize;
@@ -84,7 +92,37 @@ pub fn run(rest: &[String]) -> bool {
         println!("\n(first 10 failures shown; run with --diff for every failure's first mismatch)");
     }
 
-    total_failed == 0
+    let inventory_ok = !corpus || corpus_inventory_matches(total, &by_kind);
+    total_failed == 0 && inventory_ok
+}
+
+fn corpus_inventory_matches(total: usize, by_kind: &BTreeMap<String, KindStats>) -> bool {
+    // Measured with oxide-data's path-first taxonomy, not directory names alone.
+    let expected = [
+        ("chart", 61),
+        ("metadata", 78),
+        ("notestyle", 2),
+        ("character", 55),
+        ("stage", 21),
+        ("level", 10),
+        ("save", 0),
+        ("player", 2),
+        ("unknown", 203),
+    ];
+    let mut ok = total == 432;
+    if !ok {
+        eprintln!("parse-all: corpus inventory: expected 432 JSON files, found {total}");
+    }
+    for (kind, expected) in expected {
+        let actual = by_kind.get(kind).map_or(0, |stats| stats.ok);
+        if actual != expected {
+            eprintln!(
+                "parse-all: corpus inventory: expected {expected} successful {kind}, found {actual}"
+            );
+            ok = false;
+        }
+    }
+    ok
 }
 
 #[derive(Default)]
@@ -199,19 +237,22 @@ fn values_equal(a: &Value, b: &Value) -> bool {
     }
 }
 
-fn collect_json(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
+fn collect_json(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| format!("cannot read directory {}: {error}", dir.display()))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("cannot read entry in {}: {error}", dir.display()))?;
         let path = entry.path();
-        if path.is_dir() {
-            collect_json(&path, out);
+        let metadata = std::fs::metadata(&path)
+            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        if metadata.is_dir() {
+            collect_json(&path, out)?;
         } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
             out.push(path);
         }
     }
+    Ok(())
 }
 
 fn expand_tilde(path: &str) -> PathBuf {

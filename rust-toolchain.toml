@@ -1,4 +1,4 @@
 # Oxide Engine toolchain. Repo-wide pin so every agent gets the same compiler.
 [toolchain]
-channel = "stable"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]

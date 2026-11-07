@@ -341,15 +341,12 @@ fn map_time_changes_sorts_and_recomputes() {
 /// Change 0: stamp -50 -> 0, beatTime 0.
 /// Change 1: stamp 1000, prev BPM 137, prev den 4:
 ///   raw   = 1000*137/60/1000*(4/4) = 2.2833333333333337
-///   x1e4  = 22833.333333333336; nearest f32 (spacing 2^-9 = 0.001953125)
-///         = 22833.333984375
-///   beat  = 22833.333984375 / 1e4 = 2.2833333984375
+///   x1e4  = 22833.333333333336; native Haxe fround gives 22833.0
+///   beat  = 22833.0 / 1e4 = 2.2833
 /// Change 2: stamp 1500, prev BPM 137, prev den 4:
-///   raw   = 2.2833333984375 + 500*137/60/1000*(4/4)
-///         = 3.425000065104167
-///   x1e4  = 34250.00065104167; nearest f32 (spacing 2^-8 = 0.00390625)
-///         = 34250.0
-///   beat  = 34250.0 / 1e4 = 3.425 (the f32 escape lands back on 3.425 here)
+///   raw   = 2.2833 + 500*137/60/1000*(4/4) = 3.424966666666667
+///   x1e4  = 34249.66666666667; native Haxe fround gives 34250.0
+///   beat  = 34250.0 / 1e4 = 3.425 (ADR-0014 native utility evidence).
 #[test]
 fn map_time_changes_uses_fround_for_beat_time() {
     let mut conductor = Conductor::new();
@@ -368,7 +365,7 @@ fn map_time_changes_uses_fround_for_beat_time() {
     let second = conductor
         .get_time_change_at_ms(1000.0)
         .expect("second time change");
-    assert_eq!(second.beat_time, 2.2833333984375);
+    assert_eq!(second.beat_time, 2.2833);
 
     let third = conductor
         .get_time_change_at_ms(1500.0)
@@ -461,8 +458,8 @@ fn map_time_changes_is_stable_for_equal_timestamps() {
     assert_eq!(selected.bpm, 222.0);
     // FlxMath.roundDecimal(raw, 4) with raw = 1000*100/60/1000*(4/4):
     //   raw * 1e4 = 16666.666666666668
-    //   nearest f32 (spacing 2^-9 = 0.001953125) = 16666.666015625
-    //   beat = 16666.666015625 / 1e4 = 1.6666666015625
-    // The third entry has a zero delta, so it rounds the same f32 value.
-    assert_eq!(selected.beat_time, 1.6666666015625);
+    //   native Haxe fround = floor(16666.666666666668 + 0.5) = 16667
+    //   beat = 16667 / 1e4 = 1.6667 (ADR-0014).
+    // The third entry has a zero delta, so it preserves that decimal result.
+    assert_eq!(selected.beat_time, 1.6667);
 }

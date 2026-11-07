@@ -1,8 +1,8 @@
 //! Structural M3 tests over the committed mini fixture: classification results,
 //! deterministic pak bytes, entry policy and frozen timestamps.
 //!
-//! ffmpeg/ffprobe are external binaries (ADR-0010); when neither is present the
-//! test skips with a notice instead of silently passing.
+//! External-tool tests are explicitly ignored by default. Milestone acceptance
+//! includes them and requires ffmpeg/ffprobe; portable policy tests always run.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -30,21 +30,44 @@ fn temp_dir(tag: &str) -> PathBuf {
     path
 }
 
-fn tools_available() -> bool {
-    match oxide_media::check_tools() {
-        Ok(_) => true,
-        Err(MediaError::Tools(message)) => {
-            eprintln!("skipping media fixture test: {message}");
-            false
-        }
-        Err(error) => panic!("unexpected tool check failure: {error}"),
+fn require_tools() {
+    oxide_media::check_tools().expect("milestone acceptance requires ffmpeg/ffprobe");
+}
+
+fn assert_audio_artifacts(output: &Path) {
+    for stem in ["Inst", "Voices-bf"] {
+        let relative = format!("songs/synthetic/{stem}");
+        let source = fixture().join(format!("{relative}.ogg"));
+        let converted = output.join(format!("{relative}.opus"));
+        assert!(
+            converted.is_file(),
+            "missing conversion: {}",
+            converted.display()
+        );
+        assert!(
+            std::fs::metadata(converted).unwrap().len() < std::fs::metadata(source).unwrap().len(),
+            "synthetic audio must shrink, not fall back to a copy"
+        );
+        assert!(!output.join(format!("{relative}.ogg")).exists());
+    }
+    for relative in [
+        "songs/testsong/Inst.ogg",
+        "songs/testsong/Voices-bf.ogg",
+        "sounds/beep.ogg",
+        "sounds/quiet.ogg",
+    ] {
+        assert_eq!(
+            std::fs::read(fixture().join(relative)).unwrap(),
+            std::fs::read(output.join(relative)).unwrap(),
+            "low-bitrate audio must be byte-copied: {relative}"
+        );
     }
 }
 
 fn assert_fixture_counts(report: &PackReport) {
     assert_eq!(
-        report.audio_converted, 0,
-        "all mini audio is at/below target"
+        report.audio_converted, 2,
+        "synthetic high-bitrate stems must convert"
     );
     assert_eq!(report.audio_copied, 4);
     assert_eq!(report.images_converted, 1);
@@ -60,23 +83,23 @@ fn assert_fixture_counts(report: &PackReport) {
     assert_eq!(report.hxc_bytes, 45);
     assert_eq!(report.mp3_dropped, 0);
     assert_eq!(report.files_grew, 0);
-    assert_eq!(report.align_ok, 1);
-    assert_eq!(report.align_checked, 1);
-    assert_eq!(report.duration_checked, 0);
+    assert_eq!(report.align_checked, 2, "copied and converted stem pairs");
+    assert_eq!(report.align_ok, report.align_checked);
+    assert_eq!(report.duration_checked, report.audio_converted);
+    assert_eq!(report.duration_ok, report.duration_checked);
     assert_eq!(report.image_converted_checked, report.images_converted);
     assert_eq!(report.visible_pixels_identical, report.visible_pixels_total);
     assert!(report.visible_pixels_total > 0);
     assert!(report.alpha_zero_rgb_diff > 0);
     assert!(!report.visible_check_failed);
     assert!(report.video_ssim_min >= 0.93);
-    assert_eq!(report.pak_entries, 10);
+    assert_eq!(report.pak_entries, 12);
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn pack_is_byte_deterministic_and_policies_hold() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("determinism");
     let first_dir = root.join("first");
     let second_dir = root.join("second");
@@ -88,6 +111,8 @@ fn pack_is_byte_deterministic_and_policies_hold() {
 
     assert_fixture_counts(&first);
     assert_fixture_counts(&second);
+    assert_audio_artifacts(&first_dir);
+    assert_audio_artifacts(&second_dir);
     assert_eq!(first.pak_sha256, second.pak_sha256);
     assert!(first_dir.join(oxide_media::DIST_MARKER).is_file());
     assert!(second_dir.join(oxide_media::DIST_MARKER).is_file());
@@ -142,10 +167,9 @@ fn pack_is_byte_deterministic_and_policies_hold() {
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn output_prep_requires_marker() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("marker");
     let foreign = root.join("foreign");
     std::fs::create_dir_all(&foreign).expect("create foreign dir");
@@ -205,10 +229,9 @@ fn output_prep_requires_marker() {
 }
 
 #[test]
+#[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
 fn durable_output_preserves_foreign_files_and_removes_stale_artifacts() {
-    if !tools_available() {
-        return;
-    }
+    require_tools();
     let root = temp_dir("durable");
     let out = root.join("out");
     let first = oxide_media::pack(&fixture(), &out, 2).expect("first pack");
@@ -245,9 +268,6 @@ fn durable_output_preserves_foreign_files_and_removes_stale_artifacts() {
 
 #[test]
 fn derived_output_collision_is_rejected() {
-    if !tools_available() {
-        return;
-    }
     let root = temp_dir("collision");
     let input = root.join("in");
     std::fs::create_dir_all(&input).expect("create input");
@@ -263,6 +283,54 @@ fn derived_output_collision_is_rejected() {
         other => panic!("expected collision error, got {other:?}"),
     }
     assert!(!out.exists(), "collision must fail before touching --out");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn empty_and_missing_sources_fail_before_tools_or_output_changes() {
+    let root = temp_dir("empty-source");
+    let input = root.join("input");
+    std::fs::create_dir(&input).unwrap();
+    let output = root.join("output");
+    std::fs::create_dir(&output).unwrap();
+    std::fs::write(output.join("keep.txt"), "foreign data").unwrap();
+    for verify in [false, true] {
+        let result = if verify {
+            oxide_media::pack_and_verify(&input, &output, 1)
+        } else {
+            oxide_media::pack(&input, &output, 1)
+        };
+        assert!(
+            matches!(result, Err(MediaError::Verify(ref message)) if message.contains("empty source corpus")),
+            "{result:?}"
+        );
+    }
+    assert!(matches!(
+        Plan::build(&root.join("missing")),
+        Err(MediaError::Io(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(output.join("keep.txt")).unwrap(),
+        "foreign data"
+    );
+    assert!(!output.join(oxide_media::DIST_MARKER).exists());
+    assert!(!output.join("assets.pak").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn excluded_only_sources_are_not_a_runtime_corpus() {
+    let root = temp_dir("excluded-source");
+    let input = root.join("input");
+    std::fs::create_dir(&input).unwrap();
+    std::fs::write(input.join("only.fla"), "skipped").unwrap();
+    let output = root.join("output");
+    let result = oxide_media::pack(&input, &output, 1);
+    assert!(
+        matches!(result, Err(MediaError::Verify(ref message)) if message.contains("no runtime assets")),
+        "{result:?}"
+    );
+    assert!(!output.exists());
     let _ = std::fs::remove_dir_all(root);
 }
 

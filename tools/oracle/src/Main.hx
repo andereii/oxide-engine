@@ -1,13 +1,14 @@
 import OracleAssets.OracleChart;
 import sys.FileSystem;
+import sys.io.File;
 
 /**
  * CLI for the committed M4 conductor oracle.
  *
  *   haxe build.hxml
- *   neko /tmp/opencode/oracle-build/oracle.n \
+ *   neko ../../target/oracle.n \
  *     --assets "$HOME/Descargas/fnf/Funkin/assets" \
- *     --out ../../tests/fixtures/conductor
+ *     --out ../../target/conductor-candidates
  *
  * `--only` restricts the run to one or more song ids or fixture ids
  * (repeatable, comma-separated). `--citations` prints the audit table.
@@ -82,13 +83,17 @@ class Main {
       }
     }
 
+    var replayCharts:Array<Dynamic> = [];
     for (chart in charts) {
       var metadata = OracleAssets.loadMetadata(chart);
       var cachedLength = lengths.get(chart.songId);
       if (cachedLength == null) throw "no probed length for " + chart.songId;
       var lengthMs:Float = cachedLength;
 
+      var replay = OracleReplay.input(chart.fixtureId, metadata, lengthMs);
       var result = OracleFixture.simulate(metadata, lengthMs);
+      OracleReplay.finish(replay, result);
+      replayCharts.push(replay);
       var fixturePath = join(outDir, chart.fixtureId + ".jsonl");
       OracleFixture.writeFile(fixturePath, result.lines);
 
@@ -100,7 +105,10 @@ class Main {
         + " length=" + Std.string(lengthMs) + "ms");
     }
 
+    var smokeInput = OracleReplay.input("_smoke", OracleFixture.smokeMetadata(), 4000.0);
     var smoke = OracleFixture.simulateSmoke();
+    OracleReplay.finish(smokeInput, smoke);
+    File.saveContent(join(outDir, "_manifest.json"), OracleReplay.format(replayCharts, smokeInput));
     OracleFixture.writeFile(join(outDir, "_smoke.jsonl"), smoke.lines);
     Sys.println("_smoke"
       + ": step=" + smoke.steps

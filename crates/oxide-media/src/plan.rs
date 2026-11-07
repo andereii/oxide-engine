@@ -1,5 +1,6 @@
 //! Asset classification and deterministic plan construction.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::{AudioLayer, Disposition, EntryKind, MediaError, Plan, PlanEntry};
@@ -22,6 +23,12 @@ impl Plan {
 
         let mut files = Vec::new();
         collect_files(root, root, &mut files)?;
+        if files.is_empty() {
+            return Err(MediaError::Verify(format!(
+                "empty source corpus: {}",
+                root.display()
+            )));
+        }
         files.sort_by(|left, right| left.rel.cmp(&right.rel));
 
         let mut entries = Vec::with_capacity(files.len());
@@ -42,6 +49,80 @@ impl Plan {
         }
         Ok(Plan { entries })
     }
+}
+
+/// A planned Voices stem and its matching Inst, if present. Paths are relative
+/// to the assets root; an unpaired voice is valid in an override-only mod.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VoicePairing<'a> {
+    pub voices: &'a str,
+    pub instrumental: Option<&'a str>,
+}
+
+/// Resolves classified song stems without reading or converting any files.
+/// Selects the longest matching Inst variant suffix within the same song,
+/// falling back to the unsuffixed Inst. Every Voices stem gets a result,
+/// including those with no compatible instrumental.
+pub fn voice_pairings<'a>(
+    entries: impl IntoIterator<Item = &'a PlanEntry>,
+) -> Vec<VoicePairing<'a>> {
+    #[derive(Default)]
+    struct SongStems<'a> {
+        inst: Vec<(&'a str, &'a str)>,
+        voices: Vec<(&'a str, &'a str)>,
+    }
+
+    let mut songs: BTreeMap<&str, SongStems<'a>> = BTreeMap::new();
+    for entry in entries {
+        let prefix = match entry.kind {
+            EntryKind::Audio {
+                layer: AudioLayer::Inst,
+            } => "Inst",
+            EntryKind::Audio {
+                layer: AudioLayer::Voices,
+            } => "Voices",
+            _ => continue,
+        };
+        let parts: Vec<&str> = entry.rel.split('/').collect();
+        if parts.len() != 3 {
+            continue;
+        }
+        let stem = parts[2]
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(parts[2]);
+        let Some(variant) = stem.strip_prefix(prefix) else {
+            continue;
+        };
+        let slot = songs.entry(parts[1]).or_default();
+        let stem = (entry.rel.as_str(), variant);
+        if prefix == "Inst" {
+            slot.inst.push(stem);
+        } else {
+            slot.voices.push(stem);
+        }
+    }
+
+    let mut pairings = Vec::new();
+    for stems in songs.into_values() {
+        for (voices, variant) in stems.voices {
+            let instrumental = stems
+                .inst
+                .iter()
+                .filter(|(_, inst_variant)| {
+                    inst_variant.is_empty()
+                        || variant == *inst_variant
+                        || variant.ends_with(*inst_variant)
+                })
+                .max_by_key(|(_, inst_variant)| inst_variant.len())
+                .map(|(rel, _)| *rel);
+            pairings.push(VoicePairing {
+                voices,
+                instrumental,
+            });
+        }
+    }
+    pairings
 }
 
 struct Collected {
@@ -227,6 +308,66 @@ mod tests {
                 layer: AudioLayer::Sfx
             }
         );
+    }
+
+    #[test]
+    fn voice_pairings_share_suffix_fallback_and_song_isolation_policy() {
+        let entries: Vec<_> = [
+            "songs/a/Inst.ogg",
+            "songs/a/Inst-erect.ogg",
+            "songs/a/Inst-bf-erect.ogg",
+            "songs/a/Voices-bf-erect.ogg",
+            "songs/a/Voices-pico-erect.ogg",
+            "songs/a/Voices-bf.ogg",
+            "songs/b/Inst-erect.ogg",
+            "songs/b/Voices-bf.ogg",
+            "songs/override/Voices-bf.ogg",
+            "songs/instrumental-only/Inst.ogg",
+            "sounds/Voices-sfx.ogg",
+            "songs/a/Voices-dropped.mp3",
+        ]
+        .into_iter()
+        .map(|rel| {
+            let (kind, disposition) = kind_of(rel);
+            PlanEntry {
+                rel: rel.to_string(),
+                kind,
+                disposition,
+            }
+        })
+        .collect();
+        let pairings = voice_pairings(&entries);
+        assert_eq!(
+            pairings,
+            vec![
+                VoicePairing {
+                    voices: "songs/a/Voices-bf-erect.ogg",
+                    instrumental: Some("songs/a/Inst-bf-erect.ogg"),
+                },
+                VoicePairing {
+                    voices: "songs/a/Voices-pico-erect.ogg",
+                    instrumental: Some("songs/a/Inst-erect.ogg"),
+                },
+                VoicePairing {
+                    voices: "songs/a/Voices-bf.ogg",
+                    instrumental: Some("songs/a/Inst.ogg"),
+                },
+                VoicePairing {
+                    voices: "songs/b/Voices-bf.ogg",
+                    instrumental: None,
+                },
+                VoicePairing {
+                    voices: "songs/override/Voices-bf.ogg",
+                    instrumental: None,
+                },
+            ]
+        );
+
+        let available = entries
+            .iter()
+            .filter(|entry| entry.rel != "songs/a/Inst-bf-erect.ogg");
+        let pairings = voice_pairings(available);
+        assert_eq!(pairings[0].instrumental, Some("songs/a/Inst-erect.ogg"));
     }
 
     #[test]

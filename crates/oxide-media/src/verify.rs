@@ -376,17 +376,6 @@ mod tests {
         estimate_delay_from_pcm, parse_ssim,
     };
 
-    fn tools_available() -> bool {
-        match crate::check_tools() {
-            Ok(_) => true,
-            Err(crate::MediaError::Tools(message)) => {
-                eprintln!("skipping delay estimator test: {message}");
-                false
-            }
-            Err(error) => panic!("unexpected tool check failure: {error}"),
-        }
-    }
-
     fn write_wav(path: &std::path::Path, samples: &[i16]) {
         let data_len = (samples.len() * 2) as u32;
         let mut bytes = Vec::with_capacity(44 + samples.len() * 2);
@@ -500,10 +489,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires ffmpeg/ffprobe; executed by milestone acceptance"]
     fn cross_correlation_recovers_synthetic_delay() {
-        if !tools_available() {
-            return;
-        }
+        crate::check_tools().expect("milestone acceptance requires ffmpeg/ffprobe");
         let source = synthetic_burst(2 * 48_000);
         let mut delayed = vec![0i16; source.len()];
         delayed[37..].copy_from_slice(&source[..source.len() - 37]);

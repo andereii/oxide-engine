@@ -2,12 +2,10 @@
 #
 # Target: Neko (installed at /usr/bin/neko on the reference machine; HashLink is
 # not installed, and the interpreter is also supported by the command in the
-# README). The compiled module lands in /tmp/opencode/oracle-build/ so the
-# repository never carries a generated binary.
+# README). The compiled module lands in the ignored repository target/ directory.
 #
-#   mkdir -p /tmp/opencode/oracle-build
 #   haxe build.hxml
-#   neko /tmp/opencode/oracle-build/oracle.n --assets <assets> --out <fixtures>
+#   neko ../../target/oracle.n --assets <assets> --out ../../target/conductor-candidates
 -cp src
 -main Main
--neko /tmp/opencode/oracle-build/oracle.n
+-neko ../../target/oracle.n

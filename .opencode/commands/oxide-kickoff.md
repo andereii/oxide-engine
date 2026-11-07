@@ -1,15 +1,16 @@
 ---
-description: Start Oxide Engine work (M0+M1) with the orchestrator agent
+description: Inspect and safely resume Oxide Engine; never recreate an existing workspace
 agent: oxide-orchestrator
 ---
 
-Repo root: the current working directory.
-Canonical plan: `~/Documentos/OxideEngine/PLAN-ES.md` (read §0, §3, §4, §7.9, §7.10, §8.3).
-Goal and exclusions: `~/Documentos/OxideEngine/GOAL.md`.
-Subagent brief format: `~/Documentos/OxideEngine/SUBAGENT-BRIEF.md`.
-Oracle (reference Haxe implementation): `~/Descargas/fnf/Funkin`.
+Read `AGENTS.md`, `docs/GOAL.md`, `docs/WORKFLOW.md`, latest `docs/PROGRESS.md` and current
+working-tree changes. Resolve the next objective against the relevant contract/ADRs and
+unresolved evidence; do not blindly execute an old Next. This repository already exists.
+Do not create or overwrite a skeleton. If essential structure is missing, report it.
 
 $ARGUMENTS
 
-Execute "FIRST ACTION (M0 + M1)" from your system prompt now. Report in the required format:
-gate command, output lines, changed files, next step. Do not ask for permission to start.
+Continue the next in-scope objective. For a non-trivial change, identify behavior,
+simpler option and validation before delegating a bounded write set. Report actual
+scope/commands/exit/output, limitations, changes and next objective. Quick green is not
+milestone acceptance. No automatic commits, scope cuts or provider escalation.

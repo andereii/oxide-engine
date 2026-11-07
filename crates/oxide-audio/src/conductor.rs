@@ -1,12 +1,10 @@
 //! Pure port of `funkin/Conductor.hx` timing semantics. Timing values are
 //! milliseconds; all arithmetic is `f64` (Haxe `Float` is an IEEE-754 double).
-//! The one deliberate exception is `FlxMath.roundDecimal`, which the installed
-//! HaxeFlixel implements as `Math.fround(value * mult) / mult`
-//! (`FlxMath.hx:68-76`). There the multiply and divide stay f64 and only the
-//! intermediate product crosses the single-precision boundary. `docs/M4-CONTRACT.md`
-//! §0 pins that exact definition, so this port reproduces the f32 escape (and
-//! its tiny quantisation) wherever Haxe rounds. This module has no audio backend
-//! and no game dependencies.
+//! `FlxMath.roundDecimal` uses `Math.fround(value * mult) / mult`
+//! (`FlxMath.hx:68-76`). On the reference hxcpp runtime, `fround` means
+//! `floor(x + 0.5)`, not a binary32 conversion. ADR-0014 corrects the earlier
+//! interpretation; real-utility probe evidence is in `tools/oracle/BEHAVIOR.md`.
+//! This module has no audio backend and no game dependencies.
 //!
 //! Line references point at `~/Descargas/fnf/Funkin/source/funkin/Conductor.hx`
 //! unless stated otherwise.
@@ -39,17 +37,15 @@ const DEFAULT_TIME_SIGNATURE_DEN: i32 = 4;
 /// `FlxMath.roundDecimal` (`FlxMath.hx:68-76`), exactly as the source defines it:
 /// `Math.fround(value * mult) / mult`, with `mult` built by repeated `* 10`.
 ///
-/// `Math.fround` rounds a double to the nearest single-precision float and
-/// widens it back to double; Rust's `as f32` followed by `as f64` performs the
-/// same round-to-nearest-even conversion. Only the intermediate product is f32:
-/// the input, the multiplier and the final division remain f64. `docs/M4-CONTRACT.md`
-/// §0 pins this definition for the conductor port.
+/// hxcpp's `include/hxMath.h:28` defines `Math.fround(x)` as `floor(x + 0.5)`:
+/// ties go toward positive infinity, including negative ties. Everything remains
+/// f64, including the integer-valued intermediate (no i32 or f32 conversion).
 fn round_decimal(value: f64, digits: i32) -> f64 {
     let mut multiplier = 1.0;
     for _ in 0..digits {
         multiplier *= 10.0;
     }
-    (value * multiplier) as f32 as f64 / multiplier
+    (value * multiplier + 0.5).floor() / multiplier
 }
 
 /// Mirrors `SongData.SongTimeChange` (aliased in `oxide-data`).
@@ -639,17 +635,21 @@ mod tests {
     use super::round_decimal;
 
     #[test]
-    fn round_decimal_uses_fround_precision_escape() {
-        // d = 6: 1.23456789 * 1e6 = 1234567.89 in f64. The nearest f32 is
-        // 1234567.875 (f32 spacing at that magnitude is 0.125), so the result
-        // is 1.234567875. Decimal `Math.round` would have produced 1.234568.
-        assert_eq!(round_decimal(1.23456789, 6), 1.234567875);
-
-        // d = 0 multiplies by 1.0; fround leaves exactly representable values
-        // (including the halves/tie cases) untouched.
-        assert_eq!(round_decimal(0.5, 0), 0.5);
-        assert_eq!(round_decimal(-0.5, 0), -0.5);
-        assert_eq!(round_decimal(2.5, 0), 2.5);
-        assert_eq!(round_decimal(1.0, 6), 1.0);
+    fn round_decimal_matches_observed_native_flxmath() {
+        // Same discriminating cases as tools/oracle/src/RoundCases.hx.
+        for (value, digits, expected) in [
+            (0.5, 0, 1.0),
+            (-0.5, 0, 0.0),
+            (2.5, 0, 3.0),
+            (-1.5, 0, -1.0),
+            (-1.6, 0, -2.0),
+            (1.23456789, 6, 1.234568),
+            (-1.23456789, 6, -1.234568),
+            (1.23445, 4, 1.2345),
+            (-1.23445, 4, -1.2344),
+            (2147483649.25, 0, 2147483649.0),
+        ] {
+            assert_eq!(round_decimal(value, digits), expected);
+        }
     }
 }

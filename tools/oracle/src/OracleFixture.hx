@@ -103,8 +103,8 @@ class OracleFixture {
    * It exercises negative pre-roll indexes, the 7/8 geometry and the
    * time-change segment accumulation without depending on the asset tree.
    */
-  public static function simulateSmoke():OracleSimulation {
-    var metadata:OracleMetadata = {
+  public static function smokeMetadata():OracleMetadata {
+    return {
       changes: [
         new OracleTimeChange(0.0, 120.0, 7, 8),
         new OracleTimeChange(1000.0, 150.0, 7, 8),
@@ -113,8 +113,10 @@ class OracleFixture {
       instrumentalOffset: 0.0,
       timeFormat: "ms"
     };
+  }
 
-    return simulate(metadata, 4000.0);
+  public static function simulateSmoke():OracleSimulation {
+    return simulate(smokeMetadata(), 4000.0);
   }
 
   public static function writeFile(path:String, lines:Array<String>):Void {

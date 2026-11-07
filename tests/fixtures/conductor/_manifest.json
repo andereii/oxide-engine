@@ -1,0 +1,1421 @@
+{
+  "schema": 1,
+  "reference": "model-only; utility probes documented in tools/oracle/BEHAVIOR.md",
+  "smoke": {
+    "fOff": 0,
+    "gOff": 0,
+    "iOff": 0,
+    "rows": 111,
+    "id": "_smoke",
+    "steps": 85,
+    "measures": 4,
+    "lengthMs": 4000,
+    "avOff": 0,
+    "beats": 22,
+    "timeChanges": [
+      {
+        "b": 0,
+        "d": 8,
+        "n": 7,
+        "t": 0,
+        "bpm": 120
+      },
+      {
+        "b": 0,
+        "d": 8,
+        "n": 7,
+        "t": 1000,
+        "bpm": 150
+      },
+      {
+        "b": 0,
+        "d": 8,
+        "n": 7,
+        "t": 2500,
+        "bpm": 90
+      }
+    ]
+  },
+  "simulation": "countdown-1ms-playback-1ms-v1",
+  "charts": [
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1941,
+      "id": "2hot-default",
+      "steps": 1477,
+      "measures": 94,
+      "lengthMs": 120000,
+      "avOff": 0,
+      "beats": 370,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 182
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1573,
+      "id": "blammed-default",
+      "steps": 1197,
+      "measures": 76,
+      "lengthMs": 106969.705,
+      "avOff": 0,
+      "beats": 300,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 165
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1620,
+      "id": "blammed-erect",
+      "steps": 1233,
+      "measures": 78,
+      "lengthMs": 106969.705,
+      "avOff": 0,
+      "beats": 309,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 170
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1573,
+      "id": "blammed-pico",
+      "steps": 1197,
+      "measures": 76,
+      "lengthMs": 106969.705,
+      "avOff": 0,
+      "beats": 300,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 165
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1959,
+      "id": "blazin-default",
+      "steps": 1492,
+      "measures": 94,
+      "lengthMs": 122666.667,
+      "avOff": 0,
+      "beats": 373,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 180
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 744,
+      "id": "bopeebo-default",
+      "steps": 565,
+      "measures": 37,
+      "lengthMs": 81600,
+      "avOff": 0,
+      "beats": 142,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 100
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 907,
+      "id": "bopeebo-erect",
+      "steps": 690,
+      "measures": 44,
+      "lengthMs": 81600,
+      "avOff": 0,
+      "beats": 173,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 123
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 744,
+      "id": "bopeebo-pico",
+      "steps": 565,
+      "measures": 37,
+      "lengthMs": 81600,
+      "avOff": 0,
+      "beats": 142,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 100
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1017,
+      "id": "cocoa-default",
+      "steps": 773,
+      "measures": 50,
+      "lengthMs": 112800,
+      "avOff": 0,
+      "beats": 194,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 100
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1746,
+      "id": "cocoa-erect",
+      "steps": 1329,
+      "measures": 84,
+      "lengthMs": 112800,
+      "avOff": 0,
+      "beats": 333,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 174
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1017,
+      "id": "cocoa-pico",
+      "steps": 773,
+      "measures": 50,
+      "lengthMs": 112800,
+      "avOff": 0,
+      "beats": 194,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 100
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1437,
+      "id": "dadbattle-default",
+      "steps": 1093,
+      "measures": 70,
+      "lengthMs": 89361.111,
+      "avOff": 0,
+      "beats": 274,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 180
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1513,
+      "id": "dadbattle-erect",
+      "steps": 1152,
+      "measures": 73,
+      "lengthMs": 89361.111,
+      "avOff": 0,
+      "beats": 288,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 190
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1437,
+      "id": "dadbattle-pico",
+      "steps": 1093,
+      "measures": 70,
+      "lengthMs": 89361.111,
+      "avOff": 0,
+      "beats": 274,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 180
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1749,
+      "id": "darnell-bf",
+      "steps": 1332,
+      "measures": 84,
+      "lengthMs": 126967.75,
+      "avOff": 0,
+      "beats": 333,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 155
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1749,
+      "id": "darnell-default",
+      "steps": 1332,
+      "measures": 84,
+      "lengthMs": 126967.75,
+      "avOff": 0,
+      "beats": 333,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 155
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1749,
+      "id": "darnell-erect",
+      "steps": 1332,
+      "measures": 84,
+      "lengthMs": 126967.75,
+      "avOff": 0,
+      "beats": 333,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 155
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1279,
+      "id": "eggnog-default",
+      "steps": 973,
+      "measures": 62,
+      "lengthMs": 95200,
+      "avOff": 0,
+      "beats": 244,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 150
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1195,
+      "id": "eggnog-erect",
+      "steps": 909,
+      "measures": 58,
+      "lengthMs": 95200,
+      "avOff": 0,
+      "beats": 228,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 140
+        },
+        {
+          "b": 284.6667,
+          "d": 4,
+          "n": 4,
+          "t": 122000,
+          "bpm": 80
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1279,
+      "id": "eggnog-pico",
+      "steps": 973,
+      "measures": 62,
+      "lengthMs": 95200,
+      "avOff": 0,
+      "beats": 244,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 150
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 912,
+      "id": "fresh-default",
+      "steps": 693,
+      "measures": 45,
+      "lengthMs": 84000,
+      "avOff": 0,
+      "beats": 174,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 120
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 948,
+      "id": "fresh-erect",
+      "steps": 721,
+      "measures": 46,
+      "lengthMs": 84000,
+      "avOff": 0,
+      "beats": 181,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 125
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 912,
+      "id": "fresh-pico",
+      "steps": 693,
+      "measures": 45,
+      "lengthMs": 84000,
+      "avOff": 0,
+      "beats": 174,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 120
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 2303,
+      "id": "guns-default",
+      "steps": 1753,
+      "measures": 111,
+      "lengthMs": 140472.971,
+      "avOff": 0,
+      "beats": 439,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 185
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 2303,
+      "id": "guns-pico",
+      "steps": 1753,
+      "measures": 111,
+      "lengthMs": 140472.971,
+      "avOff": 0,
+      "beats": 439,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 185
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1185,
+      "id": "high-default",
+      "steps": 901,
+      "measures": 58,
+      "lengthMs": 105664.989,
+      "avOff": 0,
+      "beats": 226,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 125
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1185,
+      "id": "high-erect",
+      "steps": 901,
+      "measures": 58,
+      "lengthMs": 105664.989,
+      "avOff": 0,
+      "beats": 226,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 125
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1791,
+      "id": "lit-up-bf",
+      "steps": 1364,
+      "measures": 86,
+      "lengthMs": 114545.458,
+      "avOff": 0,
+      "beats": 341,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 176
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1791,
+      "id": "lit-up-default",
+      "steps": 1364,
+      "measures": 86,
+      "lengthMs": 114545.458,
+      "avOff": 0,
+      "beats": 341,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 176
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1993,
+      "id": "milf-default",
+      "steps": 1517,
+      "measures": 96,
+      "lengthMs": 124736.1,
+      "avOff": 0,
+      "beats": 380,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 180
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1689,
+      "id": "monster-default",
+      "steps": 1285,
+      "measures": 82,
+      "lengthMs": 177679.138,
+      "avOff": 0,
+      "beats": 322,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 95
+        },
+        {
+          "b": 66.1358,
+          "d": 4,
+          "n": 4,
+          "t": 41770,
+          "bpm": 95
+        },
+        {
+          "b": 68.0437,
+          "d": 4,
+          "n": 4,
+          "t": 42975,
+          "bpm": 100
+        },
+        {
+          "b": 70.052,
+          "d": 4,
+          "n": 4,
+          "t": 44180,
+          "bpm": 105
+        },
+        {
+          "b": 133.9795,
+          "d": 4,
+          "n": 4,
+          "t": 80710,
+          "bpm": 105
+        },
+        {
+          "b": 134.9858,
+          "d": 4,
+          "n": 4,
+          "t": 81285,
+          "bpm": 107.5
+        },
+        {
+          "b": 136.016,
+          "d": 4,
+          "n": 4,
+          "t": 81860,
+          "bpm": 110
+        },
+        {
+          "b": 136.0178,
+          "d": 4,
+          "n": 4,
+          "t": 81861,
+          "bpm": 95
+        },
+        {
+          "b": 192.0187,
+          "d": 4,
+          "n": 4,
+          "t": 117230,
+          "bpm": 132
+        },
+        {
+          "b": 224.0067,
+          "d": 4,
+          "n": 4,
+          "t": 131770,
+          "bpm": 132
+        },
+        {
+          "b": 225.7007,
+          "d": 4,
+          "n": 4,
+          "t": 132540,
+          "bpm": 119.5
+        },
+        {
+          "b": 227.2343,
+          "d": 4,
+          "n": 4,
+          "t": 133310,
+          "bpm": 107
+        },
+        {
+          "b": 227.2361,
+          "d": 4,
+          "n": 4,
+          "t": 133311,
+          "bpm": 132
+        },
+        {
+          "b": 228.2459,
+          "d": 4,
+          "n": 4,
+          "t": 133770,
+          "bpm": 120
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1531,
+      "id": "philly-nice-default",
+      "steps": 1165,
+      "measures": 74,
+      "lengthMs": 98058.027,
+      "avOff": 0,
+      "beats": 292,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 175
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1531,
+      "id": "philly-nice-erect",
+      "steps": 1165,
+      "measures": 74,
+      "lengthMs": 98058.027,
+      "avOff": 0,
+      "beats": 292,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 175
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1531,
+      "id": "philly-nice-pico",
+      "steps": 1165,
+      "measures": 74,
+      "lengthMs": 98058.027,
+      "avOff": 0,
+      "beats": 292,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 175
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1143,
+      "id": "pico-default",
+      "steps": 869,
+      "measures": 56,
+      "lengthMs": 84870.839,
+      "avOff": 0,
+      "beats": 218,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 150
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1232,
+      "id": "pico-erect",
+      "steps": 937,
+      "measures": 60,
+      "lengthMs": 84870.839,
+      "avOff": 0,
+      "beats": 235,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 162
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1143,
+      "id": "pico-pico",
+      "steps": 869,
+      "measures": 56,
+      "lengthMs": 84870.839,
+      "avOff": 0,
+      "beats": 218,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 150
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 996,
+      "id": "roses-default",
+      "steps": 757,
+      "measures": 49,
+      "lengthMs": 92000,
+      "avOff": 0,
+      "beats": 190,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 120
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1060,
+      "id": "roses-erect",
+      "steps": 806,
+      "measures": 52,
+      "lengthMs": 92000,
+      "avOff": 0,
+      "beats": 202,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 128
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 996,
+      "id": "roses-pico",
+      "steps": 757,
+      "measures": 49,
+      "lengthMs": 92000,
+      "avOff": 0,
+      "beats": 190,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 120
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 954,
+      "id": "satin-panties-default",
+      "steps": 725,
+      "measures": 47,
+      "lengthMs": 96079.546,
+      "avOff": 0,
+      "beats": 182,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 110
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1164,
+      "id": "satin-panties-erect",
+      "steps": 885,
+      "measures": 57,
+      "lengthMs": 96079.546,
+      "avOff": 0,
+      "beats": 222,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 135
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1266,
+      "id": "senpai-default",
+      "steps": 964,
+      "measures": 61,
+      "lengthMs": 98292.404,
+      "avOff": 0,
+      "beats": 241,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 144
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1387,
+      "id": "senpai-erect",
+      "steps": 1056,
+      "measures": 67,
+      "lengthMs": 98292.404,
+      "avOff": 0,
+      "beats": 264,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 158
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1266,
+      "id": "senpai-pico",
+      "steps": 964,
+      "measures": 61,
+      "lengthMs": 98292.404,
+      "avOff": 0,
+      "beats": 241,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 144
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1311,
+      "id": "south-default",
+      "steps": 997,
+      "measures": 64,
+      "lengthMs": 88791.655,
+      "avOff": 0,
+      "beats": 250,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 165
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1403,
+      "id": "south-erect",
+      "steps": 1068,
+      "measures": 68,
+      "lengthMs": 88791.655,
+      "avOff": 0,
+      "beats": 267,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 177
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1311,
+      "id": "south-pico",
+      "steps": 997,
+      "measures": 64,
+      "lengthMs": 88791.655,
+      "avOff": 0,
+      "beats": 250,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 165
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1722,
+      "id": "spaghetti-default",
+      "steps": 1311,
+      "measures": 83,
+      "lengthMs": 173586.531,
+      "avOff": 0,
+      "beats": 328,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 111.5
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1329,
+      "id": "spookeez-default",
+      "steps": 1012,
+      "measures": 64,
+      "lengthMs": 99166.621,
+      "avOff": 0,
+      "beats": 253,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 150
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1469,
+      "id": "spookeez-erect",
+      "steps": 1118,
+      "measures": 71,
+      "lengthMs": 99166.621,
+      "avOff": 0,
+      "beats": 280,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 166
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1329,
+      "id": "spookeez-pico",
+      "steps": 1012,
+      "measures": 64,
+      "lengthMs": 99166.621,
+      "avOff": 0,
+      "beats": 253,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 150
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1959,
+      "id": "stress-default",
+      "steps": 1492,
+      "measures": 94,
+      "lengthMs": 124009.167,
+      "avOff": 0,
+      "beats": 373,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 178
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1959,
+      "id": "stress-pico",
+      "steps": 1492,
+      "measures": 94,
+      "lengthMs": 124009.167,
+      "avOff": 0,
+      "beats": 373,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 178
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1749,
+      "id": "thorns-default",
+      "steps": 1332,
+      "measures": 84,
+      "lengthMs": 103578.957,
+      "avOff": 0,
+      "beats": 333,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 190
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1749,
+      "id": "thorns-erect",
+      "steps": 1332,
+      "measures": 84,
+      "lengthMs": 103578.957,
+      "avOff": 0,
+      "beats": 333,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 190
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 618,
+      "id": "tutorial-default",
+      "steps": 469,
+      "measures": 31,
+      "lengthMs": 67200,
+      "avOff": 0,
+      "beats": 118,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 100
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1240,
+      "id": "ugh-default",
+      "steps": 944,
+      "measures": 60,
+      "lengthMs": 86617.188,
+      "avOff": 0,
+      "beats": 236,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 160
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1317,
+      "id": "ugh-erect",
+      "steps": 1002,
+      "measures": 64,
+      "lengthMs": 86617.188,
+      "avOff": 0,
+      "beats": 251,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 170
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1240,
+      "id": "ugh-pico",
+      "steps": 944,
+      "measures": 60,
+      "lengthMs": 86617.188,
+      "avOff": 0,
+      "beats": 236,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 160
+        }
+      ]
+    },
+    {
+      "fOff": 0,
+      "gOff": 0,
+      "iOff": 0,
+      "rows": 1875,
+      "id": "winter-horrorland-default",
+      "steps": 1428,
+      "measures": 90,
+      "lengthMs": 132830.181,
+      "avOff": 0,
+      "beats": 357,
+      "timeChanges": [
+        {
+          "b": 0,
+          "d": 4,
+          "n": 4,
+          "t": 0,
+          "bpm": 159
+        }
+      ]
+    }
+  ]
+}

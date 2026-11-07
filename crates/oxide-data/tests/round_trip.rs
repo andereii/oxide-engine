@@ -835,23 +835,27 @@ fn animation_frame_indices_and_asset_path_round_trip() {
     assert_eq!(animation.render_type.as_deref(), Some("sparrow"));
 }
 
-const LIVE_ASSETS: &str = "/home/alex/Descargas/fnf/Funkin/assets";
-const LIVE_CHART: &str =
-    "/home/alex/Descargas/fnf/Funkin/assets/preload/data/songs/bopeebo/bopeebo-chart.json";
-const LIVE_SENPAI: &str =
-    "/home/alex/Descargas/fnf/Funkin/assets/preload/data/characters/senpai.json";
-const LIVE_PLAYER: &str = "/home/alex/Descargas/fnf/Funkin/assets/preload/data/players/bf.json";
+fn real_assets_root() -> PathBuf {
+    let root = PathBuf::from(
+        std::env::var_os("OXIDE_ASSETS_ROOT")
+            .filter(|value| !value.is_empty())
+            .expect("set OXIDE_ASSETS_ROOT to the reference assets directory"),
+    );
+    assert!(
+        root.is_dir(),
+        "OXIDE_ASSETS_ROOT must point to an existing assets directory: {}",
+        root.display()
+    );
+    root
+}
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_bopeebo_chart_smoke() {
-    if !Path::new(LIVE_CHART).exists() {
-        eprintln!("skipping real_bopeebo_chart_smoke: {LIVE_CHART} does not exist");
-        return;
-    }
-
-    let bytes = std::fs::read(LIVE_CHART).expect("live bopeebo chart should be readable");
-    let document =
-        parse_file(Path::new(LIVE_CHART), &bytes).expect("live bopeebo chart should parse");
+    let path = real_assets_root().join("preload/data/songs/bopeebo/bopeebo-chart.json");
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let document = parse_file(&path, &bytes).expect("live bopeebo chart should parse");
     assert_eq!(document.kind, DataKind::Chart);
 
     let Typed::Chart(chart) = document.typed else {
@@ -865,15 +869,12 @@ fn real_bopeebo_chart_smoke() {
 }
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_senpai_character_smoke() {
-    if !Path::new(LIVE_SENPAI).exists() {
-        eprintln!("skipping real_senpai_character_smoke: {LIVE_SENPAI} does not exist");
-        return;
-    }
-
-    let bytes = std::fs::read(LIVE_SENPAI).expect("live senpai character should be readable");
-    let document =
-        parse_file(Path::new(LIVE_SENPAI), &bytes).expect("live senpai character should parse");
+    let path = real_assets_root().join("preload/data/characters/senpai.json");
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let document = parse_file(&path, &bytes).expect("live senpai character should parse");
     assert_eq!(document.kind, DataKind::Character);
 
     let Typed::Character(character) = document.typed else {
@@ -887,17 +888,13 @@ fn real_senpai_character_smoke() {
 }
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_bf_player_round_trip_via_parse_file() {
-    if !Path::new(LIVE_PLAYER).exists() {
-        eprintln!(
-            "skipping real_bf_player_round_trip_via_parse_file: {LIVE_PLAYER} does not exist"
-        );
-        return;
-    }
-
-    let bytes = std::fs::read(LIVE_PLAYER).expect("live bf player should be readable");
+    let path = real_assets_root().join("preload/data/players/bf.json");
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     let source = std::str::from_utf8(&bytes).expect("live bf player should be UTF-8");
-    let document = parse_file(Path::new(LIVE_PLAYER), &bytes).expect("live bf player should parse");
+    let document = parse_file(&path, &bytes).expect("live bf player should parse");
     assert_eq!(document.kind, DataKind::Player);
     assert_round_trip(&document, source);
 
@@ -918,12 +915,9 @@ fn real_bf_player_round_trip_via_parse_file() {
 }
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_assets_smoke_via_parse_file() {
-    let root = Path::new(LIVE_ASSETS);
-    if !root.exists() {
-        eprintln!("skipping real_assets_smoke_via_parse_file: {LIVE_ASSETS} does not exist");
-        return;
-    }
+    let root = real_assets_root();
 
     let cases = [
         (
@@ -943,11 +937,8 @@ fn real_assets_smoke_via_parse_file() {
 
     for (relative, expected) in cases {
         let path = root.join(relative);
-        if !path.exists() {
-            eprintln!("skipping missing real asset: {}", path.display());
-            continue;
-        }
-        let bytes = std::fs::read(&path).expect("real asset should be readable");
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
         let document = parse_file(&path, &bytes)
             .unwrap_or_else(|error| panic!("{}: {error:?}", path.display()));
         assert_eq!(document.kind, expected, "path: {}", path.display());
@@ -969,12 +960,15 @@ fn kind_label(kind: DataKind) -> &'static str {
 }
 
 fn collect_json_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("read directory {}: {error}", dir.display()));
+    for entry in entries {
+        let entry =
+            entry.unwrap_or_else(|error| panic!("read entry in {}: {error}", dir.display()));
         let path = entry.path();
-        if path.is_dir() {
+        let metadata = std::fs::metadata(&path)
+            .unwrap_or_else(|error| panic!("inspect {}: {error}", path.display()));
+        if metadata.is_dir() {
             collect_json_files(&path, out);
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
             out.push(path);
@@ -983,17 +977,11 @@ fn collect_json_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
 fn real_assets_all_round_trip_via_parse_file() {
-    let root = Path::new(LIVE_ASSETS);
-    if !root.exists() {
-        eprintln!(
-            "skipping real_assets_all_round_trip_via_parse_file: {LIVE_ASSETS} does not exist"
-        );
-        return;
-    }
-
+    let root = real_assets_root();
     let mut files = Vec::new();
-    collect_json_files(root, &mut files);
+    collect_json_files(&root, &mut files);
     files.sort();
     assert_eq!(files.len(), 432, "unexpected real asset JSON count");
 
@@ -1001,13 +989,8 @@ fn real_assets_all_round_trip_via_parse_file() {
     let mut failures = Vec::new();
 
     for path in &files {
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                failures.push(format!("{}: read error: {error}", path.display()));
-                continue;
-            }
-        };
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
         let source = match std::str::from_utf8(&bytes) {
             Ok(source) => source,
             Err(error) => {

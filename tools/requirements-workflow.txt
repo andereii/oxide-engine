@@ -1,0 +1,2 @@
+# Existing optional static-lint dependency; not a game/runtime dependency.
+PyYAML==6.0.3

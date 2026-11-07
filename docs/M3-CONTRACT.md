@@ -1,6 +1,8 @@
 # M3 contract — offline media packer (`oxide-media`, `oxide pack`, `assets.pak`)
 
-Frozen for milestone M3. Binding rules: PLAN-ES.md §7.1–§7.7 + the orchestrator brief.
+M3 contract, amended under ADR-0013 for coverage/strict tool prerequisites. Product
+scope is `GOAL.md`; active execution policy is `WORKFLOW.md`. Historical media recipes
+remain the reference; no numeric tolerance is weakened.
 Build-time only: nothing here runs at game runtime; ffmpeg/ffprobe are EXTERNAL
 binaries spawned by the tools, never linked and never spawned by
 oxide-game/oxide-audio/oxide-input (ADR-0011). No runtime decoding, no asset loading,
@@ -202,9 +204,11 @@ wanted (the full run is expensive; the structural property is the same code path
   its source's own.
 - `files_grew`: per source file cross-checked against its dist artefact (converted or
   copy). Copies are byte-compared (hash equality), converted must be strictly smaller.
-- Coverage floor: every CONVERTED artefact must have its check performed (duration /
-  pixel / ssim) — a conversion without a check fails the gate (`unverified > 0` is
-  non-zero exit), so an empty or mis-pointed `--in` cannot pass silently.
+- Coverage floor: every converted artifact must have its check performed (duration /
+  pixel / SSIM); missing checks fail. The source plan must contain runtime content,
+  not just skipped/excluded files. `--corpus` additionally checks the official measured
+  inventory before conversion/output changes; arbitrary mods do not inherit its counts.
+  Zero conversions alone do not establish coverage of conversion behavior.
 
 ## 4. Fixtures (orchestrator-owned, committed)
 
@@ -214,8 +218,12 @@ hand-built PNG), `songs/testsong/Inst.ogg` + `Voices-bf.ogg` (1 s ffmpeg-made),
 copy-on-target), `videos/tiny.mp4` (0.5 s 64×64 h264), `videos/boyfriendEverywhere.mp4`
 (Stub name to prove the exclusion list exactness), `fonts/micro.ttf` (copied from the
 smallest real font), `script/module.hxc`; plus one `.fla` stub to prove Skip counting.
-Unit/integration tests over this fixture are ffmpeg-guarded (`--check-tools`): they
-skip with a notice when ffmpeg/ffprobe are absent.
+The fixture now additionally contains a seeded synthetic high-bitrate instrumental
+and voice pair under `songs/synthetic/`, while all four low-bitrate copy cases remain.
+See `../tests/fixtures/media/README.md` for exact recipes/provenance. Acceptance requires
+2 audio conversions, 2 duration checks and 2 alignment checks, not a vacuous `0/0`.
+External-tool tests are explicitly ignored in portable runs; milestone acceptance runs
+`--include-ignored` and missing ffmpeg/ffprobe is then a failure, not a passing return.
 
 ## 5. Deliberate deferrals
 

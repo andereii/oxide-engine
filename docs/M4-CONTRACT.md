@@ -1,7 +1,9 @@
 # M4 contract — clock, input, conductor + Haxe oracle tooling
 
-Frozen for milestone M4. This is the invariant-heavy milestone: the Haxe oracle
-fixtures are the acceptance criterion, not unit tests alone. Units: milliseconds,
+M4 contract, amended under human-approved ADR-0013/0014. The source-informed Haxe
+model fixtures are one regression criterion, not independent full-game acceptance.
+Native-game traces, input/replay/jitter and platform evidence remain required; see
+`WORKFLOW.md` and `../tools/oracle/BEHAVIOR.md` for the evidence boundary. Units: milliseconds,
 held as Haxe `Float` semantics — in Rust this means **f64 everywhere** (never f32;
 Haxe `Float` is IEEE double and the roundDecimal(…,6)/(…,4) rounding only
 reproduces in f64). No rendering, no gameplay/notes, no video, no runtime decode in
@@ -39,12 +41,13 @@ the runtime decoder work starts, M5+; this milestone uses symphonia behind
      stepLengthMs, 4)`.
   6. `currentStep/Beat/Measure = floor(…Time)`; dispatch onStep/Beat/MeasureHit iff
      the integer CHANGED (L490-503).
-- AMENDED 2026-11-05 (implementer discovery, parity with the installed runtime):
-  `FlxMath.roundDecimal` in the shipped HaxeFlixel (`.haxelib/flixel/git/flixel/math/
-  FlxMath.hx:68-76`) is `Math.fround(value * mult) / mult` — a **f32 rounding escape**
-  — not `Math.round`. The oracle and the Rust port replicate fround EXACTLY (everything
-  else stays f64; this is the one place the game leaves f64). At the gate tolerance
-  (1 ms) the difference from half-away rounding is invisible, but parity is parity.
+- CORRECTED 2026-11-05 (ADR-0014, observed native utility execution):
+  `FlxMath.roundDecimal` is `Math.fround(value * mult) / mult`. Native hxcpp
+  `fround(x)` returns the floating-point integer `floor(x + 0.5)`, NOT binary32.
+  Everything remains binary64. The real installed FlxMath method was compiled and
+  executed for discriminating positive/negative/precision/large-number cases; see
+  `../tools/oracle/rounding-probe.txt` and `provenance.json`. Negative halves round
+  toward positive infinity. Utility parity does not prove full Conductor parity.
 - `mapTimeChanges` (L549-600): sort by `timeStamp` ascending (SongDataUtils
   L267-275, `FlxSort.ASCENDING` of `a.timeStamp` values); negative `timeStamp`
   clamped to 0 with `beatTime = 0`; for `timeStamp > 0`:
@@ -62,8 +65,8 @@ the runtime decoder work starts, M5+; this milestone uses symphonia behind
     `music.playing = true`, `music.length` = decoded instrumental duration (probed
     with ffprobe). The Rust replay must reach identical junctions.
 
-Corpus: 61 chart files under `assets/songs/<id>/<id>-chart[-<variation>].json`
-(siblings `<id>-metadata.json`). Chart files carry per-difficulty notes for ONE
+Corpus: 61 chart files under `assets/preload/data/songs/<id>/<id>-chart[-<variation>].json`
+(siblings `<id>-metadata[-<variation>].json`); audio is under `assets/songs/<id>/`. Chart files carry per-difficulty notes for ONE
 variation; the conductor timeline depends only on the metadata `timeChanges` of that
 variation + `offsets` (verbatim JSON shapes, consumed through `oxide-data` on the
 Rust side; ADR-0003 keeps `offsets` untyped).
@@ -85,14 +88,13 @@ tools/oracle/
 
 Rules of the oracle:
 
-- `OracleConductor` transcribes **verbatim** Conductor math with a citation comment
-  per method (`// funkin/Conductor.hx:L176-182` style), including roundDecimal
-  semantics (`FlxMath.roundDecimal = Math.round(value*10^d)/10^d`, clamping f64).
+- `OracleConductor` is a source-informed transcription with citations, not direct
+  execution of the game's Conductor. Keep observed utility behavior, derived math
+  and model assumptions separate; native-game traces must validate the broader model.
 - It must NOT modify the game repo (never write inside `~/Descargas/fnf/Funkin`).
-- AMENDED 2026-11-05: rounding in the runner is f32-escape `Math.fround(v * mult) /`
-  `mult` (see §0; on Neko the stdlib `math_fround` is absent, so `OracleConductor.fround`
-  uses the IEEE binary32 Bytes round-trip — same round-to-nearest-even conversion the
-  hxcpp build gets).
+- CORRECTED 2026-11-05: the Neko model explicitly uses binary64
+  `Math.ffloor(value * mult + 0.5) / mult`, matching the observed native utility.
+  Do not use an Int-overflowing fallback or binary32 conversion.
 - Fixture format (JSON Lines, one file per chart file):
   `tests/fixtures/conductor/<chart-id>.jsonl`; `<chart-id>` = song dir + chart file
   suffix, e.g. `bopeebo-default-easy.jsonl`... determinism: EXACTLY one timeline per
@@ -128,7 +130,7 @@ real `Conductor.hx` at review time.
 ## 2. `crates/oxide-audio` — Kira clock + conductor semantics
 
 New dependencies (each an ADR line in the implementation brief):
-- `kira` (latest 0.10.x stable; pure Rust audio backend; ADR + licence + build cost).
+- `kira` 0.12.6 with default features disabled (ADR-0012); opt-in real audio remains separate.
 - `symphonia` 0.6/0.7 (pure Rust decoders: vorbis now, opus NOT available — runtime
   decode gate stays behind a test-only path this milestone; the CLOCK does not need a
   decoder: songs are simulated clocks).
@@ -251,17 +253,19 @@ between kernel timestamp and audio-time read is the jitter measurement).
 ## 4. Gates (xtask-owned once crates exist)
 
 - `cargo xtask fixtures-conductor`:
-  Runs `tools/oracle` (if fixtures are missing: regenerate them with the committed
-  tool; the fixtures themselves are committed and must match BYTE-IDENTICAL the
-  regenerated output → snapshot determinism asserted by the xtask test) then, for
-  each `tests/fixtures/conductor/*.jsonl`: replays the fixture's simulation through
+  Never invokes the generator or repairs missing expectations. Requires the committed
+  manifest, exact 61-chart catalog and separate smoke case; replays every simulation
+  update (including silent updates) rather than only the emitted rows. For each
+  `tests/fixtures/conductor/*.jsonl`, replays the recorded model simulation through
   OUR `oxide_audio::conductor::Conductor` using the fixture's inputs (per update: the
   recorded `input`, `music_playing`, `music_len_ms`), and checks:
   - identical step/beat/measure COUNTS per type and identical boundary index lists;
   - for every matched row: `|our.songPosition − oracle.songPosition| <= 1 ms` (the
     printed `worst delta`), plus `tsNum/tsDen` equality and `beatLen`/`stepLen`
     within 1e-6 relative;
-  - exit 0 iff ALL 61 charts pass. Print (frozen block):
+  - exit 0 iff ALL 61 charts and the separately counted smoke case pass. Output must
+    explicitly state model-only parity and pending native-game/input/replay/jitter work.
+    The core chart summary retains:
     ```
     charts: 61
     ok: 61  failed: 0

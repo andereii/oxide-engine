@@ -291,7 +291,10 @@ The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A fo
   packer ok 0 failed 0 (none in assets; fixtures cover parser)
   animate ok 88 failed 0 sprites 6071
   ```
-  Exit non-zero on ANY atlas/animate failure. Broken-XML fixture
+  Under ADR-0013, exit non-zero on ANY atlas/Packer/Animate failure, unreadable input
+  or traversal error; reject empty inputs. `--corpus` additionally requires the measured
+  266/205/61/88 inventory. Generic mod validation does not impose those totals.
+  Broken-XML fixture
   `tests/fixtures/atlas/broken/numeric-garbage.xml` must make the tool exit 1 (xtask test).
 - **Gate B** unit+integration tests in `oxide-font` (run under `cargo xtask test`):
   glyph counts for the three real Sparrow fonts are NOT in fixtures (real assets dir, do
@@ -303,7 +306,8 @@ The 61 non-atlas XML disposition is part of the gate, not the VFS: see gate A fo
   each `\n` starts a new line; reported width = max over lines, here line 1 "A"=45 > "B"=38),
   missing glyph zero-width; `measure("AA\nA")=(90,118)` discriminates widest-line from
   last-line accumulation (the last-line value would be 45).
-  Real-font checks (guarded by assets-dir presence): default=99 glyph prefixes,
+  Real-font checks (explicitly ignored in portable runs; strict when included with
+  `OXIDE_ASSETS_ROOT`, missing assets fail): default=99 glyph prefixes,
   max height 70; bold=63 / 77; freeplay-clear=10 / 24; case: default=Both,
   bold=Upper, freeplay-clear=Both; oracle quirk kept verbatim: `glyph_prefix('&') =
   "-andpersand-"` which does NOT exist in default.xml (only raw `&0000` frames exist),
