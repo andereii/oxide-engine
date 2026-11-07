@@ -6,3 +6,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
+oxide-data = { path = "../oxide-data" }
+oxide-vfs = { path = "../oxide-vfs" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

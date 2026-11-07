@@ -553,8 +553,8 @@ the ledger commit that follows this block.
   slice (no Rust gameplay implementation in this phase; acceptance gates for
   the slice's observables stay explicit and pending).
 - Ledger commit C4 80364be records the three build commits' hashes; the M5
-  contract freeze outputs (docs/M5-CONTRACT.md + M5 catalogue pendings +
-  this ledger entry) commit next as C5.
+  contract freeze landed as C5 d0526be (docs/M5-CONTRACT.md + the M5 gate
+  pendings in xtask/src/verify.rs + this ledger entry).
 
 ## 2026-11-06 — M5 phase 1: bopeebo/mainStage vertical-slice contract freeze
 
@@ -601,3 +601,49 @@ the ledger commit that follows this block.
   checkout remain source-informed observations (independent full-game
   verification stays unfinished); the LLM review was read-only (its findings
   not independently re-executed as code paths).
+
+## 2026-11-06 — M5 phase 2a: oxide-game slice sim + gameplay_sim_bopeebo gate wired
+
+- Objective (in-scope continuation of the frozen M5 contract; no human approval
+  required): implement `crates/oxide-game` `slice` (§3 boundary, currently
+  compiled) and wire the `gameplay_sim_bopeebo` xtask gate (§2 normative
+  schema). Two `@oxide-impl-rust` workers ran sequentially (non-overlapping:
+  `crates/oxide-game/`, then `xtask/`); orchestrator owned Cargo.lock.
+- Deliverable 1 — `oxide_game::slice` (923-line module + 19 unit tests + 1
+  golden integration test): PBOT1 scoring/judgement with Std.int truncation,
+  health/combo/tallies in absolute units, 1 ms grid `step` honoring the frozen
+  per-frame order (clamp+death at start → processInputQueue → processNotes),
+  160/161 full-path odd-but-true behavior, ghost/hold/drop semantics, VFS +
+  oxide-data read path, fail-closed build errors, serde §2 field order,
+  two-run byte-stability golden (synthetic fixture, CRLF-safe compare).
+- Deliverable 2 — `cargo xtask gameplay-sim --assets DIR`:
+  provenance-verified bopeebo chart+metadata (sha256 fail-closed), M4 stream
+  recipe (press ceil(t), release ceil(t+l)), 1:1 InputEvent conversion,
+  scripted negative phase on the REAL corpus (threshold edges 45/46/90/91/135/
+  136 + 110-late + 160/161 full path incl. tallies/combo_max, ghost press,
+  exact-160 boundary drop (remaining_ms bitwise == 160.0, mandatory),
+  remaining>160 big drop, full-hold tick rates 0.00012/0.25), jsonl traces in
+  target/gameplay-sim/ (never committed), two-run sha256 equality per
+  difficulty, honesty labels printed; catalogue moved pending→executable
+  (milestone 5, BASELINE deps, 600 s, assets required/fail-closed).
+- Evidence: `cargo xtask verify --profile quick` exit 0 (workspace; report
+  target/verify.json; quick = NOT milestone acceptance). Per-worker queue runs
+  `cargo test -p oxide-game` (19+1 pass) / `cargo test -p xtask` (42+integration
+  suites pass), clippy −D warnings and fmt --check exit 0 each crate. Real
+  corpus gate run (assets /home/alex/Descargas/fnf/Funkin/assets) exit 0: easy
+  19004 events `63f3e1c9…f3ca`, normal `c8b9466e…0968`, hard `e082738e…45a4c`
+  (two-run digests matched; boundary remaining exactly 160.0 on all three).
+- Reviews: `@oxide-reviewer` round 1 on the crate applied 6 findings (fmt one
+  refuted by re-run; terminal-dead-state state fix is the substantive one);
+  round 2 approved crate with 2 low test-strength comments (orchestrator
+  applied: remainder-tick-before-hold_end order pin; dead-state fixture with
+  sustain + detecting-tick press). Gate review round 1: 2 majors (full §2
+  threshold set incl. tallies/combo_max/tick rates; exact-160 boundary
+  mandatory, soft fallback removed) fixed and re-approved (zero findings).
+- Scope audit: `tools/workflow.py scope` vs pre-batch baseline: 14 paths, 0
+  violations (crates/oxide-game/ + xtask/ + mechanical Cargo.lock edges only).
+- Recorded engine decisions in docs/DECISIONS.md (terminal game-over state,
+  exact-160 mandatory boundary, trace-artifact conventions). Honesty: all of
+  this is deterministic sim of the frozen rule set over a synthesized stream —
+  NOT native-game parity; `native_note_reference` (human approval required),
+  `render_diff`, `perf_budget` remain pending and M5 acceptance stays blocked.

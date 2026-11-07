@@ -33,11 +33,11 @@ use oxide_data::chart::Chart;
 
 /// Freeze the corpus provenance (chart paths + measured input asset hashes);
 /// the gate never rebuilds or regenerates reference material.
-const PROVENANCE_JSON: &str = include_str!("../../tools/oracle/provenance.json");
+pub(crate) const PROVENANCE_JSON: &str = include_str!("../../tools/oracle/provenance.json");
 /// Per-hit placeholder for `score`; real rating windows are the M5 port's
 /// deliverable and are not invented here.
 const PLACEHOLDER_SCORE_PER_HIT: i64 = 350;
-const INPUT_SOURCE: &str = "synthesized from chart (no human replay yet)";
+pub(crate) const INPUT_SOURCE: &str = "synthesized from chart (no human replay yet)";
 
 /// Errors for the gate: usage/prerequisite problems exit 2, real failures exit 1.
 #[derive(Debug, PartialEq)]
@@ -437,7 +437,9 @@ pub fn resolve_chart_path<'m>(
 
 /// Extract the chart-count inventory, keeping the exact string values of the
 /// frozen provenance; no fields are added or dropped beyond what the gate uses.
-fn inventory_map(root: &serde_json::Value) -> Result<BTreeMap<String, String>, ReplayError> {
+pub(crate) fn inventory_map(
+    root: &serde_json::Value,
+) -> Result<BTreeMap<String, String>, ReplayError> {
     let object = root
         .as_object()
         .ok_or_else(|| ReplayError("embedded provenance.json is not an object".into()))?;

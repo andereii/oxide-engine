@@ -61,6 +61,7 @@ enum Action {
     Conductor,
     ConductorNative,
     ReplayCorpus,
+    GameplaySim,
     InputJitter,
     ExternalCi,
     Pending,
@@ -292,11 +293,15 @@ const GATES: &[Gate] = &[
         5,
         "Vertical-slice performance-budget acceptance.",
     ),
-    pending(
-        "gameplay_sim_bopeebo",
-        5,
-        "Deterministic bopeebo-slice gameplay trace per docs/M5-CONTRACT.md (schema '1', sha256 two-run stability); not a native-game parity claim.",
-    ),
+    Gate {
+        id: "gameplay_sim_bopeebo",
+        milestone: 5,
+        coverage: "Deterministic bopeebo-slice (easy/normal/hard) gameplay trace per docs/M5-CONTRACT.md §2 (schema '1'): input source 'synthesized from chart (no human replay yet)' plus the scripted negative phase (threshold edges 45/46/90/91/135/136, 110-late, 160/161 full path incl. tallies/combo_max, ghost, exact-160 boundary drop, remaining>160 big drop, full-hold tick rates, two-run sha256); per-difficulty trace jsonl with two-run sha256 equality (digests printed). NOT native-game parity; native_note_reference and render_diff/perf_budget remain pending.",
+        action: Action::GameplaySim,
+        dependencies: BASELINE,
+        timeout_secs: 600,
+        ignored_tests: "not_applicable",
+    },
     pending(
         "native_note_reference",
         5,
@@ -1274,6 +1279,14 @@ fn gate_command(gate: &Gate, options: &Options, root: &Path, executable: &Path) 
             }
             command
         }
+        Action::GameplaySim => {
+            let mut command = Command::new(executable);
+            command.arg("gameplay-sim");
+            if let Some(assets) = &options.assets {
+                command.arg("--assets").arg(assets);
+            }
+            command
+        }
         Action::InputJitter => {
             let mut command = Command::new(executable);
             command.arg("input-jitter");
@@ -1443,7 +1456,11 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             }
             if matches!(
                 gate.action,
-                Action::Corpus(_) | Action::AssetTests(_, _) | Action::Media | Action::ReplayCorpus
+                Action::Corpus(_)
+                    | Action::AssetTests(_, _)
+                    | Action::Media
+                    | Action::ReplayCorpus
+                    | Action::GameplaySim
             ) {
                 match &options.assets {
                     None => prerequisite_errors.push("explicit --assets DIR is required; no implicit home-specific corpus is accepted".into()),
@@ -2023,6 +2040,7 @@ mod tests {
             "media_mini_xtask",
             "media_synthetic_delay",
             "conductor",
+            "gameplay_sim_bopeebo",
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
             assert_eq!(gate.dependencies, BASELINE, "{id}");
@@ -2122,6 +2140,8 @@ mod tests {
         }
         for (id, milestone, expected_action) in [
             ("conductor_native_reference", 4, "executable"),
+            ("gameplay_sim_bopeebo", 5, "executable"),
+            ("native_note_reference", 5, "pending"),
             ("fuzz_parsers", 9, "pending"),
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
@@ -2133,6 +2153,27 @@ mod tests {
                 ),
                 _ => assert!(matches!(gate.action, Action::Pending), "{id}"),
             }
+        }
+        let gameplay = GATES
+            .iter()
+            .find(|gate| gate.id == "gameplay_sim_bopeebo")
+            .unwrap();
+        assert!(matches!(gameplay.action, Action::GameplaySim));
+        assert_eq!(gameplay.timeout_secs, 600);
+        assert_eq!(gameplay.ignored_tests, "not_applicable");
+        for required in [
+            "synthesized from chart (no human replay yet)",
+            "scripted negative phase",
+            "two-run sha256 equality",
+            "NOT native-game parity",
+            "native_note_reference",
+            "render_diff/perf_budget",
+        ] {
+            assert!(
+                gameplay.coverage.contains(required),
+                "coverage is missing {required:?}: {}",
+                gameplay.coverage
+            );
         }
     }
 
@@ -2168,6 +2209,13 @@ mod tests {
             }
             if matches!(gate.action, Action::Corpus(_) | Action::Media) {
                 assert!(args.iter().any(|arg| arg == "--corpus"), "{}", gate.id);
+            }
+            if matches!(gate.action, Action::GameplaySim) {
+                assert!(
+                    args.iter().any(|arg| arg == "--assets"),
+                    "{} must consume the explicit --assets directory",
+                    gate.id
+                );
             }
         }
     }

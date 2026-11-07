@@ -9,6 +9,7 @@ publish = false
 oxide-audio = { path = "../crates/oxide-audio" }
 oxide-atlas = { path = "../crates/oxide-atlas" }
 oxide-data = { path = "../crates/oxide-data" }
+oxide-game = { path = "../crates/oxide-game" }
 oxide-input = { path = "../crates/oxide-input" }
 oxide-media = { path = "../crates/oxide-media" }
 serde = { workspace = true }

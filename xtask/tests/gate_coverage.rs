@@ -239,6 +239,42 @@ fn media_corpus_inventory_fails_before_conversion_or_output() {
     }
 }
 
+#[test]
+fn gameplay_sim_fails_closed_without_explicit_assets() {
+    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .arg("gameplay-sim")
+        .env_remove("OXIDE_ASSETS_ROOT")
+        .output()
+        .expect("spawn xtask");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("missing --assets <dir> or OXIDE_ASSETS_ROOT"),
+        "{stderr}"
+    );
+
+    let missing = std::env::temp_dir().join(format!(
+        "xtask-gameplay-sim-missing-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .args(["gameplay-sim", "--assets"])
+        .arg(&missing)
+        .env_remove("OXIDE_ASSETS_ROOT")
+        .output()
+        .expect("spawn xtask");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("prerequisite: assets directory is missing or not a directory"),
+        "{stderr}"
+    );
+}
+
 fn write_empty_asset(root: &Path, relative: &str) {
     let path = root.join(relative);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

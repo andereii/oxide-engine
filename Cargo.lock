@@ -742,6 +742,13 @@ dependencies = [
 [[package]]
 name = "oxide-game"
 version = "0.1.0"
+dependencies = [
+ "oxide-data",
+ "oxide-vfs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "oxide-input"
@@ -1323,6 +1330,7 @@ dependencies = [
  "oxide-atlas",
  "oxide-audio",
  "oxide-data",
+ "oxide-game",
  "oxide-input",
  "oxide-media",
  "serde",

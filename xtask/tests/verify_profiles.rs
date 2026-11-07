@@ -214,6 +214,7 @@ fn invalid_release_options_still_list_all_pending_obligations() {
     let mut not_implemented = [
         "render_diff",
         "perf_budget",
+        "native_note_reference",
         "full_chart_gameplay",
         "ui_save_e2e",
         "ruby_mods",
@@ -223,17 +224,6 @@ fn invalid_release_options_still_list_all_pending_obligations() {
         "fuzz_parsers",
     ];
     not_implemented.sort_unstable();
-    let not_implemented = [
-        "render_diff",
-        "perf_budget",
-        "full_chart_gameplay",
-        "ui_save_e2e",
-        "ruby_mods",
-        "release_binaries",
-        "release_size",
-        "reproducibility",
-        "fuzz_parsers",
-    ];
     for id in not_implemented {
         let gate = gates
             .iter()
@@ -241,10 +231,15 @@ fn invalid_release_options_still_list_all_pending_obligations() {
             .expect("required pending gate");
         assert_eq!(gate["status"], "not_implemented", "{id}");
     }
-    // The three wired M4 obligations must not be `not_implemented` anymore:
-    // they are executable, fail-closed gates. With unmet invocation-level
+    // The wired M4/M5 obligations must not be `not_implemented` anymore: they
+    // are executable, fail-closed gates. With unmet invocation-level
     // preconditions they report blocked (never a pass) with diagnostics.
-    for id in ["conductor_native_reference", "replay", "input_jitter"] {
+    for id in [
+        "conductor_native_reference",
+        "replay",
+        "input_jitter",
+        "gameplay_sim_bopeebo",
+    ] {
         let gate = gates
             .iter()
             .find(|gate| gate["id"] == id)

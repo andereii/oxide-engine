@@ -397,3 +397,43 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   and the corpus 61-chart count check). The visible clamp divergence between
   the installed FloatTools and the contract §0 reading is recorded here and in
   BEHAVIOR.md with the note that the corpus cannot discriminate it.
+
+## ADR-0018 — M5 slice sim terminal game-over + gate trace conventions
+
+- **Context / date:** 2026-11-06, M5 phase 2a implementing the frozen
+  `docs/M5-CONTRACT.md`. The contract freezes the game-over transition up to
+  the GameOverSubState boundary (§1.4) but does not define the sim's behavior
+  AFTER a death; the first implementation silently continued processing
+  inputs/notes after `game_over` (review finding).
+- **Decision (engine decision, not observed):** death is terminal for the
+  phase-1 sim. The step that detects it (clamp → death check at step start)
+  emits exactly one `game_over` (death_count++, songScore = 0.0, health =
+  1.0 per moveToGameOver), clears active holds WITH no hold bookkeeping
+  events, returns without processing inputs/notes; every later `step` returns
+  an empty Vec. No retry/reset InputEvent exists in the phase-1 schema; a
+  restart flow would be a new phase-2 input/trace boundary, not a silent
+  state behavior.
+- **Gate trace conventions (engine decisions; contract §2 silent):** scripted
+  negative-phase targets are the first lane-collision-free qualifying notes in
+  chart order, fail-closed if none; the sustain release uses `ceil(t + l)` on
+  the 1 ms grid (M4 presses already `ceil(t)`); the exact-160 boundary drop is
+  MANDATORY (release `ceil(t + l − 160)`, bitwise `remaining_ms == 160.0`,
+  else the gate fails — the `(0,160]` fallback a reviewer caught is removed);
+  the six threshold edges 45/46/90/91/135/136, the 110-late, the 160/161 full
+  path with tallies/`combo_max` assertions, the ghost press and the full-hold
+  tick rates (0.00012 health / 0.25 score per 1 ms tick) are embedded
+  fail-closed gate checks, not recommendations.
+- **Evidence provenance:** all gameplay semantics are the frozen contract's
+  observed/derived readings of the native source; the decisions above are
+  model assumptions. The gate proves deterministic two-run sha256 stability
+  over the REAL bopeebo chart data by re-executing the whole pipeline twice,
+  but proves NO native-game parity: `native_note_reference` (human
+  ADR-0014-style approval), `render_diff` and `perf_budget` remain pending
+  and M5 acceptance stays blocked with them.
+- **Consequences:** the `oxide_game::slice` API (§3) and the `gameplay_sim_
+  bopeebo` gate are compiled; the sim trace jsonl is written only under
+  `target/` and no trace golden is committed (digests are printed at gate
+  time; a committed trace golden would be its own expectation-freeze decision).
+- **Revisit when:** native note reference evidence arrives, a real human/
+  device input stream becomes available, or the phase-2 terminal-state
+  (Game Over flow / retry) input schema is designed.
