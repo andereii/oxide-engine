@@ -552,3 +552,52 @@ the ledger commit that follows this block.
   `docs/M5-CONTRACT.md` for the bopeebo + mainStage + bf/dad/gf vertical
   slice (no Rust gameplay implementation in this phase; acceptance gates for
   the slice's observables stay explicit and pending).
+- Ledger commit C4 80364be records the three build commits' hashes; the M5
+  contract freeze outputs (docs/M5-CONTRACT.md + M5 catalogue pendings +
+  this ledger entry) commit next as C5.
+
+## 2026-11-06 — M5 phase 1: bopeebo/mainStage vertical-slice contract freeze
+
+- Human-approved M5 phase-1 objective delivered: `docs/M5-CONTRACT.md` frozen
+  (observed/derived/decided separation with PlayState/Strumline/Scoring/
+  GRhythmUtil/Constants citations) covering the bopeebo + mainStage + bf/dad/gf
+  slice: PBOT1 scoring (500/−100/sigmoid; judge thresholds 45/90/135/160 and
+  the commented-out killer branch), the health/combo/tally accounting, the
+  per-frame ordering (health clamp L1213-1215 → death check L1255 →
+  processInputQueue L1327 → processNotes L1332), the strumline note geometry
+  (104/112/−28.6/pad 16; render distance = height/0.45 per speed >=1),
+  the game-over transition trigger, the character/stage/audio data facts, and
+  the phase-1 acceptance artifacts (a NEW pending `gameplay_sim_bopeebo` gate
+  with a normative event-driven trace schema plus the two-run sha256 rule, the
+  scripted negative stream incl. full-path 160/161 window-edge cases, hold-drop
+  score penalties with the shipped zero health constants, unconditional ghost
+  penalties, and a NEW pending `native_note_reference` gate pending human
+  ADR-0014-style approval). `xtask/src/verify.rs` now has the M5 gate pendings
+  catalogue-listed (render_diff/perf_budget/gameplay_sim_bopeebo/
+  native_note_reference).
+- Review rounds: three `@oxide-reviewer` passes over the freeze — round 1: 10
+  findings (metadata/stage facts wrong, negative-case judgement wrong, hold
+  semantics wrong, geometry constants wrong, API boundary underspecified);
+  round 2: 8 findings (ghost-gating, backgroundWidth 480/edge 464, §2-vs-§3
+  incoherence, startDeath citation, citation ranges, frame ordering, small
+  typos, device-timestamp digest conflict); round 3: 12 findings spanning
+  those still-unsaved edits plus trace-edge specifics. All findings from all
+  rounds are now incorporated: asset facts re-measured from the real files,
+  the 110/160/161 full-path traces pinned to the actual per-frame semantics
+  (the 161 press still triggers a HIT-path miss judge with no health change
+  and a combo INCREMENT — recorded odd-but-true), hold_tick/drop fields
+  (score_delta/health_delta accrual, f64 penalties, is_combo_break with the
+  hard-coded true), unconditional ghost rules, background width 480/edge 464,
+  citation-range verification, M5 pending catalogue wiring, the input-event
+  ownership + asset-read path via the M1/VFS crates, and the phase-2
+  extension rule (add-only).
+- Honesty: the frozen contract covers the M5 slice ONLY; nothing claims
+  native-game parity beyond the simulated semantics; `native_note_reference`
+  stays pending on human approval; render_diff/perf_budget remain the M5
+  visual deliverables.
+- Limitations: the M5 gate implementations stay pending (their sim/trace
+  wiring is phase 2+); no Rust gameplay code was written in this phase per
+  the approved scope; asset/behavior facts derived from the reference
+  checkout remain source-informed observations (independent full-game
+  verification stays unfinished); the LLM review was read-only (its findings
+  not independently re-executed as code paths).

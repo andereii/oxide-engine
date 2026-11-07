@@ -292,6 +292,16 @@ const GATES: &[Gate] = &[
         5,
         "Vertical-slice performance-budget acceptance.",
     ),
+    pending(
+        "gameplay_sim_bopeebo",
+        5,
+        "Deterministic bopeebo-slice gameplay trace per docs/M5-CONTRACT.md (schema '1', sha256 two-run stability); not a native-game parity claim.",
+    ),
+    pending(
+        "native_note_reference",
+        5,
+        "Native PlayState note-judge trace (human ADR-0014-style approval required before any implementation); M5 acceptance stays blocked while pending.",
+    ),
     pending("full_chart_gameplay", 6, "Full-chart gameplay acceptance."),
     pending("ui_save_e2e", 7, "UI and save end-to-end acceptance."),
     pending(
