@@ -225,3 +225,175 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
 - **Consequences:** no native dependency this milestone even with the audio crate;
   Cargo.lock gains ~7 pure-Rust crates.
 - **Revisit when:** M5 attaches real sounds (cpal/ALSA backend gets its own ADR line).
+
+## ADR-0013 — Behavior-first workflow and explicitly scoped acceptance
+
+- **Context / date:** 2026-11-05, workflow review while M4 phase 1 is in progress.
+  Rigid implementation contracts, duplicated bootstrap instructions and an incomplete
+  `verify` command obscured simpler designs and the extent of verification.
+- **Authorization:** the human approved the updated workflow plan, including selective
+  cleanroom-inspired behavior specifications, and requested its implementation.
+- **Decision:** repository-local goal, policy and workflow are authoritative; contracts
+  specify observables and integration boundaries, with an explicit objection path.
+  `verify` defaults to a clearly labelled quick check; milestone and release acceptance
+  are explicit and fail closed on missing mandatory gates or prerequisites. Keep existing
+  numeric tolerances; strengthen coverage and negative tests. Ordinary regression tests
+  may be added without a fixture-change approval ritual.
+- **Consequences:** quick success does not certify a milestone. Read-only review has no
+  arbitrary shell. Implementation write sets are enforced procedurally unless a real
+  filesystem boundary is separately established. No claim of strict legal clean-room
+  independence or formal Cleanroom certification is made for existing or future code.
+- **Revisit when:** actual OpenCode capabilities or project acceptance requirements change.
+
+## ADR-0014 — Correct Haxe fround semantics and review conductor fixture replacement
+
+- **Context / date:** 2026-11-05. The Rust port and standalone Haxe transcription
+  incorrectly treated Haxe `Math.fround` as a binary32 conversion. The installed hxcpp
+  `include/hxMath.h` defines it as `floor(x + 0.5)`, returning a floating-point integer;
+  the native Haxe behavior differs from JavaScript's similarly named function.
+- **Authorization:** the human explicitly approved implementation of the reviewed plan,
+  including this identified correction and replacement of the affected expectations.
+- **Decision:** verify discriminating cases against real Haxe/runtime utilities before
+  correcting the port and model. Generate replacement fixture candidates separately,
+  inspect their differences, then replace only the affected conductor expectations.
+  Record source/runtime provenance. Do not increase the 1 ms tolerance or relax event
+  counts, boundary indices, signatures or event ordering. Fixture verification must
+  never regenerate missing expectations automatically.
+- **Consequences:** fixture bytes and their hashes can change because the old expectations
+  encoded a demonstrated error. Determinism is not proof of parity. The standalone model
+  remains a transcription, not a fully independent execution of the game Conductor;
+  unvalidated portions must remain explicit in acceptance reports.
+- **Revisit when:** a real-game trace disagrees with the model, or the reference target changes.
+
+## ADR-0015 — evdev 0.13 as the M4 input layer; observed default gameplay key set
+
+- **Context / date:** 2026-11-06, M4 contract §3 (`crates/oxide-input`). Requires Linux
+  evdev capture with kernel event timestamps, a uinput-backed virtual device for tests
+  and the jitter probe, and a gameplay key-code constant.
+- **Decision:** `evdev 0.13.2` (Apache-2.0 OR MIT, pure Rust with no C/C++ build step;
+  Cargo.lock closure: evdev, nix 0.29, bitvec/funty/radium/tap/wyz, libc, cfg-if,
+  bitflags (via nix), cfg_aliases), default features off (no tokio/serde). One
+  dependency serves both `open(path)` (real device) and the uinput `VirtualDevice`
+  used by `open_virtual()`; the sync, non-blocking polling model matches the
+  contract's `poll(now_audio_ms)` shape. Alternative considered: raw `libc` ioctl
+  against `linux/input.h` (rejected: hand-rolled ABI maintenance with an existing
+  licensed, maintained crate providing the identical observable).
+- **CODES:** the M4 contract placeholder `SECONDARY_CODES: [u16; 7]` had no observed
+  content. Observed original source (read-only reference checkout): precise gameplay
+  inputs come from `funkin.input.PreciseInputManager`, whose keyboard `_keyList` is
+  populated only from keys bound to `NOTE_*` actions via `Controls.getKeysForDirection`;
+  the default Solo scheme binds NOTE_LEFT=[A, LEFT], NOTE_DOWN=[S, DOWN], NOTE_UP=[W, UP],
+  NOTE_RIGHT=[D, RIGHT] (`source/funkin/input/Controls.hx` `getDefaultKeybinds`, Solo
+  branch) — 8 distinct keys, not 7. The Rust constant therefore exposes the Linux u16
+  evdev codes for those 8 default keys (this is a **derived mapping** of codes; FlxKey
+  Int codes remain the *observed* save format and are NOT converted silently here).
+  Equivalence check: each exposed code maps 1:1 onto a default `NOTE_*` binding, and
+  every `UI_*`-only key is absent.
+- **Consequences:** `crates/oxide-input` stays a timestamped capture primitive; binding
+  customization (save-driven key sets, M7) is a caller concern. One **engine decision**
+  is embedded in `open_virtual`: the virtual device advertises two never-emitted
+  joystick button codes (`BTN_SOUTH`/`BTN_EAST`, outside `SECONDARY_CODES`) because a
+  keys-only uinput device on this host does not get a udev `uaccess` session ACL for
+  its `/dev/input/eventN` node within usable time; the read side retries
+  permission-denied for up to 1 second, and a lasting denial still surfaces as the
+  distinct `PermissionDenied` variant. Host-specific evidence (uinput console ACL,
+  real-device group `input`) remains necessary and is NOT complete yet. Known residual:
+  `evdev::InputEvent::timestamp()` may panic on a negative/out-of-range kernel timeval
+  before the crate's own checked conversion runs; post-epoch realistic timestamps do
+  not trigger it, and the relevant upgrade would be upstream.
+- **Revisit when:** the original save-format semantics for keybind Int codes are
+  ported (M7), or a real-game precise-input trace disagrees with this mapping.
+
+## ADR-0016 — M4 replay gate: observed note-time semantics + placeholder scoring
+
+- **Context / date:** 2026-11-06, M4 contract §4 `cargo xtask replay --fixture <chart>`.
+  Requires a deterministic hits/misses/score report with a two-run sha256 ordering
+  proof, synthesized from the chart, with no human replay and no parity claim.
+- **Decision:** `xtask/src/replay.rs` implements the gate as a small deterministic
+  pipeline: provenance-verified chart load (`oxide-tools/x task`, `sha2` added to
+  xtask — same 0.10 already locked via oxide-media; MIT OR Apache-2.0, pure Rust) →
+  stream synthesis (engine-decision) → lane-merge evaluation (engine-decision) →
+  single canonical report, evaluated **twice**, printed with the sha256 equality
+  label. Misses are never zero-stated as a pass condition; hit/miss semantics are
+  explicit and unit-tested with a negative case (a 110 ms off-press misses both the
+  note and the press), so the pipeline provably discriminates.
+- **Observed:** V-Slice chart note `t` is song-position ms: `PlayState.hx` L3118
+  subtracts `note.noteData.time` (in ms) against `Conductor.songPosition`. That
+  expression is the scoring delta computed inside `goodNoteHit` AFTER the note has
+  already been accepted by the window logic (`GRhythmUtil.processWindow`/
+  `getNotesMayHit`, accept window constant 160 ms at `Constants.hx` L361) — so
+  `Std.int(...)==0` is NOT the observed accept window; it is the observed rating
+  delta shape. Wire `l` is the sustain length in ms. `NoteData.getStepTime`
+  (`SongData.hx`) is an independent ms→steps conversion, not a step that follows
+  L3118. Using note `t` instead of the oracle fixture timeline for note strum
+  times is therefore an engine decision (list below), not an observation.
+- **Engine decisions (labeled, not observed):**
+  1. synthesized perfect player presses on the first 1 ms grid integer ≥ `t`
+     (`press_grid_ms`), reproducing the observed `Std.int(k − t)` comparison shape;
+  2. `inputLatencyMs` assumed 0 (no hardware input the replay claims);
+  3. score placeholder = 350/hit to satisfy the print shape; `epicas` and real
+     windows are measured at M5 and not invented;
+  4. stream order (time, direction, difficulty, press-before-release) and the
+     per-lane earliest-pending-note matching are engine choices exercised only by
+     the synthesized stream in this milestone;
+  5. chart-file inputs are verified against the frozen
+     `tools/oracle/provenance.json` `input_asset_sha256` and the fixture id must
+     resolve to exactly one entry (fail-closed on drift or ambiguity).
+- **Consequences:** `cargo xtask replay` is deterministic and fail-closed without
+  fabricating parity claims; `verify`'s `replay` milestone gate stays pending until
+  the catalogue owner wires it with explicit coverage wording (review first). The
+  gate output states: input source, score placeholder, model boundary (1 ms grid,
+  Std.int comparison, two passes) and "not native-game note parity".
+- **Revisit when:** M5 measures the real `PlayState` hit windows/rating tiers
+  (then `evaluate_pass` semantics are replaced by measured behavior and the
+  placeholder score is retired), or when a real-game note trace contradicts the
+  observed `t`-in-ms reading.
+
+## ADR-0017 — native hxcpp Conductor probe + wired M4 executive gates
+
+- **Context / date:** 2026-11-06. Human approval: (1) build a read-only native
+  hxcpp probe harness (ProbeSlice-style non-invasive slicing, no writes into the
+  original Funkin' checkout) executing the real `funkin.Conductor` on the frozen
+  recipe; (2) wire `replay`, `input_jitter`, `conductor_native_reference` into
+  the acceptance catalogue with explicit honesty labels.
+- **Decision:** as documented in `tools/oracle/BEHAVIOR.md` §probe — the harness
+  lives in `tools/oracle/` (`NativeConductorProbe.hx`, `ConductorSlice.hx`
+  macro, probe-types stub instrumentation, `compare_native_rows.py`,
+  `native_conductor_probe.sh`); outputs are frozen at
+  `tests/fixtures/conductor-native/` (same scale/shape as the model fixtures,
+  with `_manifest_native.json` digests/provenance). The xtask gate
+  `conductor-native` replays native-vs-model field equality AND Rust-vs-native
+  (1 ms budget) fail-closed with digest verification; verify.rs moves the three
+  M4 obligations from `pending` to executable gates:
+  `conductor_native_reference` (no assets required), `replay --corpus`
+  (explicit `--assets` fail-closed), `input-jitter` (runs the uinput probe).
+- **Provenance:** observed native-vs-model equality across all 62 timelines
+  (86131 rows, worst 0.000 ms) on this machine for the FIRST run; row digests
+  committed; re-runs report deterministic digests (harness infra recorded);
+  the manifest re-runs require the original assets/inputs, and the copied
+  source bytes are hashed into the frozen manifest.
+- **Recorded divergence (`clamp`):** installed `FloatTools.clamp(min, max)` is
+  `Math.max(min, Math.min(max, value))`, so the native playback clamp
+  evaluates `max(songPos, min(length, min(combined, 0)))` — the contract §0
+  reading (`min(max(songPos, c), length)`) differs when `songPos > length`.
+  For this corpus both produce identical rows (combined == 0, songPos <=
+  length); no clamp-identity parity claim is made. See BEHAVIOR.md §clamp
+  divergence for the discriminating future case.
+- **Consequences:** M4 aggregate acceptance now exercises ALL these gates
+  explicitly, but the model/native boundaries stay visible: the native probe
+  executes the real Conductor over the frozen SIMULATED recipe (no gameplay
+  integration, audio engine or hardware), so broader native-game parity keeps
+  its own pending obligations. `replay` fails closed without explicit assets;
+  `input_jitter` only runs where the uinput probe exists (this Linux host);
+  Windows/hardware input evidence remains pending (M5+). Catalogue tests
+  updated; `fuzz_parsers` stays pending.
+- **Revisit when:** the acceptance obligations for gameplay/notes/audio
+  integration or Windows inputs change, or the reference checkout updates
+  (regenerating native rows requires the full ADR-0014-style review) and the review round (2026-11-06: 5 findings all addressed — the
+  step-to-ms conversion fix in both comparators with per-field max-delta
+  reporting (all 0.000 ms over 86131 rows after the fix, and the fix also
+  closes the discovered 'acceptance pending' label staleness, the distinct
+  copied-source provenance keys, the native input-truth avOff fail-closed path,
+  and the corpus 61-chart count check). The visible clamp divergence between
+  the installed FloatTools and the contract §0 reading is recorded here and in
+  BEHAVIOR.md with the note that the corpus cannot discriminate it.

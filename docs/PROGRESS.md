@@ -278,3 +278,277 @@ Append-only. Format: date, milestone, gate command, key output, notes, next step
 - `cargo xtask verify` exit 0.
 - Next: M4 chapter 2 — `crates/oxide-input` (evdev/uinput + jitter probe), then wire
   `cargo xtask fixtures-conductor` (61-chart comparison) and `cargo xtask replay`.
+
+## 2026-11-05 — Workflow migration, rounding correction and scoped evidence
+
+- Authorization: human approved the complete reviewed workflow plan and selective
+  cleanroom-inspired behavior/specification separation; ADR-0013/0014 record scope.
+  Initial HEAD `733c39c`, clean tree. No Git mutations/commits or original-tree writes.
+- Active instructions are now repository-local: AGENTS, docs/GOAL, docs/WORKFLOW and
+  role-specific agents. Outer plan section 8 is amended; old copies are retired pointers.
+  Contracts permit a substantiated objection, private simplification and stronger tests;
+  no automatic scope cuts. Resume commands no longer bootstrap the existing workspace.
+- Reviewer tool policy denies shell/edit. Implementation editor roots are narrower;
+  arbitrary shell means per-task isolation is still procedural, not an OS sandbox.
+  Cooperative queue/snapshot/scope helpers and static lint have 48 passing Python tests.
+- Conductor correction (ADR-0014): real installed FlxMath was compiled/executed in native
+  hxcpp; Math.fround is floor(x+0.5), not binary32. Replaced only 41 changed timelines;
+  21 unchanged, all 86,131 rows/counts/index sequences retained. Candidate review and
+  source/runtime/input provenance are in tools/oracle. No tolerance was relaxed.
+- `cargo xtask fixtures-conductor` → exit 0: 61/61 model timelines, 86,020 chart + 111
+  separate smoke boundaries, worst delta 0.000 ms. Every silent update is replayed;
+  trusted embedded manifest rejects renamed-smoke corpus substitution. This proves
+  model agreement, NOT independent full-game Conductor parity or complete M4.
+- `bash tools/oracle/snapshot_validate.sh` → exit 0: two builds/runs and frozen manifest
+  match; set hash ec4cc791930e20de96613da519dc85d4dd0c05b7c042d2ee2521c68104c4c41f.
+- Parsers reject empty input, traversal/read errors and Packer failures. Official-corpus
+  mode passes 432/432 JSON and 266 XML / 205 Sparrow / 61 non-atlas / 88 Animate.
+  Media preflight checks category inventory and 126 stem pairs before output/conversion.
+- `cargo test --locked --workspace -- --include-ignored` with explicit OXIDE_ASSETS_ROOT
+  → exit 0, including real-data/atlas/font checks and actual synthetic audio conversion.
+  Mini keeps four copies and adds two conversions/duration checks/alignment pairs.
+  Portable runs explicitly ignore external checks, never silently count them as passed.
+- `cargo xtask verify --profile quick` → exit 0: fmt, Clippy -D warnings and portable tests;
+  milestone_acceptance=false. JSON scope/metadata/deadlines/coverage are explicit.
+- M1 acceptance profile with the real corpus → expected exit 2: data checks passed,
+  missing authentic CI receipts/dirty current tree block acceptance. Linux/Windows CI
+  workflow is versioned but was NOT executed; offline receipt checks do not authenticate
+  origin. Mandatory native Conductor/input/replay/jitter and later gates stay pending.
+- Rust pinned to 1.99.1. Validation used RUSTUP_TOOLCHAIN=stable after verifying that
+  alias is this exact compiler; exact-name Rustup install was not performed in sandbox.
+  No new Rust package dependency, provider availability probes or service restart.
+  Primary models unchanged; automatic global fallback narrowed to existing DeepSeek.
+- Independent reviews identified/fixed renamed-smoke, orphan-stem and descendant-timeout
+  regressions. Full-corpus media conversion and actual Windows/OpenCode runtime policy
+  verification were not repeated. See docs/WORKFLOW-REPORT.md for before/after and limits.
+- Next: keep M4 partial; obtain independent native-game Conductor traces, then continue
+  timestamped input/replay/jitter with bounded behavior-first tasks. Do not start M5.
+
+## 2026-11-06 — Post-migration verification and full-corpus media gate
+
+- Exact toolchain `1.99.1-x86_64-unknown-linux-gnu` (with `rustfmt` and `clippy`) is now
+  installed locally; `RUSTUP_TOOLCHAIN=stable` workaround is no longer required.
+- Verified `opencode debug agents` (OpenCode 2.2.5) loads all 5 agents with the V2
+  last-match-wins permission rules; documented CWD (`oxengine/`) requirement in `docs/WORKFLOW.md`.
+- Marked `PLAN-ES.md` §11 as historical so it does not contradict `/oxide-continue`.
+- `python3 tools/workflow.py run --timeout 900 -- cargo xtask verify --profile milestone --milestone M4 --assets /home/alex/Descargas/fnf/Funkin/assets --report target/verify-m4.json`
+  → expected exit 2 (`milestone_acceptance=false`): all implemented M0–M4 phase 1 gates
+  (`fmt`, `clippy`, `tests`, `parse_all_corpus`, `real_data`, `parse_atlas_corpus`,
+  `real_atlas_geometry`, `real_fonts`, `media_mini_*`, full `media_corpus` conversion,
+  and `conductor` 61-chart + smoke replay) passed; blocked as expected on `dual_platform_ci`
+  and unimplemented `conductor_native_reference`, `replay`, and `input_jitter`.
+- `bash ../preflight.sh` → exit 0 (0 lint errors).
+- Next: M4 remaining obligations — native-game Conductor trace validation, `crates/oxide-input`
+  (timestamped capture + jitter probe), and `cargo xtask replay`.
+
+## 2026-11-06 — M4 input phase 1: crates/oxide-input + `cargo xtask input-jitter`
+
+- Objective: implement the M4 contract §3 timestamped capture crate (Linux evdev real
+  device, uinput virtual device, caller-supplied audio time, kernel µs timestamps) and
+  the contract §4 `input-jitter` standalone report command. Delegated crate work to one
+  `@oxide-impl-rust` worker (write set: crates/oxide-input/**) after an analyst pass
+  over the original input sources; manifests/lockfile/ADR/xtask gate were orchestrator-
+  owned and disjoint.
+- Contract-placeholder resolution (ADR-0015, reviewer-checked): `SECONDARY_CODES` is 8
+  Linux u16 codes [17,30,31,32,103,105,106,108] (W A S D + UP/LEFT/RIGHT/DOWN), derived
+  from the observed default Solo NOTE_* bindings (`Controls.getDefaultKeybinds`) that
+  `PreciseInputManager` binds exclusively; the contract's unobserved "[u16; 7]"
+  placeholder was superseded. Save-format FlxKey Int codes are NOT converted silently.
+- Worker deviations resolved by the orchestrator: (1) `thiserror` had not been wired
+  (my manifest omission) — wired `thiserror = { workspace = true }` and switched the
+  manual `Display`/`Error` impls to the derive; (2) accepted the disclosed uinput ACL
+  shim (virtual device advertises two never-emitted BTN_* codes so udev applies
+  uaccess; ≤1 s retry on permission-denied; lasting denial still surfaces as
+  `PermissionDenied`) and the non-Linux `UnsupportedPlatform` stub for Windows CI.
+- `python3 tools/workflow.py run --timeout 900 -- cargo test -p oxide-input` → exit 0
+  (12 unit + 5 portable + 2 external tests); `-- --include-ignored` → exit 0 (real
+  device permission variant and uinput probe round-trip pass on this host).
+- `cargo fmt --all -- --check` → exit 0; `cargo clippy -p oxide-input --all-targets
+  -- -D warnings` and `-p xtask` → exit 0. `cargo xtask verify --profile quick` →
+  exit 0 (milestone acceptance: false).
+- `python3 tools/workflow.py run --timeout 300 -- cargo xtask input-jitter` → exit 0:
+  samples 2000 p50 0.020 ms p99 0.051 ms (≤2 ms target; mitigation label if above),
+  and `--samples 500` → p99 0.068 ms; `--bogus` usage error exits 2. Output labels the
+  measurement as uinput delivery jitter only, NOT audio-clock correlation and NOT
+  input_jitter milestone acceptance.
+- Scope audit (workflow.py scope vs 00:26 baseline) → one violation: `opencode.json`
+  changed at 00:51 by the running OpenCode application itself (provider-fallback/
+  cooldown rewrite: `prefill_cap_refused`/`cell is at capacity` patterns, fallback list
+  reordered). Not written by me or the subagent; left unmodified pending human
+  awareness. All other 11 changed paths within the allowed sets.
+- Review: `@oxide-reviewer` verdict approve with comments; the single ADR-0015 wording
+  finding (dependency closure, ACL-shim disclosure, host-specific term) was fixed.
+  Defects found in code: none. `verify profiles` unchanged.
+- Limitations: `input_jitter`/`replay` remain pending acceptance gates (platform-
+  specific evidence pending; this probe never measures hardware audio latency);
+  Windows/non-Linux stub not compiled locally; real-device success path still requires
+  group `input`; ADR-0010/0014-era fixtures untouched; no Git writes.
+- Next: M4 remaining — deterministic `cargo xtask replay` gate (synthesised chart
+  inputs, sha256-identical reruns), then the native-game Conductor trace objective.
+  Also: decide whether the `input_jitter` verify gate moves from pending with
+  hardware-evidence wording or stays pending (owner: verify catalogue, review first).
+
+## 2026-11-06 — M4 replay gate: `cargo xtask replay` (deterministic, fail-closed)
+
+- Objective: contract §4 replay gate — deterministic hits/misses/score report from a
+  chart-synthesized stream with a two-pass sha256 ordering proof. Implemented
+  directly by the orchestrator as a coherent xtask tooling task (one objective,
+  explicit write set: xtask/src/replay.rs, xtask/src/main.rs arm, xtask/Cargo.toml
+  sha2 dep, Cargo.lock, docs). Two failed incrementalauthoring attempts were
+  stopped per the two-fix rule; the module was then written atomically and
+  compiled first-try (recorded as process learning, not as a code defect).
+- Observed (recorded, ADR-0016): chart note `t` is song-position ms compared
+  directly against `Conductor.songPosition` via `Std.int(...)` in the original
+  (PlayState.hx L3118); sustains are wire `l` ms. The contract's implied
+  fixture-timestamp round-trip was superseded with the equivalence argument in
+  the ADR (using the model timeline would only re-add rounding drift).
+- Engine decisions: 1 ms grid snap presses (`ceil(t)`), `inputLatencyMs = 0`,
+  difficulty union from the chart file (BTreeMap order), 350/hit score
+  placeholder (real windows measured at M5), lane-merge matching (earliest
+  pending note with Std.int == 0, exhausted notes count as missed).
+- Integrity: chart bytes must match the committed provenance sha256 exactly and
+  the fixture id must resolve uniquely; `--assets`/`OXIDE_ASSETS_ROOT` follows the
+  existing assets-directory convention (`preload/...` path composition, explicit
+  `assets/`-prefix consumption, no silent reparenting).
+- Evidence: `cargo test -p xtask --bin xtask` → exit 0 (9 replay unit tests incl.
+  negative miss + double-pass determinism; whole binary suite 30 tests pass);
+  `cargo xtask replay --fixture 2hot-default --assets …/Funkin/assets` (twice) →
+  hits 2762 misses 0 score 966700, sha256
+  328fdee4cc780cedbbe0fd851a84a7c055039390efadf055aeb0ed618a87ad78 equal across
+  runs; bopeebo-erect → 1090 hits; philly-nice-erect → 1574; blammed-pico → 1811
+  (all misses 0, synthesized perfect stream). Wrong `--assets` → explicit
+  fail (exit 1); unknown fixture id → exit 1 fail-closed; missing `--fixture` →
+  usage exit 2. fmt/clippy -D warnings → exit 0; `cargo xtask verify --profile
+  quick` → exit 0 (milestone acceptance: false). Hit counts cross-checked against
+  the raw chart JSON note sums (2762, 1090 exact).
+- Limitations: synthesized perfect stream only (no human replay, no jittered
+  stream, no sustain scoring); `verify`'s `replay` and `input_jitter` milestone
+  gates remain pending (catalogue wiring is a separate reviewed step); no
+  native-game note-parity claim; sha256 equality proves self-consistency, not
+  external determinism of hardware paths.
+- Next: reviewer round on this gate batch; then keep the M4 native-game conductor
+  trace objective, and later arbitration of whether `replay`/`input_jitter` gates
+  leave the pending catalogue with hardware-evidence wording (owner + review).
+- Review of the replay gate batch: `@oxide-reviewer` verdict "approve with comments";
+  two low findings fixed — (1) ADR-0016/module doc rewritten so L3118 is described
+  as the observed scoring-delta computation after the window logic (window 160 ms
+  per Constants.hx; `Std.int(...)==0` is explicitly NOT the accept window), and the
+  note-t-vs-fixture-timeline choice moved into the engine-decision list; the
+  printed model-boundary line states "stand-in … not the accept window"; (2) the
+  in-process double pass re-framed as a purity tripwire in the docs — the digest +
+  two CLI runs remain the ordering evidence. Added the reviewer-requested ambiguity
+  regression test (a corpus- and mod-hosted duplicate chart id now tested).
+  Post-fix: tests 31/31 pass, clippy -D warnings and fmt clean, quick verify exit 0,
+  and the 2hot-default sha256 digest is byte-identical (wording changes only).
+
+## 2026-11-06 — native Conductor probe (green) + verify catalogue wiring (M4)
+
+- Human-approved objectives implemented and validated:
+  1. Read-only native hxcpp harness (`tools/oracle/native_conductor_probe.sh`
+     + `NativeConductorProbe.hx`/`ConductorSlice.hx`/stub instrumentation/
+     `compare_native_rows.py`) executing the REAL `funkin.Conductor` from the
+     installed game source (unrelated fields sliced off pre-typing; no game-tree
+     writes; source/copy hashes recorded). First approved run: native == model
+     on ALL 62 timelines — 86,131/86,131 rows field-wise at gate tolerances
+     (counts/indices/sims exact, worst ms delta 0.000; lengths/BPM 1e-6 rel).
+     Row digests frozen in `tests/fixtures/conductor-native/` (62 jsonl +
+     `_manifest_native.json` provenance; ~29 MB / 29 MB same scale as model).
+  2. `cargo xtask conductor-native` new gate (xtask/conductor_native_check.rs
+     + pub(crate) reuse of conductor_check replay machinery): three strands —
+     frozen-row digest verification vs manifest; native-vs-model field
+     equality; Rust-vs-native 1 ms replay. Fail-closed on any row drift or
+     manifest mismatch (`cargo test -p xtask --test conductor_native_gate`:
+     4/4 pass incl. drifted-rows and partial-set negatives).
+  3. `verify.rs` catalogue wiring (objective 2): the three M4 obligations
+     moved from pending to executable gates with explicit honesty labels:
+     `conductor_native_reference` (no assets), `replay --corpus` (explicit
+     `--assets` required; new `replay --corpus` CLI mode in replay.rs, all
+     61 charts deterministically in one call: ok 61 failed 0), `input_jitter`
+     (Linux uinput p50/p99; each label states delivery-jitter-only and that
+     Windows/hardware evidence remains pending). `fuzz_parsers` and M5+
+     gates stay pending. `xtask --profile milestone M4` behaves: blocked
+     without CI receipts/assets (fail-closed), and the three gates PASS
+     locally (conductor_native_reference reproduced exactly).
+- Evidence: `python3 tools/workflow.py run --timeout 900 -- cargo xtask verify
+  --profile quick` → exit 0 (milestone_acceptance=false); milestone M4
+  no-assets probe: conductor/conductor_native_reference/input_jitter PASS,
+  replay BLOCKED on explicit --assets, overall blocked_with_pending; fmt/
+  clippy -D warnings clean; xtask binary unit tests 31/31 + gate tests
+  green. Full steps logged in real logs referenced by ledger.
+- Honesty labels (all printed/gated): native rows = REAL Conductor execution
+  over the frozen SIMULATED recipe (no gameplay/audio/HW); model/native
+  equality is the probe boundary, not a full-game integration trace; replay
+  reports are synthesized stream determinism; probe evidence boundary summary
+  lives in tools/oracle/BEHAVIOR.md §native; ADR-0017 records both approved
+  decisions.
+- Limitations: the probe's input fixed by the frozen recipe (no save/hardware/
+  alternate instrumentals); the fixture freeze introduces ~29 MB of
+  committed evidence files pending human review/commit acceptance; full
+  milestone M4 acceptance still blocked on `dual_platform_ci` and other
+  required evidence; no human replay/timed input; no GPU/AUDIO hardware runs.
+- Next: single remainder objective per the ledger: reviewer round over the
+  full native-probe + gate-memory batch (one review pass, both approved
+  objectives), then release the remaining M4 work (native-game conductor
+  traces if assets stand-in evaluation permitted, or the broader native reference extension (new ADR if the scope
+  changes).
+
+- Gate-state summary (2026-11-06 evening quick verify exit 0; milestone M4
+  still blocked as designed without CI receipts/assets; three wired gates —
+  conductor_native_reference PASS with no assets, input_jitter PASS
+  Linux-only, replay BLOCKED on explicit --assets). Review round from
+  @oxide-reviewer on the native batch: verdict BLOCK with 5 findings — all
+  fixed and re-evidenced: (1) HIGH: step/beat/measure time comparisons are
+  now converted to ms through the row's own lengths before the 1 ms budget in
+  BOTH comparators (python + rust), matching fixtures-conductor semantics;
+  per-field max-delta reporting added to both comparators and gate output;
+  fresh full run: max deltas 0.000 ms across all ms fields; frozen row digests
+  unchanged by the evaluation-only fixes; (2) honesty label refresh post
+  wiring (no more "acceptance stays pending" claims in gate output; verify.rs
+  coverage string now points at the native row manifest); (3) the three
+  copied-real-source modules get distinct provenance keys and the excluded
+  FloatTools/AnsiUtil source hashes are recorded; instrument hashes labelled
+  documentation-only (row digests + model manifest sha equality are the
+  operative fail-closed verification); (4) the real clamp divergence between
+  installed FloatTools and the contract's §0 reading recorded in BEHAVIOR.md
+  + ADR-0017 with a note that the corpus cannot discriminate it (no claim of
+  clamp parity made; no tolerance changed); (5) replay --corpus now
+  fail-closes on a drifted (non-61) provenance inventory; usage line
+  includes conductor-native; native probe now refuses nonzero recorded avOff
+  (input-truth fail-closed) instead of silently writing 0; conductor_native
+  usage error test asserts exit code 2. All reviewer requested checks met.
+- Instrumentation trim: `RowDeltas` in the native gate now tracks only the five
+  ms fields it reports (step/beat/measure are exact integer comparisons).
+  Post-trim state: clippy -D warnings clean, fmt clean, `conductor-native`
+  gate → native ok 62/62, worst/max deltas 0.000 ms, quick verify exit 0.
+
+## 2026-11-06 — authorized local commits (no push) + hashes
+
+Working tree committed in three logical batches per human approval (recorded by
+the orchestrator; nothing pushed; no history rewrite):
+
+- C1 3167efa — `m4: behavior-first workflow migration + ADR-0014 corrected
+  fround fixtures` (policy/roles/queue/CI + gate catalogue + parser/media
+  hardening + the 41 corrected conductor timelines + native rounding probe
+  evidence).
+- C2 33039cd — `m4: oxide-input — timestamped evdev capture + uinput probe +
+  ADR-0015 codeset` (input crate, jitter CLI, ADR-0015 in the ledger commit).
+- C3 bce444b — `m4: replay gate + native Conductor reference probe + wired
+  executive gates` (ADR-0016/0017 deliverables: replay/corpus CLI, native
+  hxcpp probe harness + frozen conductor-native fixtures, xtask native gate,
+  verify.rs wiring + label refresh + negative regressions).
+
+Every intermediate state was build-verified (`cargo check --locked -p xtask`
+plus the xtask gate tests per state); the final tree passes
+`cargo xtask verify --profile quick` (exit 0) and the probe pipeline re-run;
+the fixture freeze introduced `tests/fixtures/conductor-native/` (62 jsonl +
+manifest) which remains human-reviewed evidence (no fixture regeneration ever
+ran as part of the commit). Remaining docs-only changes at commit time are the
+ledger updates themselves (ADR text + progress entries + hashes), committed in
+the ledger commit that follows this block.
+
+## 2026-11-06 — M5 phase 1 kickoff (analysis + contract freeze)
+
+- Objective per human approval: analyze observed behavior and freeze
+  `docs/M5-CONTRACT.md` for the bopeebo + mainStage + bf/dad/gf vertical
+  slice (no Rust gameplay implementation in this phase; acceptance gates for
+  the slice's observables stay explicit and pending).
