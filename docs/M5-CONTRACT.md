@@ -535,7 +535,6 @@ impl GameplaySimState {
   STRUCTURAL semantics the renderer must obey.
 
 ## 6. Honesty boundary summary
-
 This contract does NOT certify:
 - that the M5 rule implementation matches the original beyond the sections
   frozen here (`native_note_reference` pending; the `render_diff`/`perf_budget`
@@ -544,4 +543,65 @@ This contract does NOT certify:
   labels), audio clock tie-ins;
 - parity of ALL game modes (any mode outside the frozen slice is unverified
   unless a separate findable/citable gate wire proves it).
-EOF
+
+## 7. Corrigendum (2026-11-07, native-probe evidence; recorded via ADR-0019)
+
+Native-probe evidence (`tools/oracle/NOTE-BEHAVIOR.md` §6.1, frozen rows in
+`tests/fixtures/note-native/`) corrects two over-generalizations in the §2
+trace wording; the wire schema and the phase-2 add-only rule are unchanged:
+
+1. **hold_drop combo semantics.** §1.3/§2 describe the dropped-hold event with
+   "the shipped HoldNoteScriptEvent hard-codes isComboBreak = true". The real
+   event is constructed ONLY inside the `remaining > HOLD_DROP_PENALTY_MS`
+   branch (PlayState.hx L2956-2977): a sub-threshold drop dispatches nothing,
+   applies no score/health change, and breaks NO combo. Trace rows still
+   record a `hold_drop` row for every released sustain; its fields follow the
+   branch that ran (`is_combo_break=false`, `combo_after == combo_before`,
+   zero penalty for sub-threshold drops). The penalizing-branch wording
+   ("shipped true") remains true for that branch only, not for all drops.
+2. **total_notes_hit on misses.** The real `applyScore('miss')` path never
+   touches `total_notes_hit`; the increment lives in `goodNoteHit` only
+   (PlayState.hx L3152-3153). The `tallies` field list in §2 is unchanged, but
+   the sim no longer bumps `total_notes_hit` on a windowed miss; the 161 ms
+   odd-but-true HIT-path judgement-miss keeps its bump (goodNoteHit runs).
+
+Also recorded (evidence, not schema change): `hold_drop.input_ms` records
+0.0 (non-input event per §2's own input_ms rule), and the sim no longer
+bumps `total_notes_hit` on a windowed miss while the 161 ms odd-but-true
+HIT-path judgement-miss keeps its bump.
+
+3. **Hold mirror ordering (round-3 correction; supersedes the corrigendum's
+   earlier "deferred one tick" wording).** The real frame order is:
+   `PlayState.update` calls `super.update` FIRST (PlayState.hx L1035), so the
+   `Strumline` hold block (Strumline.hx L627-760) runs each frame with the
+   PREVIOUS frame's conductor position; the natural chain order inside it is
+   drop detect (L632-642) -> completion (L653-684) -> keep-clipped
+   (L685-686) -> recompute (L721-727, `sustainLength = (strumTime +
+   fullSustainLength) - previousSongPosition`). The penalty branch
+   (PlayState.hx L2956-2977) reads the STALE snapshot at the same tick the
+   drop flag fires: for a release at R, the stale value is `end - (R-1)`, so
+   the trace row `hold_drop` (input_ms 0.0) is emitted at release+1 with the
+   stale-derived penalty. Consequences for the §2 wording:
+   - the §2 sentence "a hold released early ... exactly 160 does NOT trigger
+     the penalty" described the PROJECTED remaining; the real branch tests
+     `stale > 160` where `stale = (end - R) + 1` on the recipe grid, so the
+     recipe's `ceil(t+l-160)` release (projected remaining exactly 160.0)
+     PENALIZES (stale 161, score `-20.125`, combo break) and the zero-penalty
+     boundary case is the release at `ceil(t+l-159)` (stale EXACTLY 160.0,
+     bitwise; zero penalty, combo unchanged). Both cases are now mandatory
+     fail-closed checks.
+   - the §2 sentence "a sustain held to its full length yields hold_end with
+     NO drop penalty" is likewise a projected reading: the recipe releases
+     every sustain at `ceil(t+l) = end`, and the real chain flags that drop at
+     the next mirror (stale = 1 ms, "Hold note too short, not penalizing..."),
+     so the trace records a zero-penalty `hold_drop` at end+1, and `hold_end`
+     rows exist ONLY when the key stays held past the sustain end
+     (completion at the first integer tick >= end+2; exercised by unit/toy
+     coverage, not by the recipe streams).
+   - the accrual snapshot the real branch observes is the frame-START mirror
+     value (two consecutive full snapshots at the hit tick and the first
+     recompute; the last accrual row at ceil(end); never a negative
+     remaining; no fractional partial row).
+4. The `game_over` kind is unreachable in the native probe (death/clamp
+   ordering lives in the unretained `update()`), so its frozen rows never
+   exercise it; the §1.4 ordering stays an engine decision.

@@ -22,15 +22,22 @@
 //!   no retry/reset input.
 //! - `note_id` is the zero-based index inside the selected difficulty's
 //!   player-note list (chart order after filtering the opponent lanes).
-//! - `total_notes_hit` counts every judged note, including the 161 ms
-//!   hit-path `miss` and window misses (the FNF tally is the accuracy
-//!   denominator, not just the non-miss judgements).
+//! - `total_notes_hit` counts every judged note reached through the hit path,
+//!   including the 161 ms hit-path `miss`; window misses bump only the `missed`
+//!   tally (the real `applyScore` on a windowed miss never touches
+//!   `totalNotesHit`).
 //! - A window miss applies the observed PBOT1 miss score (`-100`), the
 //!   configured `HEALTH_MISS_BONUS` (`-0.08` absolute) and resets the combo.
-//! - A hold ticks once per elapsed step after the hit tick; the final
-//!   fractional/grid remainder up to the sustain end is emitted as a last
-//!   `hold_tick` immediately before `hold_end`. A release at or after the
-//!   sustain end completes the hold (`hold_end`) instead of dropping it.
+//! - Hold rows follow `tools/oracle/NOTE-BEHAVIOR.md` §6.1 REVISED. Each tick
+//!   first runs a mirror with `P = T-1`: drop detect, completion when the
+//!   previous snapshot is `<= 0`, keep-clipped, then recompute
+//!   `snapshot = end - P`. `processNotes` then accrues a fixed 1 ms
+//!   `hold_tick` (0.00012 health / 0.25 score) whenever the mirror snapshot is
+//!   positive, recording that observed snapshot (two full rows at the hit tick
+//!   and the first recompute, then the decay). A drop row is emitted on the
+//!   same mirror tick that flags it and uses the stale snapshot; only a stale
+//!   value strictly over 160 ms penalizes and resets combo. `hold_end` is the
+//!   first integer tick `>= end + 2`; no fractional partial row exists.
 //! - Ghost presses, hit-path scores and hold penalties are not rounded: the
 //!   trace records the observed f64 arithmetic.
 
@@ -64,6 +71,13 @@ const HEALTH_SHIT_BONUS: f64 = -1.0 / 100.0 * HEALTH_MAX;
 const HEALTH_MISS_BONUS: f64 = -4.0 / 100.0 * HEALTH_MAX;
 const HEALTH_GHOST_MISS_PENALTY: f64 = -4.0 / 100.0 * HEALTH_MAX;
 const HEALTH_HOLD_BONUS_PER_SECOND: f64 = 6.0 / 100.0 * HEALTH_MAX;
+/// Fixed per-tick branch delta for the frozen 1 ms recipe
+/// (`tools/oracle/NOTE-BEHAVIOR.md` §6.1 REVISED item 4): one branch entry with
+/// `elapsed = 0.001` seconds gives exactly `0.00012` health and `0.25` score.
+/// Multiplication (not division) mirrors the real `PER_SECOND * elapsed`.
+const HOLD_TICK_ELAPSED_SECONDS: f64 = 0.001;
+const HEALTH_HOLD_BONUS_PER_MS: f64 = HEALTH_HOLD_BONUS_PER_SECOND * HOLD_TICK_ELAPSED_SECONDS;
+const SCORE_HOLD_BONUS_PER_MS: f64 = SCORE_HOLD_BONUS_PER_SECOND * HOLD_TICK_ELAPSED_SECONDS;
 const HEALTH_HOLD_DROP_PENALTY_PER_SECOND: f64 = 0.0;
 const SCORE_GHOST_MISS_PENALTY: f64 = -10.0;
 const SCORE_HOLD_BONUS_PER_SECOND: f64 = 250.0;
@@ -363,7 +377,6 @@ pub struct GameplaySimState {
     /// then on the play state stops processing; phase 1 has no retry input.
     dead: bool,
     held: [bool; 4],
-    last_release_ms: [Option<u64>; 4],
     active_holds: [Option<ActiveHold>; 4],
     trace: Vec<TraceEvent>,
 }
@@ -384,9 +397,21 @@ struct SimNote {
 #[derive(Debug, Clone, Copy)]
 struct ActiveHold {
     note_index: usize,
+    /// Hit tick T0 in milliseconds; the first accrual row is this same tick.
     start_ms: f64,
+    /// Base note strum time (the mirror `P > strumTime` guard).
+    strum_time: f64,
+    /// Full sustain end `strumTime + fullSustainLength`.
     end_ms: f64,
-    last_tick_ms: f64,
+    /// The hold's `sustainLength` field as last set by the mirror/accrual
+    /// chain; `hold_tick` rows record this observed value.
+    snapshot_ms: f64,
+    /// This tick's mirror set the drop flag; the row is emitted in
+    /// `processNotes` of the same tick with the stale snapshot.
+    dropped: bool,
+    /// This tick's mirror saw the previous snapshot `<= 0`; `hold_end` is
+    /// emitted in `processNotes` of the same tick.
+    completed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -547,7 +572,6 @@ impl GameplaySimState {
             death_count: 0,
             dead: false,
             held: [false; 4],
-            last_release_ms: [None; 4],
             active_holds: [None; 4],
             trace: Vec::new(),
         };
@@ -558,9 +582,10 @@ impl GameplaySimState {
         Ok(state)
     }
 
-    /// One sim tick: clamp + death check, then the input events, then the
-    /// window/process-notes updates. Returns only the events dispatched during
-    /// this tick, in dispatch order.
+    /// One sim tick: clamp + death check, then the hold mirror with
+    /// `P = T-1`, then the input events, then the window/process-notes
+    /// updates. Returns only the events dispatched during this tick, in
+    /// dispatch order.
     ///
     /// The death check is terminal: the tick that reaches it dispatches the
     /// single `game_over` event after the `moveToGameOver` score/health reset
@@ -573,7 +598,8 @@ impl GameplaySimState {
         }
 
         // Observed per-frame order: health clamp and death check run before
-        // processInputQueue/processNotes.
+        // the strumline mirror; the conductor update and processInputQueue
+        // follow, then processNotes.
         self.health = self.health.clamp(HEALTH_MIN, HEALTH_MAX);
         if self.health <= HEALTH_MIN {
             self.dead = true;
@@ -593,6 +619,7 @@ impl GameplaySimState {
             return vec![game_over];
         }
 
+        self.mirror_holds(sim_ms);
         let mut dispatched = Vec::new();
 
         for event in events {
@@ -651,12 +678,11 @@ impl GameplaySimState {
         }
     }
 
-    fn release(&mut self, event_ms: u64, direction: i64) {
+    fn release(&mut self, _event_ms: u64, direction: i64) {
         let Some(lane) = player_lane(direction) else {
             return;
         };
         self.held[lane] = false;
-        self.last_release_ms[lane] = Some(event_ms);
     }
 
     fn find_may_hit(&self, direction: i64) -> Option<usize> {
@@ -731,11 +757,18 @@ impl GameplaySimState {
             if let Some(previous) = self.active_holds[lane].take() {
                 self.finish_hold(previous, step_ms, dispatched);
             }
+            let end_ms = note.time + note.sustain_length;
+            // Hit capture: `min(full, end - songPosition_at_hit)`. Recipe hits
+            // land on strumTime, so this is `full` (§6.1 REVISED item 4).
+            let snapshot_ms = note.sustain_length.min(end_ms - step_ms as f64);
             self.active_holds[lane] = Some(ActiveHold {
                 note_index: index,
                 start_ms: step_ms as f64,
-                end_ms: note.time + note.sustain_length,
-                last_tick_ms: step_ms as f64,
+                strum_time: note.time,
+                end_ms,
+                snapshot_ms,
+                dropped: false,
+                completed: false,
             });
             dispatched.push(trace_event!(
                 HoldStart,
@@ -778,7 +811,6 @@ impl GameplaySimState {
         self.health += HEALTH_MISS_BONUS;
         self.song_score += f64::from(PBOT1_MISS_SCORE);
         self.tallies.missed += 1;
-        self.tallies.total_notes_hit += 1;
         self.combo = 0;
 
         let header = Header::new(sim_ms)
@@ -798,67 +830,92 @@ impl GameplaySimState {
         ));
     }
 
-    fn process_hold_lane(&mut self, lane: usize, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
-        let Some(mut hold) = self.active_holds[lane] else {
+    /// Strumline mirror (super-equivalent) using the previous frame's
+    /// conductor position `P = T-1`.
+    ///
+    /// The real chain order is drop detect, completion (using the snapshot
+    /// set at T-1), keep-clipped, then recompute. A flagged drop preserves
+    /// the stale snapshot; completion kills the hold with no recompute.
+    fn mirror_holds(&mut self, sim_ms: u64) {
+        if sim_ms == 0 {
             return;
-        };
-        let position = sim_ms as f64;
-
-        if !self.held[lane] {
-            let remaining_ms = hold.end_ms - position;
-            if remaining_ms <= 0.0 {
-                self.finish_hold(hold, sim_ms, dispatched);
-            } else {
-                let note = self.notes[hold.note_index];
-                let score_penalty = if remaining_ms > HOLD_DROP_PENALTY_THRESHOLD_MS {
-                    remaining_ms / 1000.0 * SCORE_HOLD_DROP_PENALTY_PER_SECOND
-                } else {
-                    0.0
-                };
-                let health_change = remaining_ms / 1000.0 * HEALTH_HOLD_DROP_PENALTY_PER_SECOND;
-                self.song_score += score_penalty;
-                self.health += health_change;
-                let combo_before = self.combo;
-                self.combo = 0;
-                self.active_holds[lane] = None;
-
-                let input_ms = self.last_release_ms[lane].unwrap_or(sim_ms);
-                let header = Header::new(sim_ms)
-                    .with_input(input_ms)
-                    .with_note(note.id, note.direction);
-                dispatched.push(trace_event!(
-                    HoldDrop,
-                    "hold_drop",
-                    header,
-                    score_penalty: score_penalty,
-                    health_change: health_change,
-                    combo_before: combo_before,
-                    combo_after: self.combo,
-                    is_combo_break: true,
-                ));
+        }
+        let mirror_position = sim_ms as f64 - 1.0;
+        for lane in 0..4 {
+            let Some(mut hold) = self.active_holds[lane] else {
+                continue;
+            };
+            // a. drop detect: snapshot is NOT touched (keep-clipped later).
+            if mirror_position > hold.strum_time && !self.held[lane] {
+                hold.dropped = true;
             }
-            return;
-        }
-
-        if position >= hold.end_ms {
-            self.finish_hold(hold, sim_ms, dispatched);
-            return;
-        }
-
-        if position > hold.last_tick_ms {
-            let delta_ms = position - hold.last_tick_ms;
-            hold.last_tick_ms = position;
+            // b. completion sees the snapshot set at frame T-1.
+            if hold.snapshot_ms <= 0.0 {
+                hold.completed = true;
+                self.active_holds[lane] = Some(hold);
+                continue;
+            }
+            // c. keep-clipped branch preserves the snapshot.
+            if hold.dropped {
+                self.active_holds[lane] = Some(hold);
+                continue;
+            }
+            // d. recompute for an active non-dropped hold.
+            if mirror_position > hold.strum_time {
+                hold.snapshot_ms = hold.end_ms - mirror_position;
+            }
             self.active_holds[lane] = Some(hold);
-            self.emit_hold_tick(hold, sim_ms, delta_ms, position, dispatched);
         }
     }
 
-    fn finish_hold(&mut self, mut hold: ActiveHold, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
-        if hold.last_tick_ms < hold.end_ms {
-            let delta_ms = hold.end_ms - hold.last_tick_ms;
-            hold.last_tick_ms = hold.end_ms;
-            self.emit_hold_tick(hold, sim_ms, delta_ms, hold.end_ms, dispatched);
+    fn process_hold_lane(&mut self, lane: usize, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
+        let Some(hold) = self.active_holds[lane] else {
+            return;
+        };
+        if hold.completed {
+            self.finish_hold(hold, sim_ms, dispatched);
+            return;
         }
+        if hold.dropped {
+            let note = self.notes[hold.note_index];
+            let stale_ms = hold.snapshot_ms;
+            let combo_before = self.combo;
+            let is_combo_break = stale_ms > HOLD_DROP_PENALTY_THRESHOLD_MS;
+            // Spec formula is `-125.0 * snapshot / 1000` (multiply, then
+            // divide) so the stale-161 boundary is bitwise `-20.125`.
+            let score_penalty = if is_combo_break {
+                SCORE_HOLD_DROP_PENALTY_PER_SECOND * stale_ms / 1000.0
+            } else {
+                0.0
+            };
+            let health_change = stale_ms / 1000.0 * HEALTH_HOLD_DROP_PENALTY_PER_SECOND;
+            self.song_score += score_penalty;
+            self.health += health_change;
+            if is_combo_break {
+                self.combo = 0;
+            }
+            let combo_after = self.combo;
+            self.active_holds[lane] = None;
+            dispatched.push(trace_event!(
+                HoldDrop,
+                "hold_drop",
+                // A hold drop is a non-input event: the §2 schema pins 0.0.
+                Header::new(sim_ms).with_note(note.id, note.direction),
+                score_penalty: score_penalty,
+                health_change: health_change,
+                combo_before: combo_before,
+                combo_after: combo_after,
+                is_combo_break: is_combo_break,
+            ));
+            return;
+        }
+        // The accrual branch observes this tick's mirror snapshot.
+        if hold.snapshot_ms > 0.0 {
+            self.emit_hold_tick(hold, sim_ms, dispatched);
+        }
+    }
+
+    fn finish_hold(&mut self, hold: ActiveHold, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
         for lane in 0..4 {
             if self.active_holds[lane].is_some_and(|active| {
                 active.note_index == hold.note_index && active.start_ms == hold.start_ms
@@ -874,17 +931,9 @@ impl GameplaySimState {
         ));
     }
 
-    fn emit_hold_tick(
-        &mut self,
-        hold: ActiveHold,
-        sim_ms: u64,
-        delta_ms: f64,
-        position_ms: f64,
-        dispatched: &mut Vec<TraceEvent>,
-    ) {
-        let elapsed_seconds = delta_ms / 1000.0;
-        let health_delta = HEALTH_HOLD_BONUS_PER_SECOND * elapsed_seconds;
-        let score_delta = SCORE_HOLD_BONUS_PER_SECOND * elapsed_seconds;
+    fn emit_hold_tick(&mut self, hold: ActiveHold, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
+        let health_delta = HEALTH_HOLD_BONUS_PER_MS;
+        let score_delta = SCORE_HOLD_BONUS_PER_MS;
         self.health += health_delta;
         self.song_score += score_delta;
         let note = self.notes[hold.note_index];
@@ -895,8 +944,8 @@ impl GameplaySimState {
             header,
             health_delta: health_delta,
             score_delta: score_delta,
-            hold_remaining_ms: (hold.end_ms - position_ms).max(0.0),
-            hold_elapsed_ms: position_ms - hold.start_ms,
+            hold_remaining_ms: hold.snapshot_ms,
+            hold_elapsed_ms: sim_ms as f64 - hold.start_ms,
         ));
     }
 

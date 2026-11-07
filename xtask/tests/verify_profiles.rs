@@ -214,7 +214,6 @@ fn invalid_release_options_still_list_all_pending_obligations() {
     let mut not_implemented = [
         "render_diff",
         "perf_budget",
-        "native_note_reference",
         "full_chart_gameplay",
         "ui_save_e2e",
         "ruby_mods",
@@ -239,6 +238,7 @@ fn invalid_release_options_still_list_all_pending_obligations() {
         "replay",
         "input_jitter",
         "gameplay_sim_bopeebo",
+        "native_note_reference",
     ] {
         let gate = gates
             .iter()

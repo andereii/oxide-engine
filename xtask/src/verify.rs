@@ -62,6 +62,7 @@ enum Action {
     ConductorNative,
     ReplayCorpus,
     GameplaySim,
+    NoteNative,
     InputJitter,
     ExternalCi,
     Pending,
@@ -296,17 +297,21 @@ const GATES: &[Gate] = &[
     Gate {
         id: "gameplay_sim_bopeebo",
         milestone: 5,
-        coverage: "Deterministic bopeebo-slice (easy/normal/hard) gameplay trace per docs/M5-CONTRACT.md §2 (schema '1'): input source 'synthesized from chart (no human replay yet)' plus the scripted negative phase (threshold edges 45/46/90/91/135/136, 110-late, 160/161 full path incl. tallies/combo_max, ghost, exact-160 boundary drop, remaining>160 big drop, full-hold tick rates, two-run sha256); per-difficulty trace jsonl with two-run sha256 equality (digests printed). NOT native-game parity; native_note_reference and render_diff/perf_budget remain pending.",
+        coverage: "Deterministic bopeebo-slice (easy/normal/hard) gameplay trace per docs/M5-CONTRACT.md §2 (schema '1'): input source 'synthesized from chart (no human replay yet)' plus the scripted negative phase (threshold edges 45/46/90/91/135/136, 110-late, 160/161 full path incl. tallies/combo_max, ghost, big drop, two-case boundary per §6.1 REVISED: stale 161 penalizing at ceil(t+l-160), stale exactly 160.0 zero-penalty at ceil(t+l-159); full-hold tick rates, two-run sha256); per-difficulty trace jsonl with two-run sha256 equality (digests printed). NOT native-game parity; native_note_reference is a separate frozen-reference gate; render_diff/perf_budget remain pending.",
         action: Action::GameplaySim,
         dependencies: BASELINE,
         timeout_secs: 600,
         ignored_tests: "not_applicable",
     },
-    pending(
-        "native_note_reference",
-        5,
-        "Native PlayState note-judge trace (human ADR-0014-style approval required before any implementation); M5 acceptance stays blocked while pending.",
-    ),
+    Gate {
+        id: "native_note_reference",
+        milestone: 5,
+        coverage: "Frozen native hxcpp PlayState/Scoring/GRhythmUtil rows over the exported bopeebo slice stream (easy/normal/hard, per-tick sim/music_ms/events, schema 'note-stream-1') replayed through oxide_game::slice and compared field-wise (integers/bools/strings exact, f64 abs <= 1e-9, row order/counts exact; labeled §6.1 health-clamp exclusion only after the first native>2.0 / Rust-clamped crossing, every other field strict; two-case boundary: stale 161 penalizing at ceil(t+l-160), stale exactly 160.0 zero-penalty at ceil(t+l-159) per §6.1 REVISED). Fail-closed on missing/ drifted fixtures, asset drift via re-export sha256, and provenance fields; see tests/fixtures/note-native/_manifest_native.json. Synthesized stream; not native-game parity; native rows are frozen reference execution evidence.",
+        action: Action::NoteNative,
+        dependencies: BASELINE,
+        timeout_secs: 600,
+        ignored_tests: "not_applicable",
+    },
     pending("full_chart_gameplay", 6, "Full-chart gameplay acceptance."),
     pending("ui_save_e2e", 7, "UI and save end-to-end acceptance."),
     pending(
@@ -1287,6 +1292,14 @@ fn gate_command(gate: &Gate, options: &Options, root: &Path, executable: &Path) 
             }
             command
         }
+        Action::NoteNative => {
+            let mut command = Command::new(executable);
+            command.arg("note-native");
+            if let Some(assets) = &options.assets {
+                command.arg("--assets").arg(assets);
+            }
+            command
+        }
         Action::InputJitter => {
             let mut command = Command::new(executable);
             command.arg("input-jitter");
@@ -1461,6 +1474,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
                     | Action::Media
                     | Action::ReplayCorpus
                     | Action::GameplaySim
+                    | Action::NoteNative
             ) {
                 match &options.assets {
                     None => prerequisite_errors.push("explicit --assets DIR is required; no implicit home-specific corpus is accepted".into()),
@@ -1481,6 +1495,16 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
                     prerequisite_errors.push(format!(
                         "committed native reference fixtures are missing: {}",
                         native_fixtures.display()
+                    ));
+                }
+            }
+            if matches!(gate.action, Action::NoteNative) {
+                let native_note_fixtures =
+                    root.join("tests/fixtures/note-native/_manifest_native.json");
+                if !native_note_fixtures.is_file() {
+                    prerequisite_errors.push(format!(
+                        "committed native note-reference fixtures are missing: {}",
+                        native_note_fixtures.display()
                     ));
                 }
             }
@@ -2041,6 +2065,7 @@ mod tests {
             "media_synthetic_delay",
             "conductor",
             "gameplay_sim_bopeebo",
+            "native_note_reference",
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
             assert_eq!(gate.dependencies, BASELINE, "{id}");
@@ -2141,7 +2166,7 @@ mod tests {
         for (id, milestone, expected_action) in [
             ("conductor_native_reference", 4, "executable"),
             ("gameplay_sim_bopeebo", 5, "executable"),
-            ("native_note_reference", 5, "pending"),
+            ("native_note_reference", 5, "executable"),
             ("fuzz_parsers", 9, "pending"),
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
@@ -2173,6 +2198,26 @@ mod tests {
                 gameplay.coverage.contains(required),
                 "coverage is missing {required:?}: {}",
                 gameplay.coverage
+            );
+        }
+        let note_native = GATES
+            .iter()
+            .find(|gate| gate.id == "native_note_reference")
+            .unwrap();
+        assert!(matches!(note_native.action, Action::NoteNative));
+        assert_eq!(note_native.timeout_secs, 600);
+        assert_eq!(note_native.ignored_tests, "not_applicable");
+        for required in [
+            "Synthesized stream",
+            "not native-game parity",
+            "native rows are frozen reference execution evidence",
+            "f64 abs <= 1e-9",
+            "asset drift",
+        ] {
+            assert!(
+                note_native.coverage.contains(required),
+                "native note coverage is missing {required:?}: {}",
+                note_native.coverage
             );
         }
     }
@@ -2210,7 +2255,7 @@ mod tests {
             if matches!(gate.action, Action::Corpus(_) | Action::Media) {
                 assert!(args.iter().any(|arg| arg == "--corpus"), "{}", gate.id);
             }
-            if matches!(gate.action, Action::GameplaySim) {
+            if matches!(gate.action, Action::GameplaySim | Action::NoteNative) {
                 assert!(
                     args.iter().any(|arg| arg == "--assets"),
                     "{} must consume the explicit --assets directory",

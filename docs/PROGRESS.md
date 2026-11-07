@@ -647,3 +647,58 @@ the ledger commit that follows this block.
   this is deterministic sim of the frozen rule set over a synthesized stream —
   NOT native-game parity; `native_note_reference` (human approval required),
   `render_diff`, `perf_budget` remain pending and M5 acceptance stays blocked.
+
+## 2026-11-07 — native hxcpp note-reference probe (native_note_reference) green + land/hold semantics corrections
+
+- Human-approved objective #2 of the M5 phase-2a follow-up implemented and
+  validated: a read-only native hxcpp probe (`tools/oracle/note_probe.sh` +
+  retained-body-only Haxe slices/stubs in `tools/oracle/note-probe/`) executing
+  the REAL installed `Scoring`/`GRhythmUtil`/`PlayState` note-score path
+  (macros drop fields, never modify bodies; copied==original sha256 pairs
+  recorded) over the bopeebo synthesized streams; comparator field-wise
+  (ints/bools/strings exact, f64 <=1e-9 labelled, order/sims/key-order exact);
+  `cargo xtask note-native` gate wired (`xtask/src/note_native_check.rs` +
+  verify.rs catalogue: milestone 5, explicit `--assets` fail-closed) with the
+  fixtures frozen by the orchestrator into `tests/fixtures/note-native/`
+  (streams `9737e8a0…/b3c02ffa…/a1cd8b4c…`, rows 18880/17224/14216 digests
+  `923ce1cb…/ae138208…/3c1acd54…`, manifest with real chart `2d1fd06f…` /
+  metadata `f891cd53…`).
+- Evidence: frozen-fixture gate run exit 0 PASS (worst strict f64 delta
+  4.663e-15; labeled health-clamp exclusions easy 58/29 rows first sim 31200,
+  normal 66/33 first 31200, hard 78/39 first 35700, last 75600); `cargo xtask
+  verify --profile quick` exit 0 (57 xtask bin tests, 12 note_native_gate CLI
+  tests incl. reordered-row negative, 21+1 oxide-game, fmt/clippy clean,
+  milestone_acceptance=false); probe negative battery exit 2 on all five
+  conditions; scope audit 98 paths, 0 violations.
+- The native round falsified FOUR sim errors and the review round (HIGH) a
+  frame-order misread, all fixed and revalidated: (1) sub-threshold hold drops
+  dispatch no event (is_combo_break=false, combo unchanged); (2) the real
+  hold mirror runs at frame start with the previous songPosition
+  (PlayState.update super.update L1035 first; Strumline.hx L632→L745 chain:
+  drop detect → completion → keep-clipped → recompute with `end - P`), the
+  stale snapshot at the drop branch is `end-(R-1)`, row at release+1; the
+  `ceil(t+l-160)` boundary release is PENALIZED (stale 161, -20.125) and the
+  zero-penalty boundary is `ceil(t+l-159)` (stale bitwise 160.0) — revising
+  ADR-0018's convention (addendum recorded); (3) windowed misses do not bump
+  total_notes_hit; (4) hold_drop.input_ms = 0.0. Recipe releases at
+  `ceil(t+l)=end` end as zero-penalty drops; hold_end exists only for
+  key-still-held completions (ceil(end)+2). Labeled unclamped-health crossing
+  (update() not retained) is the single engine-decision divergence.
+- Reviews: round 1 verdict BLOCK on the frame-order HIGH (driver overrode the
+  retained sustainLength; real ordering verified in source); round 2 found no
+  behavioral defect and listed documentation-consistency items, all applied:
+  ADR-0019 rewritten to the round-3 regime/counts; M5-CONTRACT §7 corrigendum
+  item 3 now corrects the §2 exact-160 and full-hold wording explicitly with
+  frame-start mirror semantics; NOTE-BEHAVIOR §6.1 item 9 handles the
+  fractional-end release (drop at ceil(end)+1, completion only at R >= end+1
+  with the key path); ADR-0018 addendum pointer added; NOTE-BEHAVIOR §9 item
+  17 marks superseded items and the stale NativeNoteProbe header comment
+  (kept unmodified to preserve frozen source hashes).
+- ADRs: ADR-0019 (probe decisions, frozen set, clamp policy, trust
+  limitation), ADR-0018 addendum. Limitations: no full-game parity claim
+  (probe boundary only; real-game integration traces separate); the gate does
+  not authenticate fixture files (vs the conductor gate's embedded manifest —
+  documented); no Windows/CI evidence; `worktree`-level attribution is not
+  claimed (shared worktree).
+- Next step: approval #3 — M5 phase-2b: stage/character/strumline rendering and
+  animation groundwork toward `render_diff` and `perf_budget` vertical slice.

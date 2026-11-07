@@ -22,18 +22,22 @@
 //! - The six PBOT1 threshold edges (45/46/90/91/135/136 ms) each claim a
 //!   distinct free tap under that same lane/window rule. A difficulty without
 //!   six free taps fails closed; the edges are not folded into 110/160/161.
-//! - The big sustain drop releases one grid tick after the hit (requiring
-//!   `remaining_ms > 160` strictly). The boundary drop releases at
-//!   `ceil(t + l - 160)` and is accepted only when that tick leaves
-//!   `remaining_ms == 160.0` exactly. An integer `t + l` makes
-//!   `t + l - 160` an integer grid tick, so every on-grid sustain longer
-//!   than 160 ms can hit it; a non-integer end cannot, and the old
-//!   `(0, 160]` fallback is gone. Both drops remove the synthesized release,
-//!   keep the press, and must not overlap another same-lane note.
-//! - The full hold keeps both synthesized events, emits one `hold_end` and
-//!   no `hold_drop`, and its ticks must match the frozen accrual rate
-//!   (0.00012 health / 0.25 score per full grid ms; a fractional final tick
-//!   only when the sustain end is off the grid).
+//! - The big sustain drop releases one grid tick after the hit and the
+//!   exact-160 boundary release keeps the frozen ADR-0018 formula
+//!   `ceil(t + l - 160)`; under §6.1 REVISED its mirror snapshot is stale 161,
+//!   so it penalizes (`-20.125`). A second mandatory boundary case releases at
+//!   `ceil(t + l - 159)`, whose stale snapshot is bitwise 160.0 (zero penalty,
+//!   no combo break). Both drops remove the synthesized release, keep the
+//!   press, and must not overlap another same-lane note.
+//! - The full hold keeps both synthesized events. That release is `ceil(end)`,
+//!   two ticks before the completion tick (first integer `T >= end + 2`), so
+//!   the next mirror still sees a positive snapshot in `(0, 1]` and emits a
+//!   zero-penalty `hold_drop` rather than `hold_end` (§6.1 REVISED items 8-9).
+//!   A key that stays down through that completion tick is the `hold_end` path;
+//!   the crate tests cover it. Hold ticks are the fixed per-entry 0.00012/0.25
+//!   rows from the hit tick through `ceil(end)`, with the observed mirror
+//!   snapshot (two full rows, then the 1 ms decay) and no fractional partial.
+//!   The last fractional-end snapshot is `0.5`, never negative.
 //! - The ghost press is placed 1 s after the last note end, safely past every
 //!   note's 160 ms hit window, in the first lane with no scheduled event.
 //! - The sim runs from 0 through `ceil(last note end) + 2000 ms`, so every
@@ -44,9 +48,16 @@
 //! runs twice from fresh state and the gate fails unless both runs are byte
 //! identical. `input_time_us` is pinned to `0.0` by the frozen crate trace.
 //!
+//! The same synthesized stream is exported by [`export_stream`] for the
+//! separate `native_note_reference` gate (`tools/oracle/NOTE-BEHAVIOR.md` §4):
+//! one JSONL header plus one line per 1 ms tick carrying the exact per-tick
+//! slice position and input events. The export reuses the same selection and
+//! conversion path as the trace gate; it does not re-derive the recipe.
+//!
 //! Honesty: this gate proves deterministic simulation of the frozen rule set
 //! over a synthesized stream, not native-game parity. `native_note_reference`
-//! and `render_diff`/`perf_budget` remain separate pending obligations.
+//! is a separate frozen-reference gate; `render_diff`/`perf_budget` remain
+//! separate pending obligations.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -55,15 +66,25 @@ use std::process::ExitCode;
 
 use oxide_data::Typed;
 use oxide_game::slice::{GameplaySimState, InputEvent, TallyCounts, TraceEvent};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::replay::{INPUT_SOURCE, Key, LaneNote, PROVENANCE_JSON, StreamEvent};
 
-const DIFFICULTIES: [&str; 3] = ["easy", "normal", "hard"];
-const CHART_ID: &str = "bopeebo-default";
+pub(crate) const DIFFICULTIES: [&str; 3] = ["easy", "normal", "hard"];
+pub(crate) const CHART_ID: &str = "bopeebo-default";
 const SCHEMA_VERSION: &str = "1";
 const CLI_USAGE: &str = "usage: gameplay-sim [--assets <dir>]";
 const TRACE_DIR: &str = "target/gameplay-sim";
+/// The only stream format the native-note probe and this harness accept.
+pub(crate) const STREAM_SCHEMA: &str = "note-stream-1";
+/// Provenance label for the exported per-tick position.
+///
+/// `oxide_game::slice` has no separate conductor object: its frozen `step`
+/// argument IS the song position. The export writes that exact value so the
+/// Haxe probe feeds its conductor the same per-tick music time.
+pub(crate) const SONGPOS_SOURCE: &str =
+    "oxide_game::slice step sim_ms (per-tick song position; no separate conductor object)";
 
 /// Observed hit window and hold-drop threshold (docs/M5-CONTRACT.md §1).
 const HIT_WINDOW_MS: f64 = 160.0;
@@ -72,14 +93,11 @@ const SCORE_HOLD_DROP_PENALTY_PER_SECOND: f64 = -125.0;
 const LATE_110_MS: f64 = 110.0;
 const EDGE_160_MS: f64 = 160.0;
 const EDGE_161_MS: f64 = 161.0;
-/// Full-grid hold accrual on the 1 ms recipe. `HEALTH_HOLD_BONUS_PER_SECOND`
-/// is 0.12 absolute units/s and `SCORE_HOLD_BONUS_PER_SECOND` is 250/s, so
-/// one grid millisecond is 0.00012 health and 0.25 score (frozen crate).
+/// Fixed per-entry hold accrual under the §6.1 regime. The real branch
+/// multiplies the per-second constants by `elapsed = 0.001` s, yielding
+/// exactly 0.00012 health and 0.25 score for every 1 ms tick.
 const FULL_GRID_HOLD_HEALTH: f64 = 0.00012;
 const FULL_GRID_HOLD_SCORE: f64 = 0.25;
-/// Remainder ticks use the crate's elapsed-seconds formula. The reviewed
-/// fractional-sustain test accepts 1e-12 around that result.
-const HOLD_TICK_EPSILON: f64 = 1e-12;
 
 /// PBOT1 threshold edges from `docs/M5-CONTRACT.md` §2. Each case needs its
 /// own free tap; they are not samples of the 110/160/161 probes.
@@ -174,12 +192,13 @@ pub fn run(rest: &[String]) -> ExitCode {
     println!(
         "gameplay-sim: input source: {INPUT_SOURCE}; scripted negative phase: \
          threshold edges 45/46/90/91/135/136, 110-late, 160/161 full path, ghost, \
-         exact-160 boundary drop, remaining>160 big drop, full-hold tick rates"
+         big drop, two-case boundary (stale 161 penalizing at ceil(t+l-160), stale exactly \
+         160.0 zero-penalty at ceil(t+l-159)), full-hold tick rates"
     );
     println!(
         "gameplay-sim: trace digest covers compact schema-{SCHEMA_VERSION} JSONL with \
-         input_time_us = 0.0; not native-game parity; native_note_reference and \
-         render_diff/perf_budget remain pending"
+         input_time_us = 0.0; not native-game parity; native_note_reference is the separate \
+         frozen native note-row gate; render_diff/perf_budget remain pending"
     );
     if failed.is_empty() {
         ExitCode::SUCCESS
@@ -344,6 +363,128 @@ fn sha_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// One exported stream in the frozen `note-stream-1` format.
+pub(crate) struct ExportedStream {
+    pub difficulty: String,
+    pub tick_count: u64,
+    pub input_count: usize,
+    pub digest: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Line 1 of the frozen stream format (`tools/oracle/NOTE-BEHAVIOR.md` §4).
+#[derive(Serialize)]
+struct StreamHeader<'a> {
+    schema: &'a str,
+    difficulty: &'a str,
+    chart_id: &'a str,
+    tick_count: u32,
+    songpos_source: &'a str,
+}
+
+#[derive(Serialize)]
+struct StreamTick {
+    sim: u64,
+    music_ms: f64,
+    events: Vec<StreamInput>,
+}
+
+#[derive(Serialize)]
+struct StreamInput {
+    kind: &'static str,
+    direction: i64,
+    input_ms: u64,
+}
+
+/// Exports a stream from already-loaded notes.
+///
+/// This is the shared synthesis seam: the production gate loads provenance-
+/// verified notes first, while tests supply synthetic notes over their own
+/// small asset tree. The recipe itself is never re-derived here.
+pub(crate) fn export_stream_from_notes(
+    notes: &[LaneNote],
+    difficulty: &str,
+) -> Result<ExportedStream, String> {
+    if !DIFFICULTIES.contains(&difficulty) {
+        return Err(format!(
+            "unknown difficulty {difficulty:?}; the native-note stream supports easy, normal and hard"
+        ));
+    }
+    if let Some(note) = notes.iter().find(|note| note.difficulty != difficulty) {
+        return Err(format!(
+            "cannot export a {difficulty:?} stream from notes labelled {:?}; the header would lie \
+             about the replay inputs",
+            note.difficulty
+        ));
+    }
+    let PreparedStream { inputs, end_ms, .. } = prepare_stream(notes)?;
+    let tick_count = end_ms
+        .checked_add(1)
+        .ok_or_else(|| "stream tick count overflows u64".to_string())?;
+    let header_ticks = u32::try_from(tick_count)
+        .map_err(|_| format!("stream tick count {tick_count} does not fit the u32 header field"))?;
+
+    let mut bytes = Vec::new();
+    serde_json::to_writer(
+        &mut bytes,
+        &StreamHeader {
+            schema: STREAM_SCHEMA,
+            difficulty,
+            chart_id: CHART_ID,
+            tick_count: header_ticks,
+            songpos_source: SONGPOS_SOURCE,
+        },
+    )
+    .map_err(|error| format!("cannot serialize stream header for {difficulty}: {error}"))?;
+    bytes.push(b'\n');
+
+    let mut next_input = 0usize;
+    for sim in 0..=end_ms {
+        let mut events = Vec::new();
+        while let Some(input) = inputs.get(next_input) {
+            if input_sim(input) != sim {
+                break;
+            }
+            let (kind, direction, input_ms) = match input {
+                InputEvent::Press { sim_ms, direction } => ("press", *direction, *sim_ms),
+                InputEvent::Release { sim_ms, direction } => ("release", *direction, *sim_ms),
+            };
+            events.push(StreamInput {
+                kind,
+                direction,
+                input_ms,
+            });
+            next_input += 1;
+        }
+        serde_json::to_writer(
+            &mut bytes,
+            &StreamTick {
+                sim,
+                // The slice's `step(sim_ms, ...)` argument is the song
+                // position; there is no separate conductor state to read.
+                music_ms: sim as f64,
+                events,
+            },
+        )
+        .map_err(|error| format!("cannot serialize stream tick {sim} for {difficulty}: {error}"))?;
+        bytes.push(b'\n');
+    }
+    if next_input != inputs.len() {
+        return Err(format!(
+            "{} input event(s) remain after the exported {difficulty} stream end",
+            inputs.len() - next_input
+        ));
+    }
+    let digest = sha_hex(&bytes);
+    Ok(ExportedStream {
+        difficulty: difficulty.to_string(),
+        tick_count,
+        input_count: inputs.len(),
+        digest,
+        bytes,
+    })
+}
+
 /// One fresh pipeline pass over the frozen bopeebo chart.
 fn simulate_difficulty(assets_root: &Path, difficulty: &str) -> Result<PassOutput, String> {
     let notes = load_verified_notes(assets_root, difficulty)?;
@@ -354,7 +495,10 @@ fn simulate_difficulty(assets_root: &Path, difficulty: &str) -> Result<PassOutpu
 /// chart order (the order the slice sim uses for `note_id`). The chart and its
 /// metadata must match the frozen M4 provenance inventory; arbitrary mods or a
 /// drifted checkout are rejected rather than silently accepted as the corpus.
-fn load_verified_notes(assets_root: &Path, difficulty: &str) -> Result<Vec<LaneNote>, String> {
+pub(crate) fn load_verified_notes(
+    assets_root: &Path,
+    difficulty: &str,
+) -> Result<Vec<LaneNote>, String> {
     let inventory = provenance_inventory()?;
     let chart_provenance_path =
         crate::replay::resolve_chart_path(CHART_ID, &inventory).map_err(|error| error.0)?;
@@ -487,11 +631,18 @@ struct PassOutput {
     end_ms: u64,
 }
 
-fn simulate_with_notes(
-    assets_root: &Path,
-    difficulty: &str,
-    notes: &[LaneNote],
-) -> Result<PassOutput, String> {
+/// The scripted synthesis shared by the trace gate and the stream export.
+struct PreparedStream {
+    script: Script,
+    inputs: Vec<InputEvent>,
+    end_ms: u64,
+}
+
+/// Synthesizes the frozen scripted stream and converts it to the 1 ms grid.
+///
+/// This is the single synthesis path used by both the gameplay trace gate and
+/// the native-note stream export; callers must not re-derive the recipe.
+fn prepare_stream(notes: &[LaneNote]) -> Result<PreparedStream, String> {
     let script = select_script(notes)?;
     let stream = build_scripted_stream(notes, &script)?;
     let inputs = to_input_events(&stream)?;
@@ -510,6 +661,23 @@ fn simulate_with_notes(
             script.ghost_sim, end_ms
         ));
     }
+    Ok(PreparedStream {
+        script,
+        inputs,
+        end_ms,
+    })
+}
+
+fn simulate_with_notes(
+    assets_root: &Path,
+    difficulty: &str,
+    notes: &[LaneNote],
+) -> Result<PassOutput, String> {
+    let PreparedStream {
+        script,
+        inputs,
+        end_ms,
+    } = prepare_stream(notes)?;
 
     let mut sim = GameplaySimState::build(assets_root, difficulty)
         .map_err(|error| format!("failed to build the bopeebo {difficulty} sim: {error}"))?;
@@ -716,10 +884,15 @@ struct HoldTarget {
     note_id: u32,
     lane: i64,
     press_sim: u64,
+    /// Release/flag tick (the grid release for a scripted drop; `ceil(end)`
+    /// for a full hold). Drop rows are emitted on this tick + 1 under the
+    /// §6.1 REVISED mirror (`release+1`), while hold_end is two ticks after
+    /// the last accrual.
     release_sim: u64,
+    /// Base-note strum time, used by the mirror's `P > strumTime` guard and
+    /// the stale-snapshot formula.
+    strum_time_ms: f64,
     /// Chart sustain end, `note.t + note.l`, not the grid release.
-    /// `remaining_ms` is `end_ms - release_sim`, computed at the check so the
-    /// stored release tick cannot drift from the asserted remainder.
     end_ms: f64,
 }
 
@@ -730,7 +903,12 @@ struct Script {
     edge_160: ScriptedTarget,
     edge_161: ScriptedTarget,
     big_drop: HoldTarget,
-    boundary_drop: HoldTarget,
+    /// ADR-0018 release `ceil(t+l-160)`: its mirror snapshot is 161 ms, so
+    /// the real branch penalizes.
+    boundary_160: HoldTarget,
+    /// New no-penalty boundary release `ceil(t+l-159)`: its mirror snapshot
+    /// is exactly 160.0.
+    boundary_exact_160: HoldTarget,
     full_hold: HoldTarget,
     ghost_sim: u64,
     ghost_direction: i64,
@@ -783,12 +961,34 @@ fn select_script(notes: &[LaneNote]) -> Result<Script, String> {
         to: big_drop.release_sim,
     });
 
-    let boundary_drop = select_boundary_drop(notes, &used, &scheduled)?;
-    used.insert(boundary_drop.note_index);
+    let boundary_160 = select_boundary_drop(
+        notes,
+        &used,
+        &scheduled,
+        160.0,
+        161.0,
+        "stale 161 penalizing",
+    )?;
+    used.insert(boundary_160.note_index);
     scheduled.push(LaneInterval {
-        lane: boundary_drop.lane,
-        from: boundary_drop.press_sim,
-        to: boundary_drop.release_sim,
+        lane: boundary_160.lane,
+        from: boundary_160.press_sim,
+        to: boundary_160.release_sim,
+    });
+
+    let boundary_exact_160 = select_boundary_drop(
+        notes,
+        &used,
+        &scheduled,
+        159.0,
+        160.0,
+        "stale exactly 160.0 zero-penalty",
+    )?;
+    used.insert(boundary_exact_160.note_index);
+    scheduled.push(LaneInterval {
+        lane: boundary_exact_160.lane,
+        from: boundary_exact_160.press_sim,
+        to: boundary_exact_160.release_sim,
     });
 
     let full_hold = select_full_hold(notes, &used, &scheduled)?;
@@ -838,7 +1038,8 @@ fn select_script(notes: &[LaneNote]) -> Result<Script, String> {
         edge_160,
         edge_161,
         big_drop,
-        boundary_drop,
+        boundary_160,
+        boundary_exact_160,
         full_hold,
         ghost_sim,
         ghost_direction,
@@ -909,8 +1110,8 @@ fn select_big_drop(
             .checked_add(1)
             .ok_or_else(|| "early sustain release overflows u64 milliseconds".to_string())?;
         let end_ms = note.time_ms + note.hold_ms;
-        let remaining_ms = end_ms - release_sim as f64;
-        if remaining_ms <= HOLD_DROP_THRESHOLD_MS || (release_sim as f64) >= end_ms {
+        let stale_ms = stale_snapshot(end_ms, note.time_ms, release_sim);
+        if stale_ms <= HOLD_DROP_THRESHOLD_MS || (release_sim as f64) >= end_ms {
             continue;
         }
         if !lane_interval_free(
@@ -929,34 +1130,34 @@ fn select_big_drop(
             lane: note.direction,
             press_sim,
             release_sim,
+            strum_time_ms: note.time_ms,
             end_ms,
         });
     }
     Err(
-        "no sustain note can be released with `remaining_ms > 160` while its lane stays free; \
-         the negative acceptance phase refuses to skip"
+        "no sustain note can be released with a stale mirror snapshot > 160 while its lane \
+         stays free; the negative acceptance phase refuses to skip"
             .into(),
     )
 }
 
-/// Selects a sustain whose release tick leaves `remaining_ms == 160.0` exactly.
+/// Selects a sustain for one of the two §6.1 REVISED boundary cases.
 ///
-/// The old `(0, 160]` fallback is gone: a near miss does not prove the strict
-/// `>` penalty gate. Exact 160 is a grid property. The sim drops on an integer
-/// `release_sim` and computes `remaining_ms = (t + l) - release_sim`, which
-/// equals 160.0 iff `t + l - 160` is an integer millisecond. Then
-/// `ceil(t + l - 160)` is that same tick. Integer `t` and integer `l` (every
-/// on-grid sustain) satisfy it, and a sustain longer than 160 ms releases
-/// strictly after the press; `l == 160` releases on the press tick, which the
-/// frozen sim still drops after the same-tick hit. A non-integer end cannot
-/// hit 160.0 on any integer release, so those sustains are skipped rather than
-/// accepted. No lane-free exact candidate fails closed.
+/// `offset_ms` is the frozen release formula `ceil(t + l - offset_ms)`
+/// (`160` for the ADR-0018 penalizing case, `159` for the new zero-penalty
+/// case). The mirror at `release_sim + 1` sees the snapshot last set at
+/// `release_sim`; when `release_sim - 1 > strumTime` that snapshot is
+/// `end - (release_sim - 1)`, otherwise it is still the hit capture `full`.
+/// The selected note must produce `expected_stale_ms` bitwise.
 fn select_boundary_drop(
     notes: &[LaneNote],
     used: &BTreeSet<usize>,
     scheduled: &[LaneInterval],
+    offset_ms: f64,
+    expected_stale_ms: f64,
+    label: &str,
 ) -> Result<HoldTarget, String> {
-    let mut integer_ends = 0usize;
+    let mut stale_matches = 0usize;
     let mut lane_blocked = 0usize;
     for (index, note) in notes.iter().enumerate() {
         if used.contains(&index) || note.hold_ms <= 0.0 {
@@ -964,23 +1165,19 @@ fn select_boundary_drop(
         }
         let press_sim = grid_ms(note.time_ms)?;
         let end_ms = note.time_ms + note.hold_ms;
-        let release_target = end_ms - HOLD_DROP_THRESHOLD_MS;
+        let release_target = end_ms - offset_ms;
         if release_target < 0.0 {
             continue;
         }
         let release_sim = grid_ms(release_target)?;
-        let remaining_ms = end_ms - release_sim as f64;
-        // `ceil` does not change an integer, so this is the exact-160 test.
-        // A fractional end ceils away from 160.0 and is rejected here.
-        if !same_f64(remaining_ms, HOLD_DROP_THRESHOLD_MS) {
+        if release_sim <= press_sim || (release_sim as f64) >= end_ms {
             continue;
         }
-        // Releasing before the hit cannot leave 160 ms after the hit. The
-        // press tick itself is allowed (`l == 160` on an integer start).
-        if release_sim < press_sim || (release_sim as f64) >= end_ms {
+        let stale_ms = stale_snapshot(end_ms, note.time_ms, release_sim);
+        if !same_f64(stale_ms, expected_stale_ms) {
             continue;
         }
-        integer_ends += 1;
+        stale_matches += 1;
         if !lane_interval_free(
             notes,
             note.direction,
@@ -998,16 +1195,31 @@ fn select_boundary_drop(
             lane: note.direction,
             press_sim,
             release_sim,
+            strum_time_ms: note.time_ms,
             end_ms,
         });
     }
     Err(format!(
-        "no lane-free sustain produces remaining_ms == 160.0 exactly (release at \
-         ceil(t + l - 160)); integer-end sustains that hit 160.0: {integer_ends}, \
-         of which {lane_blocked} were blocked by a same-lane note or an earlier \
-         scripted interval; the exact-160 boundary drop is mandatory and the \
-         negative acceptance phase refuses to skip"
+        "no lane-free sustain produces the {label} boundary case (release at \
+         ceil(t + l - {offset_ms}), stale mirror snapshot {expected_stale_ms}); \
+         stale-matching candidates: {stale_matches}, of which {lane_blocked} were blocked by a \
+         same-lane note or an earlier scripted interval; both §6.1 REVISED boundary cases are \
+         mandatory and the negative acceptance phase refuses to skip"
     ))
+}
+
+/// Snapshot observed by the mirror at `release_sim + 1`.
+///
+/// The snapshot is last set at frame `release_sim`: the recompute there uses
+/// `P = release_sim - 1` when that is strictly past the strum time; otherwise
+/// the hold still carries the hit capture (`full`).
+fn stale_snapshot(end_ms: f64, strum_time_ms: f64, release_sim: u64) -> f64 {
+    let mirror_position = release_sim as f64 - 1.0;
+    if mirror_position > strum_time_ms {
+        end_ms - mirror_position
+    } else {
+        end_ms - strum_time_ms
+    }
 }
 
 fn same_f64(left: f64, right: f64) -> bool {
@@ -1045,6 +1257,7 @@ fn select_full_hold(
             lane: note.direction,
             press_sim,
             release_sim,
+            strum_time_ms: note.time_ms,
             end_ms,
         });
     }
@@ -1119,8 +1332,10 @@ fn build_scripted_stream(notes: &[LaneNote], script: &Script) -> Result<Vec<Stre
         });
         let release = if index == script.big_drop.note_index {
             script.big_drop.release_sim as f64
-        } else if index == script.boundary_drop.note_index {
-            script.boundary_drop.release_sim as f64
+        } else if index == script.boundary_160.note_index {
+            script.boundary_160.release_sim as f64
+        } else if index == script.boundary_exact_160.note_index {
+            script.boundary_exact_160.release_sim as f64
         } else {
             release_audio(note)
         };
@@ -1183,7 +1398,7 @@ fn validate_expectations(
     trace: &[TraceEvent],
     script: &Script,
 ) -> Result<Vec<(&'static str, String)>, String> {
-    let mut checks = Vec::with_capacity(THRESHOLD_CASES.len() + 7);
+    let mut checks = Vec::with_capacity(THRESHOLD_CASES.len() + 8);
     for (case, target) in THRESHOLD_CASES.iter().zip(script.thresholds.iter()) {
         let detail = check_threshold(trace, target, case)
             .map_err(|error| format!("{} check: {error}", case.name))?;
@@ -1200,8 +1415,22 @@ fn validate_expectations(
     check_hold_inventory(trace, script).map_err(|error| format!("holds check: {error}"))?;
     let big_drop =
         check_big_drop(trace, script).map_err(|error| format!("hold_big_drop check: {error}"))?;
-    let boundary = check_boundary_drop(trace, script)
-        .map_err(|error| format!("hold_boundary_160 check: {error}"))?;
+    let boundary = check_boundary_drop(
+        trace,
+        &script.boundary_160,
+        "hold_boundary_160",
+        161.0,
+        true,
+    )
+    .map_err(|error| format!("hold_boundary_160 check: {error}"))?;
+    let boundary_exact = check_boundary_drop(
+        trace,
+        &script.boundary_exact_160,
+        "hold_boundary_exact_160",
+        160.0,
+        false,
+    )
+    .map_err(|error| format!("hold_boundary_exact_160 check: {error}"))?;
     let full_hold = check_full_hold(trace, script)
         .map_err(|error| format!("hold_full_ticks check: {error}"))?;
     if let Some(event) = trace
@@ -1230,6 +1459,7 @@ fn validate_expectations(
     checks.push(("ghost_press", ghost));
     checks.push(("hold_big_drop", big_drop));
     checks.push(("hold_boundary_160", boundary));
+    checks.push(("hold_boundary_exact_160", boundary_exact));
     checks.push(("hold_full_ticks", full_hold));
     Ok(checks)
 }
@@ -1596,30 +1826,86 @@ struct PriorJudgement {
 }
 
 fn check_hold_inventory(trace: &[TraceEvent], script: &Script) -> Result<(), String> {
-    let drop_notes: Vec<u32> = trace
+    // Every synthesized sustain releases at or before `ceil(end)`. That is two
+    // ticks before the completion tick, so the next mirror still sees a
+    // positive snapshot and drops. `hold_end` requires the key to still be
+    // down at the first integer `T >= end + 2` (§6.1 REVISED items 8-9).
+    let ends: Vec<u32> = trace
         .iter()
         .filter_map(|event| match event {
-            TraceEvent::HoldDrop { note_id, .. } => Some(*note_id),
+            TraceEvent::HoldEnd { note_id, .. } => Some(*note_id),
             _ => None,
         })
         .collect();
-    if drop_notes.len() != 2
-        || !drop_notes.contains(&script.big_drop.note_id)
-        || !drop_notes.contains(&script.boundary_drop.note_id)
-    {
+    if !ends.is_empty() {
         return Err(format!(
-            "expected exactly the two scripted hold drops (notes {} and {}), found {drop_notes:?}",
-            script.big_drop.note_id, script.boundary_drop.note_id
+            "synthesized releases land at ceil(end), before the §6.1 REVISED completion tick; \
+             expected no hold_end, found {ends:?}"
         ));
+    }
+    let starts: BTreeSet<u32> = trace
+        .iter()
+        .filter_map(|event| match event {
+            TraceEvent::HoldStart { note_id, .. } => Some(*note_id),
+            _ => None,
+        })
+        .collect();
+    let early = [
+        script.big_drop.note_id,
+        script.boundary_160.note_id,
+        script.boundary_exact_160.note_id,
+    ];
+    let mut drop_notes = Vec::new();
+    for event in trace {
+        let TraceEvent::HoldDrop {
+            note_id,
+            input_ms,
+            score_penalty,
+            combo_before,
+            combo_after,
+            is_combo_break,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        drop_notes.push(*note_id);
+        if early.contains(note_id) {
+            continue;
+        }
+        if *input_ms != 0.0
+            || *score_penalty != 0.0
+            || *is_combo_break
+            || combo_after != combo_before
+        {
+            return Err(format!(
+                "end-release drop note {note_id} has input_ms {input_ms} score_penalty \
+                 {score_penalty} is_combo_break={is_combo_break} combo {combo_before} -> \
+                 {combo_after}; the stale snapshot is in (0, 1] and must not penalize \
+                 (§6.1 REVISED items 8-9)"
+            ));
+        }
+    }
+    let drop_set: BTreeSet<u32> = drop_notes.iter().copied().collect();
+    if drop_notes.len() != drop_set.len() || drop_set != starts {
+        return Err(format!(
+            "every hold_start must drop exactly once under the synthesized ceil(end) release; \
+             starts {starts:?}, drops {drop_notes:?}"
+        ));
+    }
+    for note_id in early.into_iter().chain([script.full_hold.note_id]) {
+        if !drop_set.contains(&note_id) {
+            return Err(format!("scripted sustain {note_id} did not drop"));
+        }
     }
     Ok(())
 }
 
 fn check_big_drop(trace: &[TraceEvent], script: &Script) -> Result<String, String> {
-    let remaining_ms = hold_remaining(&script.big_drop);
-    if remaining_ms <= HOLD_DROP_THRESHOLD_MS {
+    let stale_ms = hold_stale_snapshot(&script.big_drop);
+    if stale_ms <= HOLD_DROP_THRESHOLD_MS {
         return Err(format!(
-            "big sustain drop note {} remaining {remaining_ms} ms is not > 160",
+            "big sustain drop note {} stale snapshot {stale_ms} ms is not > 160",
             script.big_drop.note_id
         ));
     }
@@ -1635,11 +1921,11 @@ fn check_big_drop(trace: &[TraceEvent], script: &Script) -> Result<String, Strin
     else {
         return Err("matched a non-hold_drop trace event".into());
     };
-    let expected_penalty = remaining_ms / 1000.0 * SCORE_HOLD_DROP_PENALTY_PER_SECOND;
+    let expected_penalty = SCORE_HOLD_DROP_PENALTY_PER_SECOND * stale_ms / 1000.0;
     if (*score_penalty - expected_penalty).abs() > 1e-12 {
         return Err(format!(
             "big sustain drop note {} has score_penalty {score_penalty}; expected \
-             remaining_sec * -125.0 = {expected_penalty}",
+             stale_snapshot/1000 * -125.0 = {expected_penalty}",
             script.big_drop.note_id
         ));
     }
@@ -1658,122 +1944,202 @@ fn check_big_drop(trace: &[TraceEvent], script: &Script) -> Result<String, Strin
         ));
     }
     Ok(format!(
-        "note {} release {} remaining_ms {remaining_ms} > 160 penalty {expected_penalty} \
-         health 0.0 combo break",
-        script.big_drop.note_id, script.big_drop.release_sim
+        "note {} release {} stale snapshot {stale_ms} > 160 penalty {expected_penalty} \
+         health 0.0 combo break; hold_drop at sim {}",
+        script.big_drop.note_id,
+        script.big_drop.release_sim,
+        hold_drop_sim(&script.big_drop)?
     ))
 }
 
-fn check_boundary_drop(trace: &[TraceEvent], script: &Script) -> Result<String, String> {
-    let remaining_ms = hold_remaining(&script.boundary_drop);
-    if !same_f64(remaining_ms, HOLD_DROP_THRESHOLD_MS) {
+/// Checks one of the two §6.1 REVISED boundary cases.
+///
+/// `expected_stale_ms` is the mirror snapshot observed on the penalty tick,
+/// not the projected `end - release` value. The ADR-0018 `ceil(t+l-160)`
+/// release sees stale 161 and penalizes; the new `ceil(t+l-159)` release sees
+/// bitwise 160.0 and must not penalize or break combo.
+fn check_boundary_drop(
+    trace: &[TraceEvent],
+    target: &HoldTarget,
+    name: &str,
+    expected_stale_ms: f64,
+    penalizing: bool,
+) -> Result<String, String> {
+    let stale_ms = hold_stale_snapshot(target);
+    if !same_f64(stale_ms, expected_stale_ms) {
         return Err(format!(
-            "boundary sustain drop note {} release {} leaves remaining_ms {remaining_ms}; \
-             expected exactly 160.0 (the strict > 160 penalty gate)",
-            script.boundary_drop.note_id, script.boundary_drop.release_sim
+            "{name}: sustain drop note {} release {} observes stale snapshot {stale_ms}; \
+             expected bitwise {expected_stale_ms}",
+            target.note_id, target.release_sim
         ));
     }
-    let boundary = find_hold_drop(trace, &script.boundary_drop)?;
+    let boundary = find_hold_drop(trace, target)?;
     let TraceEvent::HoldDrop {
+        sim,
+        input_ms,
         score_penalty,
         health_change,
+        combo_before,
+        combo_after,
         is_combo_break,
         ..
     } = boundary
     else {
         return Err("matched a non-hold_drop trace event".into());
     };
-    if *score_penalty != 0.0 {
+    let drop_sim = hold_drop_sim(target)?;
+    if *sim != drop_sim {
         return Err(format!(
-            "exact-160 boundary sustain drop note {} has score_penalty {score_penalty}; \
-             remaining_ms == 160.0 must not trigger the strict > 160 ms penalty",
-            script.boundary_drop.note_id
+            "{name}: sustain drop note {} emitted at sim {sim}; expected the mirror penalty \
+             tick {drop_sim}",
+            target.note_id
         ));
     }
-    if *health_change != 0.0 || !*is_combo_break {
+    if *input_ms != 0.0 {
         return Err(format!(
-            "exact-160 boundary sustain drop note {} has health_change {health_change} \
-             is_combo_break={is_combo_break}; expected zero health and a combo break",
-            script.boundary_drop.note_id
+            "{name}: sustain drop note {} has input_ms {input_ms}; a hold drop is a non-input \
+             event with input_ms 0.0",
+            target.note_id
         ));
     }
+    let expected_penalty = if penalizing {
+        SCORE_HOLD_DROP_PENALTY_PER_SECOND * stale_ms / 1000.0
+    } else {
+        0.0
+    };
+    if (*score_penalty - expected_penalty).abs() > 1e-12 {
+        return Err(format!(
+            "{name}: sustain drop note {} has score_penalty {score_penalty}; expected \
+             {expected_penalty} from stale snapshot {stale_ms}",
+            target.note_id
+        ));
+    }
+    if *health_change != 0.0 {
+        return Err(format!(
+            "{name}: sustain drop note {} has health_change {health_change}; expected 0.0",
+            target.note_id
+        ));
+    }
+    if penalizing {
+        if !*is_combo_break || *combo_after != 0 {
+            return Err(format!(
+                "{name}: sustain drop note {} combo {combo_before} -> {combo_after} \
+                 is_combo_break={is_combo_break}; expected a penalizing combo break to 0",
+                target.note_id
+            ));
+        }
+    } else if *is_combo_break || *combo_after != *combo_before {
+        return Err(format!(
+            "{name}: sustain drop note {} combo {combo_before} -> {combo_after} \
+             is_combo_break={is_combo_break}; expected no combo change on the zero-penalty branch",
+            target.note_id
+        ));
+    }
+    let branch = if penalizing {
+        "penalizing"
+    } else {
+        "zero penalty / no combo break"
+    };
     Ok(format!(
-        "note {} release {} remaining_ms == 160.0 penalty 0.0 health 0.0 combo break",
-        script.boundary_drop.note_id, script.boundary_drop.release_sim
+        "note {} release {} stale snapshot {stale_ms} -> {branch}; score_penalty \
+         {expected_penalty} health 0.0; hold_drop at sim {drop_sim}",
+        target.note_id, target.release_sim
     ))
 }
 
 fn check_full_hold(trace: &[TraceEvent], script: &Script) -> Result<String, String> {
-    let full = find_hold_end(trace, &script.full_hold)?;
+    // The synthesized release is `ceil(end)`, two ticks before the completion
+    // tick. The drop mirror therefore still sees `end - (ceil(end)-1)`, which
+    // is in `(0, 1]`, and emits a zero-penalty drop. `hold_end` is only the
+    // key-still-down path (§6.1 REVISED items 8-9); crate tests cover it.
     if trace.iter().any(|event| {
-        matches!(event, TraceEvent::HoldDrop { note_id, .. } if *note_id == script.full_hold.note_id)
+        matches!(event, TraceEvent::HoldEnd { note_id, .. } if *note_id == script.full_hold.note_id)
     }) {
         return Err(format!(
-            "full hold note {} emitted a hold_drop; it must run to hold_end",
+            "full hold note {} emitted hold_end; the synthesized ceil(end) release drops \
+             while the snapshot is still positive (§6.1 REVISED items 8-9)",
             script.full_hold.note_id
         ));
     }
-    if !trace.iter().any(|event| {
-        matches!(event, TraceEvent::HoldStart { note_id, .. } if *note_id == script.full_hold.note_id)
-    }) {
+    let ceil_end = grid_ms(script.full_hold.end_ms)?;
+    if script.full_hold.release_sim != ceil_end {
         return Err(format!(
-            "full hold note {} never emitted hold_start",
+            "full hold note {} release {} is not ceil(end) {ceil_end}",
+            script.full_hold.note_id, script.full_hold.release_sim
+        ));
+    }
+    let expected_stale = script.full_hold.end_ms - (ceil_end as f64 - 1.0);
+    if !(expected_stale > 0.0 && expected_stale <= 1.0) {
+        return Err(format!(
+            "full hold note {} end-release remainder {expected_stale} is not in (0, 1]",
             script.full_hold.note_id
         ));
     }
-    let TraceEvent::HoldEnd { sim, .. } = full else {
-        return Err("matched a non-hold_end trace event".into());
-    };
-    if *sim != script.full_hold.release_sim {
-        return Err(format!(
-            "full hold note {} ended at sim {}; expected the grid release tick {}",
-            script.full_hold.note_id, sim, script.full_hold.release_sim
-        ));
-    }
+    let drop = check_boundary_drop(
+        trace,
+        &script.full_hold,
+        "hold_full_release",
+        expected_stale,
+        false,
+    )?;
     let ticks = check_full_hold_ticks(trace, &script.full_hold)?;
     Ok(format!(
-        "note {} hold_end at sim {} with no drop; {ticks}",
-        script.full_hold.note_id, script.full_hold.release_sim
+        "note {} end-release zero-penalty drop ({drop}); {ticks}",
+        script.full_hold.note_id
     ))
 }
 
-fn hold_remaining(target: &HoldTarget) -> f64 {
-    target.end_ms - target.release_sim as f64
+fn hold_stale_snapshot(target: &HoldTarget) -> f64 {
+    stale_snapshot(target.end_ms, target.strum_time_ms, target.release_sim)
 }
 
-/// Hold ticks the frozen sim emits for a key held through `ceil(end_ms)` on
-/// the 1 ms harness grid.
+/// The snapshot observed by the accrual branch at tick `sim`.
 ///
-/// Steps strictly before the end accrue `delta_ms = 1`. The step that first
-/// reaches the end (the release tick) emits the leftover `end - last_tick`:
-/// another full millisecond when `end` is on the grid, otherwise the
-/// fractional remainder and only that remainder. The crate emits that
-/// leftover inside `finish_hold`, immediately before `hold_end`.
-fn expected_hold_ticks(press_sim: u64, end_ms: f64) -> Result<Vec<(u64, f64)>, String> {
+/// T0 uses the hit capture (`full`); T0+1 still sees `full` for an on-time
+/// hit because the mirror's `P = T0` does not exceed `strumTime`. From T0+2
+/// onward the mirror recomputes `end - (T-1)`, so the last accrual at
+/// `ceil(end)` carries the positive stale value (1 ms for integer ends,
+/// `0.5` for a `.5` end).
+fn observed_snapshot(target: &HoldTarget, sim: u64) -> f64 {
+    let full = target.end_ms - target.strum_time_ms;
+    if sim == target.press_sim {
+        full
+    } else {
+        let mirror_position = sim as f64 - 1.0;
+        if mirror_position > target.strum_time_ms {
+            target.end_ms - mirror_position
+        } else {
+            full
+        }
+    }
+}
+
+/// The `hold_drop` row is emitted on the same mirror tick that flags the
+/// hold, one tick after the release (`release+1`) under §6.1 REVISED.
+fn hold_drop_sim(target: &HoldTarget) -> Result<u64, String> {
+    target.release_sim.checked_add(1).ok_or_else(|| {
+        format!(
+            "mirror hold-drop tick overflows u64 for note {}",
+            target.note_id
+        )
+    })
+}
+
+/// Hold ticks emitted by the frozen §6.1 regime for a key held through
+/// `ceil(end_ms)`: the hit tick T0 and every tick through `ceil(end)`, each
+/// carrying the fixed per-entry 1 ms delta. There is no fractional remainder
+/// row.
+fn expected_hold_ticks(press_sim: u64, end_ms: f64) -> Result<Vec<u64>, String> {
     if !end_ms.is_finite() || end_ms < 0.0 {
         return Err(format!("full hold end {end_ms} is not a usable timestamp"));
     }
-    let mut last_tick = press_sim as f64;
-    let mut sim = press_sim;
-    let mut ticks = Vec::new();
-    loop {
-        sim = sim
-            .checked_add(1)
-            .ok_or_else(|| "hold tick timestamp overflow".to_string())?;
-        let position = sim as f64;
-        if position >= end_ms {
-            if last_tick < end_ms {
-                ticks.push((sim, end_ms - last_tick));
-            }
-            break;
-        }
-        if position > last_tick {
-            let delta = position - last_tick;
-            last_tick = position;
-            ticks.push((sim, delta));
-        }
+    let last = grid_ms(end_ms).map_err(|error| format!("full hold end {end_ms}: {error}"))?;
+    if last < press_sim {
+        return Err(format!(
+            "full hold end {end_ms} (ceil {last}) precedes the hit tick {press_sim}"
+        ));
     }
-    Ok(ticks)
+    Ok((press_sim..=last).collect())
 }
 
 fn check_full_hold_ticks(trace: &[TraceEvent], target: &HoldTarget) -> Result<String, String> {
@@ -1786,8 +2152,8 @@ fn check_full_hold_ticks(trace: &[TraceEvent], target: &HoldTarget) -> Result<St
         .collect();
     if actual.len() != expected.len() {
         return Err(format!(
-            "full hold note {} emitted {} hold_tick(s); expected {} from the 1 ms remainder \
-             rule (press {}, end {})",
+            "full hold note {} emitted {} hold_tick(s); expected {} fixed per-entry ticks \
+             from hit tick {} through ceil(end) {} (no fractional partial)",
             target.note_id,
             actual.len(),
             expected.len(),
@@ -1795,78 +2161,57 @@ fn check_full_hold_ticks(trace: &[TraceEvent], target: &HoldTarget) -> Result<St
             target.end_ms
         ));
     }
-    let mut full_ticks = 0usize;
-    let mut remainder = None;
-    for (event, (sim, delta_ms)) in actual.iter().zip(expected.iter().copied()) {
+    for (event, expected_sim) in actual.iter().zip(expected.iter().copied()) {
         let TraceEvent::HoldTick {
             sim: event_sim,
             health_delta,
             score_delta,
+            hold_remaining_ms,
+            hold_elapsed_ms,
             ..
         } = event
         else {
             return Err("matched a non-hold_tick trace event".into());
         };
-        if *event_sim != sim {
+        if *event_sim != expected_sim {
             return Err(format!(
-                "full hold note {} tick at sim {event_sim}; expected sim {sim}",
+                "full hold note {} tick at sim {event_sim}; expected sim {expected_sim}",
                 target.note_id
             ));
         }
-        if same_f64(delta_ms, 1.0) {
-            full_ticks += 1;
-            if !same_f64(*health_delta, FULL_GRID_HOLD_HEALTH)
-                || !same_f64(*score_delta, FULL_GRID_HOLD_SCORE)
-            {
-                return Err(format!(
-                    "full-grid hold_tick note {} sim {sim} has health_delta {health_delta} \
-                     score_delta {score_delta}; expected 0.00012 and 0.25",
-                    target.note_id
-                ));
-            }
-        } else if remainder.is_some() {
+        if !same_f64(*health_delta, FULL_GRID_HOLD_HEALTH)
+            || !same_f64(*score_delta, FULL_GRID_HOLD_SCORE)
+        {
             return Err(format!(
-                "full hold note {} has more than one non-grid hold_tick; only the final \
-                 fractional remainder is allowed",
+                "full hold note {} tick sim {event_sim} has health_delta {health_delta} \
+                 score_delta {score_delta}; expected the fixed per-entry 0.00012 and 0.25",
                 target.note_id
             ));
-        } else {
-            let elapsed_seconds = delta_ms / 1000.0;
-            // Same expression as the frozen crate: 6% of HEALTH_MAX (2.0)
-            // and 250 score units, times the leftover seconds.
-            let expected_health = (6.0 / 100.0 * 2.0) * elapsed_seconds;
-            let expected_score = 250.0 * elapsed_seconds;
-            if (*health_delta - expected_health).abs() > HOLD_TICK_EPSILON
-                || (*score_delta - expected_score).abs() > HOLD_TICK_EPSILON
-            {
-                return Err(format!(
-                    "fractional final hold_tick note {} sim {sim} delta {delta_ms} ms has \
-                     health_delta {health_delta} score_delta {score_delta}; expected \
-                     {expected_health} and {expected_score} (0.12 and 250.0 per second)",
-                    target.note_id
-                ));
-            }
-            remainder = Some((sim, delta_ms));
         }
-    }
-    if let Some((sim, _)) = remainder {
-        let last_sim = expected.last().map(|(tick_sim, _)| *tick_sim);
-        if last_sim != Some(sim) {
+        let expected_remaining = observed_snapshot(target, *event_sim);
+        if !same_f64(*hold_remaining_ms, expected_remaining) {
             return Err(format!(
-                "fractional hold_tick note {} at sim {sim} is not the final tick before hold_end",
+                "full hold note {} tick sim {event_sim} has hold_remaining_ms \
+                 {hold_remaining_ms}; expected the observed mirror snapshot {expected_remaining}",
+                target.note_id
+            ));
+        }
+        let expected_elapsed = *event_sim as f64 - target.press_sim as f64;
+        if !same_f64(*hold_elapsed_ms, expected_elapsed) {
+            return Err(format!(
+                "full hold note {} tick sim {event_sim} has hold_elapsed_ms \
+                 {hold_elapsed_ms}; expected sim - hit tick = {expected_elapsed}",
                 target.note_id
             ));
         }
     }
-    let remainder_detail = match remainder {
-        Some((sim, delta_ms)) => {
-            format!("present at sim {sim} delta {delta_ms} ms")
-        }
-        None => "absent".to_string(),
-    };
+    let detail_last = expected.last().copied().unwrap_or(target.press_sim);
     Ok(format!(
-        "{full_ticks} full-grid ticks at health_delta 0.00012 score_delta 0.25; fractional \
-         remainder {remainder_detail}"
+        "{} fixed per-entry ticks at health_delta 0.00012 score_delta 0.25 from hit tick {} \
+         through ceil(end) {}; no fractional partial",
+        expected.len(),
+        target.press_sim,
+        detail_last
     ))
 }
 
@@ -1899,6 +2244,7 @@ fn find_hold_drop<'a>(
     trace: &'a [TraceEvent],
     target: &HoldTarget,
 ) -> Result<&'a TraceEvent, String> {
+    let drop_sim = hold_drop_sim(target)?;
     let matches: Vec<&TraceEvent> = trace
         .iter()
         .filter(|event| {
@@ -1908,46 +2254,15 @@ fn find_hold_drop<'a>(
                     note_id,
                     sim,
                     ..
-                } if *note_id == target.note_id && *sim == target.release_sim
+                } if *note_id == target.note_id && *sim == drop_sim
             )
         })
         .collect();
     if matches.len() != 1 {
         return Err(format!(
-            "expected exactly one hold_drop for note {} at sim {}, found {}; trace events for \
-             that note: {:?}",
+            "expected exactly one hold_drop for note {} at the deferred sim {drop_sim}, found \
+             {}; trace events for that note: {:?}",
             target.note_id,
-            target.release_sim,
-            matches.len(),
-            note_events(trace, target.note_id)
-        ));
-    }
-    Ok(matches[0])
-}
-
-fn find_hold_end<'a>(
-    trace: &'a [TraceEvent],
-    target: &HoldTarget,
-) -> Result<&'a TraceEvent, String> {
-    let matches: Vec<&TraceEvent> = trace
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                TraceEvent::HoldEnd {
-                    note_id,
-                    sim,
-                    ..
-                } if *note_id == target.note_id && *sim == target.release_sim
-            )
-        })
-        .collect();
-    if matches.len() != 1 {
-        return Err(format!(
-            "expected exactly one hold_end for note {} at sim {}, found {}; trace events for \
-             that note: {:?}",
-            target.note_id,
-            target.release_sim,
             matches.len(),
             note_events(trace, target.note_id)
         ));
@@ -2086,10 +2401,12 @@ mod tests {
         }
     }
 
-    /// Nine taps (six threshold edges plus 110/160/161) and three sustains,
-    /// spaced so no lane/window collides. The full hold is fractional so the
-    /// remainder tick is present; nothing sits between the 160 and 161 presses,
-    /// so that hit does not extend `combo_max`.
+    /// Nine taps (six threshold edges plus 110/160/161) and four sustains,
+    /// spaced so no lane/window collides. The sustain set supplies the big
+    /// drop, both §6.1 REVISED boundary cases and the fractional full hold.
+    /// The full-hold last accrual at `ceil(end)` carries the positive stale
+    /// snapshot `0.5`; nothing sits between the 160 and 161 presses, so that
+    /// hit does not extend `combo_max`.
     const SCRIPTED_NOTES: &str = r#"
         {"t":1000,"d":0},
         {"t":2000,"d":1},
@@ -2102,7 +2419,8 @@ mod tests {
         {"t":9000,"d":0},
         {"t":11000,"d":1,"l":500},
         {"t":13000,"d":2,"l":400},
-        {"t":15000,"d":3,"l":300.5}
+        {"t":15000,"d":3,"l":300.5},
+        {"t":17000,"d":3,"l":400}
     "#;
 
     fn check_detail<'a>(checks: &'a [(&'static str, String)], name: &str) -> &'a str {
@@ -2193,22 +2511,25 @@ mod tests {
                 "ghost_press",
                 "hold_big_drop",
                 "hold_boundary_160",
+                "hold_boundary_exact_160",
                 "hold_full_ticks",
             ]
         );
         assert_eq!(
             first.counts,
             KindCounts {
-                hit: 12,
+                hit: 13,
                 miss: 0,
                 ghost_press: 1,
-                hold_start: 3,
-                // Boundary ticks 13001..=13239 (239); big drop releases one
-                // tick after the hit (0 ticks); full hold ticks 15001..=15300
-                // plus the 0.5 ms remainder at 15301 (301).
-                hold_tick: 540,
-                hold_drop: 2,
-                hold_end: 1,
+                hold_start: 4,
+                // §6.1 REVISED fixed accrual from each hit tick through
+                // ceil(end): big 11000..=11001 (2), ADR-0018 boundary
+                // 13000..=13240 (241), new exact-160 boundary 17000..=17241
+                // (242), full hold 15000..=15301 (302). Total 787.
+                // The ceil(end) release drops; it does not reach hold_end.
+                hold_tick: 787,
+                hold_drop: 4,
+                hold_end: 0,
                 game_over: 0,
             }
         );
@@ -2222,13 +2543,29 @@ mod tests {
         assert!(check_detail(&first.checks, "edge_160").contains("tallies.shit"));
         assert!(check_detail(&first.checks, "edge_161").contains("tallies.missed"));
         assert!(check_detail(&first.checks, "edge_161").contains("updated=false"));
-        assert!(check_detail(&first.checks, "hold_big_drop").contains("> 160"));
-        assert!(check_detail(&first.checks, "hold_boundary_160").contains("remaining_ms == 160.0"));
-        assert!(check_detail(&first.checks, "hold_boundary_160").contains("penalty 0.0"));
+        assert!(check_detail(&first.checks, "hold_big_drop").contains("stale snapshot 500"));
+        assert!(check_detail(&first.checks, "hold_big_drop").contains("-62.5"));
+        let boundary_160 = check_detail(&first.checks, "hold_boundary_160");
+        assert!(
+            boundary_160.contains("stale snapshot 161"),
+            "{boundary_160}"
+        );
+        assert!(boundary_160.contains("penalizing"), "{boundary_160}");
+        assert!(boundary_160.contains("-20.125"), "{boundary_160}");
+        let boundary_exact = check_detail(&first.checks, "hold_boundary_exact_160");
+        assert!(
+            boundary_exact.contains("stale snapshot 160"),
+            "{boundary_exact}"
+        );
+        assert!(
+            boundary_exact.contains("zero penalty / no combo break"),
+            "{boundary_exact}"
+        );
         let ticks = check_detail(&first.checks, "hold_full_ticks");
+        assert!(ticks.contains("302 fixed per-entry ticks"), "{ticks}");
         assert!(ticks.contains("health_delta 0.00012"), "{ticks}");
         assert!(ticks.contains("score_delta 0.25"), "{ticks}");
-        assert!(ticks.contains("fractional remainder present"), "{ticks}");
+        assert!(ticks.contains("no fractional partial"), "{ticks}");
         let text = std::str::from_utf8(&first.trace_bytes).expect("utf-8 trace");
         assert!(
             text.starts_with(
@@ -2249,6 +2586,52 @@ mod tests {
         assert_eq!(first.digest, second.digest);
         assert_eq!(first.trace_bytes, second.trace_bytes);
         assert_eq!(first.event_count, second.event_count);
+    }
+
+    #[test]
+    fn exported_stream_matches_the_gates_own_grid_inputs_and_is_deterministic() {
+        let fixture = Fixture::with_notes(SCRIPTED_NOTES);
+        let notes = fixture.notes("easy");
+        let exported = export_stream_from_notes(&notes, "easy").expect("first export");
+        let again = export_stream_from_notes(&notes, "easy").expect("second export");
+        assert_eq!(exported.bytes, again.bytes);
+        assert_eq!(exported.digest, again.digest);
+
+        let script = select_script(&notes).unwrap();
+        let stream = build_scripted_stream(&notes, &script).unwrap();
+        let inputs = to_input_events(&stream).unwrap();
+        let text = std::str::from_utf8(&exported.bytes).expect("stream is UTF-8");
+        let mut lines = text.lines();
+        let header: serde_json::Value =
+            serde_json::from_str(lines.next().expect("header line")).expect("header JSON");
+        assert_eq!(header["schema"], STREAM_SCHEMA);
+        assert_eq!(header["difficulty"], "easy");
+        assert_eq!(header["chart_id"], CHART_ID);
+        assert_eq!(header["tick_count"].as_u64(), Some(exported.tick_count));
+        assert_eq!(header["songpos_source"], SONGPOS_SOURCE);
+
+        let mut seen = 0usize;
+        let mut ticks = 0u64;
+        for (index, line) in lines.enumerate() {
+            let tick: serde_json::Value = serde_json::from_str(line).expect("tick JSON");
+            assert_eq!(tick["sim"].as_u64(), Some(index as u64));
+            assert_eq!(tick["music_ms"].as_f64(), Some(index as f64));
+            for event in tick["events"].as_array().expect("events array") {
+                let input = inputs.get(seen).expect("input not in the gate stream");
+                let (kind, direction, input_ms) = match input {
+                    InputEvent::Press { sim_ms, direction } => ("press", *direction, *sim_ms),
+                    InputEvent::Release { sim_ms, direction } => ("release", *direction, *sim_ms),
+                };
+                assert_eq!(event["kind"], kind);
+                assert_eq!(event["direction"].as_i64(), Some(direction));
+                assert_eq!(event["input_ms"].as_u64(), Some(input_ms));
+                assert_eq!(input_ms, index as u64);
+                seen += 1;
+            }
+            ticks += 1;
+        }
+        assert_eq!(ticks, exported.tick_count);
+        assert_eq!(seen, inputs.len());
     }
 
     #[test]
@@ -2285,7 +2668,7 @@ mod tests {
             .map(|index| note(i64::from(index % 4), 1000.0 + (index as f64) * 2000.0, 0.0))
             .collect();
         let error = select_script(&no_holds).expect_err("the sustain drops require hold notes");
-        assert!(error.contains("remaining_ms > 160"), "{error}");
+        assert!(error.contains("stale mirror snapshot > 160"), "{error}");
     }
 
     #[test]
@@ -2300,38 +2683,91 @@ mod tests {
     }
 
     #[test]
-    fn exact_160_boundary_drop_is_mandatory() {
+    fn both_revised_boundary_cases_are_mandatory() {
         let fractional_only = vec![note(0, 1000.0, 412.5)];
-        let error = select_boundary_drop(&fractional_only, &BTreeSet::new(), &[])
-            .expect_err("a non-integer end cannot leave exactly 160 ms");
-        assert!(error.contains("160.0"), "{error}");
-        assert!(error.contains("exactly"), "{error}");
-        assert!(!error.contains("<="), "{error}");
+        let error = select_boundary_drop(
+            &fractional_only,
+            &BTreeSet::new(),
+            &[],
+            160.0,
+            161.0,
+            "stale 161 penalizing",
+        )
+        .expect_err("a non-integer end cannot observe stale 161");
+        assert!(error.contains("stale 161"), "{error}");
+        assert!(error.contains("refuses to skip"), "{error}");
 
         let mut notes: Vec<_> = (0..9)
             .map(|index| note(i64::from(index % 4), 1000.0 + (index as f64) * 2000.0, 0.0))
             .collect();
         notes.push(note(1, 20000.0, 412.5));
         notes.push(note(2, 22000.0, 100.0));
-        let error = select_script(&notes).expect_err("no sustain can leave exactly 160 ms");
-        assert!(error.contains("160.0"), "{error}");
-        assert!(error.contains("exactly"), "{error}");
+        let error = select_boundary_drop(
+            &notes,
+            &BTreeSet::new(),
+            &[],
+            160.0,
+            161.0,
+            "stale 161 penalizing",
+        )
+        .expect_err("no penalizing stale-161 candidate");
+        assert!(error.contains("stale 161"), "{error}");
 
-        // Integer `l` on an integer start releases at `t + l - 160`, including
-        // the same-tick `l == 160` case. A fractional end earlier in the chart
-        // must not be accepted as a fallback.
+        // ADR-0018 release ceil(t+l-160): stale 161 => -20.125 penalty.
         let holds = vec![note(0, 1000.0, 412.5), note(1, 3000.0, 400.0)];
-        let target = select_boundary_drop(&holds, &BTreeSet::new(), &[]).expect("integer end");
+        let target = select_boundary_drop(
+            &holds,
+            &BTreeSet::new(),
+            &[],
+            160.0,
+            161.0,
+            "stale 161 penalizing",
+        )
+        .expect("penalizing boundary target");
         assert_eq!(target.note_index, 1);
         assert_eq!(target.release_sim, 3240);
-        assert!(same_f64(hold_remaining(&target), 160.0));
+        assert!(same_f64(hold_stale_snapshot(&target), 161.0));
 
+        // New release ceil(t+l-159): stale bitwise 160.0 => no penalty.
+        let target = select_boundary_drop(
+            &holds,
+            &BTreeSet::new(),
+            &[],
+            159.0,
+            160.0,
+            "stale exactly 160.0 zero-penalty",
+        )
+        .expect("zero-penalty boundary target");
+        assert_eq!(target.note_index, 1);
+        assert_eq!(target.release_sim, 3241);
+        assert!(same_f64(hold_stale_snapshot(&target), 160.0));
+
+        // A 160 ms sustain releases on t+1 for the -159 formula and observes
+        // the hit capture full = 160.0 (not a recompute).
         let same_tick = vec![note(0, 1000.0, 160.0)];
-        let target =
-            select_boundary_drop(&same_tick, &BTreeSet::new(), &[]).expect("l == 160 is exact");
+        let target = select_boundary_drop(
+            &same_tick,
+            &BTreeSet::new(),
+            &[],
+            159.0,
+            160.0,
+            "stale exactly 160.0 zero-penalty",
+        )
+        .expect("160 ms hold is the zero-penalty boundary");
         assert_eq!(target.press_sim, 1000);
-        assert_eq!(target.release_sim, 1000);
-        assert!(same_f64(hold_remaining(&target), 160.0));
+        assert_eq!(target.release_sim, 1001);
+        assert!(same_f64(hold_stale_snapshot(&target), 160.0));
+        assert!(
+            select_boundary_drop(
+                &same_tick,
+                &BTreeSet::new(),
+                &[],
+                160.0,
+                161.0,
+                "stale 161 penalizing",
+            )
+            .is_err()
+        );
     }
 
     fn scripted_tap(note_id: u32, press_sim: u64) -> ScriptedTarget {
@@ -2380,7 +2816,13 @@ mod tests {
         }
     }
 
-    fn hold_tick(note_id: u32, sim: u64, health_delta: f64, score_delta: f64) -> TraceEvent {
+    fn hold_tick(
+        note_id: u32,
+        sim: u64,
+        health_delta: f64,
+        score_delta: f64,
+        target: &HoldTarget,
+    ) -> TraceEvent {
         TraceEvent::HoldTick {
             schema: "1",
             kind: "hold_tick",
@@ -2394,8 +2836,8 @@ mod tests {
             note_diff_int: 0,
             health_delta,
             score_delta,
-            hold_remaining_ms: 0.0,
-            hold_elapsed_ms: sim as f64,
+            hold_remaining_ms: observed_snapshot(target, sim),
+            hold_elapsed_ms: sim as f64 - target.press_sim as f64,
         }
     }
 
@@ -2564,43 +3006,59 @@ mod tests {
     }
 
     #[test]
-    fn full_hold_tick_rates_reject_a_deviant_full_tick_and_pin_the_remainder() {
+    fn full_hold_ticks_require_the_fixed_per_entry_rate_through_ceil_end() {
         let fractional = HoldTarget {
             note_index: 0,
             note_id: 7,
             lane: 0,
             press_sim: 0,
             release_sim: 3,
+            strum_time_ms: 0.0,
             end_ms: 2.5,
         };
         let good = vec![
-            hold_tick(7, 1, 0.00012, 0.25),
-            hold_tick(7, 2, 0.00012, 0.25),
-            hold_tick(7, 3, 0.00006, 0.125),
+            hold_tick(7, 0, 0.00012, 0.25, &fractional),
+            hold_tick(7, 1, 0.00012, 0.25, &fractional),
+            hold_tick(7, 2, 0.00012, 0.25, &fractional),
+            hold_tick(7, 3, 0.00012, 0.25, &fractional),
         ];
-        let detail = check_full_hold_ticks(&good, &fractional).expect("remainder accepted");
-        assert!(detail.contains("2 full-grid ticks"), "{detail}");
+        let detail = check_full_hold_ticks(&good, &fractional).expect("fixed ticks accepted");
+        assert!(detail.contains("4 fixed per-entry ticks"), "{detail}");
         assert!(detail.contains("health_delta 0.00012"), "{detail}");
         assert!(detail.contains("score_delta 0.25"), "{detail}");
-        assert!(detail.contains("fractional remainder present"), "{detail}");
+        assert!(detail.contains("no fractional partial"), "{detail}");
 
-        let deviant = vec![
-            hold_tick(7, 1, 0.00012, 0.25),
-            hold_tick(7, 2, 0.00024, 0.25),
-            hold_tick(7, 3, 0.00006, 0.125),
-        ];
-        let error = check_full_hold_ticks(&deviant, &fractional).expect_err("full tick rate");
+        let mut deviant = good.clone();
+        deviant[2] = hold_tick(7, 2, 0.00024, 0.25, &fractional);
+        let error = check_full_hold_ticks(&deviant, &fractional).expect_err("fixed tick rate");
         assert!(error.contains("0.00012"), "{error}");
         assert!(error.contains("0.25"), "{error}");
 
-        let remainder_as_full = vec![
-            hold_tick(7, 1, 0.00012, 0.25),
-            hold_tick(7, 2, 0.00012, 0.25),
-            hold_tick(7, 3, 0.00012, 0.25),
-        ];
-        let error = check_full_hold_ticks(&remainder_as_full, &fractional)
-            .expect_err("the fractional tick is not a full-grid tick");
-        assert!(error.contains("fractional"), "{error}");
+        let short = good[..3].to_vec();
+        let error = check_full_hold_ticks(&short, &fractional).expect_err("missing ceil-end tick");
+        assert!(error.contains("expected 4"), "{error}");
+        assert!(error.contains("no fractional partial"), "{error}");
+
+        let mut wrong_elapsed = good.clone();
+        wrong_elapsed[2] = TraceEvent::HoldTick {
+            schema: "1",
+            kind: "hold_tick",
+            sim: 2,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 7,
+            note_direction: 0,
+            judgement: "none",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            health_delta: 0.00012,
+            score_delta: 0.25,
+            hold_remaining_ms: 1.5,
+            hold_elapsed_ms: 0.0,
+        };
+        let error =
+            check_full_hold_ticks(&wrong_elapsed, &fractional).expect_err("elapsed mismatch");
+        assert!(error.contains("hold_elapsed_ms"), "{error}");
 
         let integer = HoldTarget {
             note_index: 0,
@@ -2608,14 +3066,17 @@ mod tests {
             lane: 0,
             press_sim: 0,
             release_sim: 2,
+            strum_time_ms: 0.0,
             end_ms: 2.0,
         };
         let ticks = vec![
-            hold_tick(7, 1, 0.00012, 0.25),
-            hold_tick(7, 2, 0.00012, 0.25),
+            hold_tick(7, 0, 0.00012, 0.25, &integer),
+            hold_tick(7, 1, 0.00012, 0.25, &integer),
+            hold_tick(7, 2, 0.00012, 0.25, &integer),
         ];
         let detail = check_full_hold_ticks(&ticks, &integer).expect("integer end");
-        assert!(detail.contains("fractional remainder absent"), "{detail}");
+        assert!(detail.contains("3 fixed per-entry ticks"), "{detail}");
+        assert!(detail.contains("no fractional partial"), "{detail}");
     }
 
     #[test]

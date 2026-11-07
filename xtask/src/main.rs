@@ -8,6 +8,7 @@ mod conductor_native_check;
 mod gameplay_sim;
 mod input_jitter;
 mod media_check;
+mod note_native_check;
 mod parse_all;
 mod parse_atlas;
 mod replay;
@@ -22,7 +23,7 @@ fn main() -> ExitCode {
         None => {
             eprintln!("usage: cargo xtask <command> [args]");
             eprintln!(
-                "commands: verify [--help] | fmt | clippy | test | parse-all | parse-atlas | fixtures-conductor | conductor-native | replay | gameplay-sim | input-jitter | render-diff | perf-budget | media-check | pack"
+                "commands: verify [--help] | fmt | clippy | test | parse-all | parse-atlas | fixtures-conductor | conductor-native | note-native | replay | gameplay-sim | input-jitter | render-diff | perf-budget | media-check | pack"
             );
             return ExitCode::from(2);
         }
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
         "media-check" => to_code(media_check::media_check(rest)),
         "input-jitter" => input_jitter::run(rest),
         "conductor-native" => conductor_native_check::run(rest),
+        "note-native" => note_native_check::run(rest),
         "pack" => to_code(media_check::pack(rest)),
         "fixtures-conductor" => to_code(conductor_check::run(rest)),
         "replay" => replay::run(rest),

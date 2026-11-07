@@ -402,9 +402,9 @@ fn window_update_at_160_keeps_may_hit_and_misses_at_161() {
         *tallies,
         TallyCounts {
             missed: 1,
-            total_notes_hit: 1,
             ..TallyCounts::default()
-        }
+        },
+        "the real applyScore-on-miss bumps only the missed tally"
     );
 }
 
@@ -444,9 +444,14 @@ fn ghost_press_penalties_are_unconditional_while_another_lane_has_a_hold() {
 #[test]
 fn hold_ticks_accrue_on_the_grid_and_a_full_hold_ends_without_a_drop() {
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":100}"#);
-    let (sim, events) = run(&fixture, 100, &[press(0, 0)]);
+    // Key stays down. Completion is the first integer T >= end+2 (§6.1 item 8).
+    let (sim, events) = run(&fixture, 102, &[press(0, 0)]);
     let ticks = hold_ticks(&events);
-    assert_eq!(ticks.len(), 100);
+    assert_eq!(
+        ticks.len(),
+        101,
+        "the hit tick T0 plus every tick through ceil(end); the silent recompute does not accrue"
+    );
     let TraceEvent::HoldTick {
         sim: first_sim,
         health_delta,
@@ -458,41 +463,178 @@ fn hold_ticks_accrue_on_the_grid_and_a_full_hold_ends_without_a_drop() {
     else {
         unreachable!("hold_ticks() returns tick variants");
     };
-    assert_eq!(*first_sim, 1);
+    assert_eq!(*first_sim, 0, "the hit tick itself accrues");
     assert_eq!(*health_delta, 0.00012);
     assert_eq!(*score_delta, 0.25);
-    assert_eq!(*hold_remaining_ms, 99.0);
-    assert_eq!(*hold_elapsed_ms, 1.0);
+    assert_eq!(*hold_remaining_ms, 100.0);
+    assert_eq!(*hold_elapsed_ms, 0.0);
+    let TraceEvent::HoldTick {
+        sim: second_sim,
+        hold_remaining_ms: second_remaining,
+        ..
+    } = ticks[1]
+    else {
+        unreachable!("hold_ticks() returns tick variants");
+    };
+    assert_eq!(*second_sim, 1);
+    assert_eq!(
+        *second_remaining, 100.0,
+        "T0+1 still sees the hit capture: mirror P == strumTime does not recompute"
+    );
+    let TraceEvent::HoldTick {
+        hold_remaining_ms: third_remaining,
+        ..
+    } = ticks[2]
+    else {
+        unreachable!("hold_ticks() returns tick variants");
+    };
+    assert_eq!(*third_remaining, 99.0, "decay starts at T0+2: end - (T-1)");
     let TraceEvent::HoldTick {
         sim: last_sim,
         hold_remaining_ms,
         hold_elapsed_ms,
         ..
-    } = ticks[99]
+    } = ticks[100]
     else {
         unreachable!("hold_ticks() returns tick variants");
     };
     assert_eq!(*last_sim, 100);
-    assert_eq!(*hold_remaining_ms, 0.0);
+    assert_eq!(
+        *hold_remaining_ms, 1.0,
+        "last accrual at ceil(end) observes end - (ceil(end)-1), never zero or negative"
+    );
     assert_eq!(*hold_elapsed_ms, 100.0);
     assert!(hold_drops(&events).is_empty());
     let ends = hold_ends(&events);
     assert_eq!(ends.len(), 1);
-    assert!(matches!(ends[0], TraceEvent::HoldEnd { sim: 100, .. }));
-    assert!((sim.health - (1.0 + 0.03 + 0.012)).abs() < 1e-12);
-    assert!((sim.song_score - 525.0).abs() < 1e-12);
+    assert!(matches!(ends[0], TraceEvent::HoldEnd { sim: 102, .. }));
+    assert!((sim.health - (1.0 + 0.03 + 101.0 * 0.00012)).abs() < 1e-12);
+    assert!((sim.song_score - (500.0 + 101.0 * 0.25)).abs() < 1e-12);
     assert_eq!(sim.record().len(), events.len());
+
+    // Emission order at the hit tick: hit, hold_start, then the first tick.
+    let hit_index = events
+        .iter()
+        .position(|event| matches!(event, TraceEvent::Hit { .. }))
+        .expect("hit row");
+    assert!(matches!(
+        &events[hit_index + 1],
+        TraceEvent::HoldStart { sim: 0, .. }
+    ));
+    assert!(matches!(
+        &events[hit_index + 2],
+        TraceEvent::HoldTick { sim: 0, .. }
+    ));
 }
 
 #[test]
-fn fractional_sustain_emits_the_remainder_tick_before_hold_end() {
+fn hit_tick_accrues_a_fixed_hold_tick_immediately_after_hold_start() {
+    let fixture = Fixture::with_notes(r#"{"t":1000,"d":0,"l":50}"#);
+    let (_, events) = run(&fixture, 1052, &[press(1000, 0)]);
+    let hit_index = events
+        .iter()
+        .position(|event| matches!(event, TraceEvent::Hit { sim: 1000, .. }))
+        .expect("hit row at the press tick");
+    assert!(matches!(
+        &events[hit_index + 1],
+        TraceEvent::HoldStart { sim: 1000, .. }
+    ));
+    let TraceEvent::HoldTick {
+        sim,
+        health_delta,
+        score_delta,
+        hold_remaining_ms,
+        hold_elapsed_ms,
+        ..
+    } = &events[hit_index + 2]
+    else {
+        panic!("the hit tick must accrue immediately: {events:?}");
+    };
+    assert_eq!(*sim, 1000);
+    assert_eq!(*health_delta, 0.00012);
+    assert_eq!(*score_delta, 0.25);
+    assert_eq!(*hold_remaining_ms, 50.0);
+    assert_eq!(*hold_elapsed_ms, 0.0);
+    assert_eq!(
+        hold_ticks(&events).len(),
+        51,
+        "ticks 1000..=1050 accrue the fixed per-entry delta"
+    );
+    let TraceEvent::HoldTick {
+        hold_remaining_ms: second_remaining,
+        ..
+    } = hold_ticks(&events)[1]
+    else {
+        unreachable!("hold_ticks() returns tick variants");
+    };
+    assert_eq!(*second_remaining, 50.0, "two consecutive full snapshots");
+    let ends = hold_ends(&events);
+    assert_eq!(ends.len(), 1);
+    assert!(matches!(ends[0], TraceEvent::HoldEnd { sim: 1052, .. }));
+}
+
+#[test]
+fn window_miss_keeps_missed_without_bumping_total_notes_hit() {
+    let fixture = Fixture::with_notes(r#"{"t":0,"d":0},{"t":100,"d":1}"#);
+    let (_, events) = run(&fixture, 300, &[press(0, 0)]);
+    let miss = events
+        .iter()
+        .find(|event| matches!(event, TraceEvent::Miss { note_id: 1, .. }))
+        .expect("window miss for the unpressed note");
+    let TraceEvent::Miss {
+        sim,
+        tallies,
+        combo_before,
+        combo_after,
+        ..
+    } = miss
+    else {
+        unreachable!("filtered miss variants");
+    };
+    assert_eq!(*sim, 261, "position > note.time + 160");
+    assert_eq!(*combo_before, 1);
+    assert_eq!(*combo_after, 0, "a window miss breaks combo");
+    assert_eq!(
+        *tallies,
+        TallyCounts {
+            sick: 1,
+            missed: 1,
+            total_notes_hit: 1,
+            ..TallyCounts::default()
+        },
+        "only the earlier hit incremented total_notes_hit"
+    );
+}
+
+#[test]
+fn fractional_sustain_accrues_fixed_ticks_through_ceil_end_without_a_partial() {
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":10.5}"#);
-    let (sim, events) = run(&fixture, 11, &[press(0, 0)]);
+    // hold_end is the first integer T >= 10.5+2, which is 13.
+    let (sim, events) = run(&fixture, 13, &[press(0, 0)]);
     let ticks = hold_ticks(&events);
     assert_eq!(
         ticks.len(),
-        11,
-        "ten 1 ms ticks plus the 0.5 ms remainder tick"
+        12,
+        "ticks 0..=ceil(10.5): the fixed per-entry branch has no 0.5 ms partial"
+    );
+    let TraceEvent::HoldTick {
+        hold_remaining_ms: first_remaining,
+        ..
+    } = ticks[0]
+    else {
+        unreachable!("hold_ticks() returns tick variants");
+    };
+    let TraceEvent::HoldTick {
+        hold_remaining_ms: second_remaining,
+        ..
+    } = ticks[1]
+    else {
+        unreachable!("hold_ticks() returns tick variants");
+    };
+    assert_eq!(*first_remaining, 10.5);
+    assert_eq!(
+        *second_remaining, 10.5,
+        "two consecutive full snapshots before the decay"
     );
     let TraceEvent::HoldTick {
         sim: last_sim,
@@ -501,20 +643,32 @@ fn fractional_sustain_emits_the_remainder_tick_before_hold_end() {
         hold_remaining_ms,
         hold_elapsed_ms,
         ..
-    } = ticks[10]
+    } = ticks[11]
     else {
         unreachable!("hold_ticks() returns tick variants");
     };
     assert_eq!(*last_sim, 11);
-    assert!((*health_delta - 0.00006).abs() < 1e-12);
-    assert!((*score_delta - 0.125).abs() < 1e-12);
-    assert_eq!(*hold_remaining_ms, 0.0);
-    assert_eq!(*hold_elapsed_ms, 10.5);
+    assert_eq!(*health_delta, 0.00012, "always the fixed 1 ms delta");
+    assert_eq!(*score_delta, 0.25, "always the fixed 1 ms delta");
+    assert_eq!(
+        *hold_remaining_ms, 0.5,
+        "the last accrual observes the stale 0.5 snapshot, never -0.5"
+    );
+    assert_eq!(*hold_elapsed_ms, 11.0);
     let ends = hold_ends(&events);
     assert_eq!(ends.len(), 1);
-    assert!(matches!(ends[0], TraceEvent::HoldEnd { sim: 11, .. }));
-    // The order of the raw event stream: the fractional remainder tick must
-    // sit exactly one position before the hold end.
+    assert!(matches!(ends[0], TraceEvent::HoldEnd { sim: 13, .. }));
+    assert!(
+        !events.iter().any(|event| {
+            matches!(
+                event,
+                TraceEvent::HoldTick { sim: 12, .. }
+                    | TraceEvent::HoldEnd { sim: 12, .. }
+                    | TraceEvent::HoldDrop { sim: 12, .. }
+            )
+        }),
+        "the recompute that stores the non-positive snapshot emits no row"
+    );
     let last_tick_index = events
         .iter()
         .rposition(|event| matches!(event, TraceEvent::HoldTick { .. }));
@@ -527,15 +681,39 @@ fn fractional_sustain_emits_the_remainder_tick_before_hold_end() {
     assert_eq!(
         last_tick_index + 1,
         first_end_index,
-        "remainder tick immediately before hold_end"
+        "the silent tick between last accrual and hold_end emits no row"
     );
-    assert!((sim.health - (HEALTH_STARTING + HEALTH_SICK_BONUS + 10.5 * 0.00012)).abs() < 1e-12);
-    assert!((sim.song_score - (500.0 + 10.5 * 0.25)).abs() < 1e-12);
+    assert!((sim.health - (HEALTH_STARTING + HEALTH_SICK_BONUS + 12.0 * 0.00012)).abs() < 1e-12);
+    assert!((sim.song_score - (500.0 + 12.0 * 0.25)).abs() < 1e-12);
+
+    // A whole-millisecond sustain of the same floor length accrues one fewer
+    // tick: ceil(10) = 10, so ticks 0..=10. The last snapshot is 1 ms, not 0.
+    let whole = Fixture::with_notes(r#"{"t":0,"d":0,"l":10}"#);
+    let (_, whole_events) = run(&whole, 12, &[press(0, 0)]);
+    let whole_ticks = hold_ticks(&whole_events);
+    assert_eq!(whole_ticks.len(), 11);
+    let TraceEvent::HoldTick {
+        hold_remaining_ms: last_remaining,
+        health_delta: last_health,
+        score_delta: last_score,
+        ..
+    } = whole_ticks[10]
+    else {
+        unreachable!("hold_ticks() returns tick variants");
+    };
+    assert_eq!(*last_remaining, 1.0);
+    assert_eq!(*last_health, 0.00012);
+    assert_eq!(*last_score, 0.25);
+    assert!(matches!(
+        hold_ends(&whole_events)[0],
+        TraceEvent::HoldEnd { sim: 12, .. }
+    ));
 }
 
 #[test]
-fn hold_drop_penalty_is_strictly_gated_at_160_ms() {
-    // remaining = 200 ms > 160: the score penalty applies.
+fn hold_drop_penalty_is_strictly_gated_at_160_ms_and_deferred_one_tick() {
+    // Release at 300. The next mirror (sim 301) flags the drop and keeps the
+    // snapshot set at sim 300: end - 299 = 201. Penalty is -125 * 201 / 1000.
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":500}"#);
     let (sim, events) = run(&fixture, 301, &[press(0, 0), release(300, 0)]);
     let drops = hold_drops(&events);
@@ -553,20 +731,69 @@ fn hold_drop_penalty_is_strictly_gated_at_160_ms() {
     else {
         unreachable!("hold_drops() returns drop variants");
     };
-    assert_eq!(*drop_sim, 300);
-    assert_eq!(*input_ms, 300.0);
-    assert_eq!(*score_penalty, -25.0);
+    assert_eq!(
+        *drop_sim, 301,
+        "the drop row is the flag tick, one after release"
+    );
+    assert_eq!(*input_ms, 0.0, "a hold drop is a non-input event");
+    assert_eq!(*score_penalty, -25.125);
     assert_eq!(*health_change, 0.0);
     assert_eq!(*combo_before, 1);
     assert_eq!(*combo_after, 0);
     assert!(*is_combo_break);
-    assert_eq!(hold_ticks(&events).len(), 299);
-    assert!((sim.health - (1.0 + 0.03 + 299.0 * 0.00012)).abs() < 1e-12);
-    assert!((sim.song_score - (500.0 + 299.0 * 0.25 - 25.0)).abs() < 1e-12);
+    assert_eq!(hold_ticks(&events).len(), 301, "ticks 0..=release tick");
+    assert!((sim.health - (1.0 + 0.03 + 301.0 * 0.00012)).abs() < 1e-12);
+    assert!((sim.song_score - (500.0 + 301.0 * 0.25 - 25.125)).abs() < 1e-12);
 
-    // remaining == 160 exactly: no score penalty, but the drop event and
-    // combo reset still follow the hard-coded shipped hold-drop branch.
+    // ADR-0018 release ceil(t+l-160)=300 on l=460: stale snapshot
+    // end-(R-1)=161, penalizing -20.125, combo break.
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":460}"#);
+    let (_, events) = run(&fixture, 301, &[press(0, 0), release(300, 0)]);
+    let drops = hold_drops(&events);
+    assert_eq!(drops.len(), 1);
+    let TraceEvent::HoldDrop {
+        sim: drop_sim,
+        score_penalty,
+        combo_before,
+        combo_after,
+        is_combo_break,
+        ..
+    } = drops[0]
+    else {
+        unreachable!("hold_drops() returns drop variants");
+    };
+    assert_eq!(*drop_sim, 301);
+    assert_eq!(*score_penalty, -20.125);
+    assert_eq!(*combo_before, 1);
+    assert_eq!(*combo_after, 0);
+    assert!(*is_combo_break);
+
+    // New boundary ceil(t+l-159)=301: stale snapshot exactly 160.0, zero
+    // penalty, combo unchanged.
+    let (_, events) = run(&fixture, 302, &[press(0, 0), release(301, 0)]);
+    let drops = hold_drops(&events);
+    assert_eq!(drops.len(), 1);
+    let TraceEvent::HoldDrop {
+        sim: drop_sim,
+        input_ms,
+        score_penalty,
+        combo_before,
+        combo_after,
+        is_combo_break,
+        ..
+    } = drops[0]
+    else {
+        unreachable!("hold_drops() returns drop variants");
+    };
+    assert_eq!(*drop_sim, 302);
+    assert_eq!(*input_ms, 0.0);
+    assert_eq!(*score_penalty, 0.0);
+    assert_eq!(*combo_before, 1);
+    assert_eq!(*combo_after, 1);
+    assert!(!*is_combo_break);
+
+    // Stale snapshot end-(R-1)=101 <= 160: zero penalty, no combo break.
+    let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":400}"#);
     let (_, events) = run(&fixture, 301, &[press(0, 0), release(300, 0)]);
     let drops = hold_drops(&events);
     assert_eq!(drops.len(), 1);
@@ -582,44 +809,67 @@ fn hold_drop_penalty_is_strictly_gated_at_160_ms() {
     };
     assert_eq!(*score_penalty, 0.0);
     assert_eq!(*combo_before, 1);
-    assert_eq!(*combo_after, 0);
-    assert!(*is_combo_break);
+    assert_eq!(*combo_after, 1);
+    assert!(!*is_combo_break);
 
-    // remaining = 100 ms <= 160: no score penalty either.
-    let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":400}"#);
-    let (_, events) = run(&fixture, 301, &[press(0, 0), release(300, 0)]);
+    // Release at the sustain end is not completion. The next mirror still sees
+    // snapshot 1.0 and drops with zero penalty (§6.1 items 8-9).
+    let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":300}"#);
+    let (_, events) = run(&fixture, 302, &[press(0, 0), release(300, 0)]);
+    assert!(hold_ends(&events).is_empty());
     let drops = hold_drops(&events);
     assert_eq!(drops.len(), 1);
-    let TraceEvent::HoldDrop { score_penalty, .. } = drops[0] else {
+    let TraceEvent::HoldDrop {
+        sim: drop_sim,
+        score_penalty,
+        is_combo_break,
+        ..
+    } = drops[0]
+    else {
         unreachable!("hold_drops() returns drop variants");
     };
+    assert_eq!(*drop_sim, 301);
     assert_eq!(*score_penalty, 0.0);
+    assert!(!*is_combo_break);
+    assert_eq!(hold_ticks(&events).len(), 301);
 
-    // Release at the sustain end completes the hold instead of dropping it.
-    let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":300}"#);
-    let (_, events) = run(&fixture, 301, &[press(0, 0), release(300, 0)]);
+    // Release on the silent tick after the last accrual is seen by the
+    // completion mirror, which precedes the penalty (§6.1 item 9).
+    let (_, events) = run(&fixture, 302, &[press(0, 0), release(301, 0)]);
     assert!(hold_drops(&events).is_empty());
     assert_eq!(hold_ends(&events).len(), 1);
-    assert_eq!(hold_ticks(&events).len(), 300);
+    assert!(matches!(
+        hold_ends(&events)[0],
+        TraceEvent::HoldEnd { sim: 302, .. }
+    ));
+    assert_eq!(hold_ticks(&events).len(), 301);
 }
 
 #[test]
-fn same_tick_press_before_release_starts_then_drops_the_hold() {
+fn same_tick_press_before_release_deferrs_the_drop_one_tick() {
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":500}"#);
-    let (_, events) = run(&fixture, 0, &[press(0, 0), release(0, 0)]);
-    assert_eq!(events.len(), 3);
+    let (_, events) = run(&fixture, 2, &[press(0, 0), release(0, 0)]);
+    assert_eq!(events.len(), 5);
     assert!(matches!(&events[0], TraceEvent::Hit { .. }));
-    assert!(matches!(&events[1], TraceEvent::HoldStart { .. }));
+    assert!(matches!(&events[1], TraceEvent::HoldStart { sim: 0, .. }));
+    assert!(matches!(&events[2], TraceEvent::HoldTick { sim: 0, .. }));
+    assert!(matches!(&events[3], TraceEvent::HoldTick { sim: 1, .. }));
     let TraceEvent::HoldDrop {
+        sim,
+        input_ms,
         score_penalty,
         combo_before,
         combo_after,
         is_combo_break,
         ..
-    } = &events[2]
+    } = &events[4]
     else {
-        panic!("expected hold drop as the third same-tick event: {events:?}");
+        panic!("expected the deferred hold drop as the fifth event: {events:?}");
     };
+    // The hit-tick mirror has not run yet, and the T0+1 mirror sees P == strumTime,
+    // so the drop flag and row both land on tick 2 with the hit-capture snapshot.
+    assert_eq!(*sim, 2);
+    assert_eq!(*input_ms, 0.0);
     assert_eq!(*score_penalty, -62.5);
     assert_eq!(*combo_before, 1);
     assert_eq!(*combo_after, 0);
@@ -835,7 +1085,7 @@ fn build_rejects_chart_directions_outside_zero_to_seven() {
 #[test]
 fn hold_trace_variants_serialize_in_contract_order() {
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":500}"#);
-    let (_, events) = run(&fixture, 300, &[press(0, 0), release(300, 0)]);
+    let (_, events) = run(&fixture, 301, &[press(0, 0), release(300, 0)]);
 
     let start = events
         .iter()
@@ -849,12 +1099,12 @@ fn hold_trace_variants_serialize_in_contract_order() {
 
     let tick = events
         .iter()
-        .find(|event| matches!(event, TraceEvent::HoldTick { sim: 1, .. }))
-        .expect("first hold tick");
+        .find(|event| matches!(event, TraceEvent::HoldTick { sim: 0, .. }))
+        .expect("hit-tick hold tick");
     let tick_json = serde_json::to_string(tick).expect("serialize hold tick");
     assert_eq!(
         tick_json,
-        r#"{"schema":"1","kind":"hold_tick","sim":1,"input_ms":0.0,"input_time_us":0.0,"note_id":0,"note_direction":0,"judgement":"none","raw_note_diff":0.0,"note_diff_int":0,"health_delta":0.00012,"score_delta":0.25,"hold_remaining_ms":499.0,"hold_elapsed_ms":1.0}"#
+        r#"{"schema":"1","kind":"hold_tick","sim":0,"input_ms":0.0,"input_time_us":0.0,"note_id":0,"note_direction":0,"judgement":"none","raw_note_diff":0.0,"note_diff_int":0,"health_delta":0.00012,"score_delta":0.25,"hold_remaining_ms":500.0,"hold_elapsed_ms":0.0}"#
     );
 
     let drop = events
@@ -864,11 +1114,11 @@ fn hold_trace_variants_serialize_in_contract_order() {
     let drop_json = serde_json::to_string(drop).expect("serialize hold drop");
     assert_eq!(
         drop_json,
-        r#"{"schema":"1","kind":"hold_drop","sim":300,"input_ms":300.0,"input_time_us":0.0,"note_id":0,"note_direction":0,"judgement":"none","raw_note_diff":0.0,"note_diff_int":0,"score_penalty":-25.0,"health_change":0.0,"combo_before":1,"combo_after":0,"is_combo_break":true}"#
+        r#"{"schema":"1","kind":"hold_drop","sim":301,"input_ms":0.0,"input_time_us":0.0,"note_id":0,"note_direction":0,"judgement":"none","raw_note_diff":0.0,"note_diff_int":0,"score_penalty":-25.125,"health_change":0.0,"combo_before":1,"combo_after":0,"is_combo_break":true}"#
     );
 
     let fixture = Fixture::with_notes(r#"{"t":0,"d":0,"l":10}"#);
-    let (_, events) = run(&fixture, 10, &[press(0, 0)]);
+    let (_, events) = run(&fixture, 12, &[press(0, 0)]);
     let end = events
         .iter()
         .find(|event| matches!(event, TraceEvent::HoldEnd { .. }))
@@ -876,7 +1126,7 @@ fn hold_trace_variants_serialize_in_contract_order() {
     let end_json = serde_json::to_string(end).expect("serialize hold end");
     assert_eq!(
         end_json,
-        r#"{"schema":"1","kind":"hold_end","sim":10,"input_ms":0.0,"input_time_us":0.0,"note_id":0,"note_direction":0,"judgement":"none","raw_note_diff":0.0,"note_diff_int":0}"#
+        r#"{"schema":"1","kind":"hold_end","sim":12,"input_ms":0.0,"input_time_us":0.0,"note_id":0,"note_direction":0,"judgement":"none","raw_note_diff":0.0,"note_diff_int":0}"#
     );
 }
 

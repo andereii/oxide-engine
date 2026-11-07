@@ -398,7 +398,101 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
   the installed FloatTools and the contract §0 reading is recorded here and in
   BEHAVIOR.md with the note that the corpus cannot discriminate it.
 
+## ADR-0019 — native note reference probe for the M5 vertical slice
+
+- **Context / date:** approved 2026-11-06 (human approval #2 of the M5
+  phase-2a follow-up); evidence rounds 2026-11-06/07 with three review/fix
+  rounds. The human approved building and wiring the read-only native hxcpp
+  probe for `native_note_reference` under the ADR-0014/0017 non-invasive
+  approach, to validate `oxide_game::slice` scoring/judgement/window/hold
+  semantics against the real Haxe classes. Probe behavior specification:
+  `tools/oracle/NOTE-BEHAVIOR.md` (§6, §6.1 REVISED = the operative hold
+  regime, §9 implementation/reconciliation notes items 1-17).
+- **Decision (validated, round 2):** retained-REAL-code, stub-labelled probe:
+  byte-exact copies of `Scoring.hx`, `GRhythmUtil.hx`, `PlayState.hx`,
+  `Conductor.hx` (macros drop FIELDS, no body is modified; original/copied
+  sha256 pairs recorded in the fixture `provenance.txt`); last-classpath
+  shadow modules for graphics/audio/character surfaces; `dispatchEvent` as
+  the sole event-row instrument with the fail-closed
+  <=1-stateful-event-per-tick rule. Driver orders each tick as the real
+  frame does — mirror of the real `Strumline` hold chain FIRST with the
+  PREVIOUS frame's conductor position (`PlayState.update` calls
+  `super.update` at L1035), then the conductor update to T, then
+  `processInputQueue`, then `processNotes` — with the penalizing drop row
+  fields read FROM the real `HoldNoteScriptEvent` (fail-closed against the
+  `-125.0 * stale / 1000` formula) and driver-emitted hold rows mirroring
+  6.1. Rows came from observed real state, never from a model projection
+  (the first freeze's projected values were re-derived after review).
+- **Frozen set:** `tests/fixtures/note-native/` — three synthesized streams
+  (`note-stream-1`, digests `9737e8a0.../b3c02ffa.../a1cd8b4c...`, 78276
+  ticks each, 90/104/126 inputs incl. the two-case scripted boundary), three
+  native row files (18880/17224/14216 rows; digests `923ce1cb.../ae138208.../
+  3c1acd54...`), `_manifest_native.json` digest/provenance manifest (real
+  chart `2d1fd06f...`, metadata `f891cd53...`), probe `provenance.txt`. Gate
+  `cargo xtask note-native` re-exports the stream from the real corpus
+  (sha256 fail-closed), replays the Rust slice twice, compares field-wise
+  (integers/bools/strings exact; f64 <=1e-9 labelled; order/sims/key order
+  exact) and fail-closes on provenance drift.
+- **Evidence results (frozen-gate run):** PASS; worst strict f64 delta
+  4.663e-15 over ~351k compared f64 fields; labeled clamp exclusions easy
+  58/29 rows (first sim 31200), normal 66/33 (31200), hard 78/39 (35700),
+  last sim 75600 in all; every non-health field strict. Native evidence
+  corrected FOUR sim errors/over-generalizations (all now fixed and tested):
+  (1) sub-threshold hold drops dispatch no event — zero-penalty rows keep
+  `is_combo_break=false`, combo unchanged; (2) the real hold mirror runs at
+  the frame start with the previous songPosition — hit-tick first accrual,
+  fixed per-entry 0.00012/0.25, stale snapshot at the drop branch =
+  `end-(R-1)`, drop row emitted on the flag tick = release+1 (NOT one tick
+  later, NOT at a projected `end-R` value); the recipe's `ceil(t+l-160)`
+  boundary release is therefore PENALIZED (stale 161, `-20.125`) and the
+  zero-penalty boundary is `ceil(t+l-159)` (stale exactly 160.0) —
+  ADR-0018's "exact-160 does not penalize" expectation is revised by this
+  evidence; (3) the windowed-miss path does NOT bump `total_notes_hit`
+  (goodNoteHit-only; the 161 hit-path judgement-miss keeps its bump);
+  (4) `hold_drop.input_ms` = 0.0. The recipe releases every sustain at
+  exactly `ceil(end)`, so a full-length sustain ends as a zero-penalty DROP
+  row, and `hold_end` rows appear only when the key stays held past the
+  sustain end (toy/negative coverage at ceil(end)+2). Probe negative battery
+  (schema drift, `input_ms` below sim, short/missing/extra ticks,
+  multi-event tick) all exit 2.
+- **Engine-decision divergence (labeled, not modeled):** the retained probe
+  path excludes `PlayState.update()`, so it has no health clamp/death
+  ordering; native health accumulates unclamped past HEALTH_MAX and the
+  traces diverge on `health_before/health_after` from the first crossing.
+  The probe refuses to emulate the clamp. The comparator implements the 6.1
+  item-6 labeled policy: strict until the first crossing (shape-checked:
+  native > HEALTH_MAX, Rust in [HEALTH_MAX, native+1e-9]); from there only
+  those two fields are excluded, counted per difficulty (58/66/78 fields),
+  all other fields stay strict. This is an evidence-interpretation rule over
+  an engine-decision field, not a data/acceptance tolerance change; no
+  tolerance value changed.
+- **Not covered (unchanged honesty list):** game-over/clamp ordering
+  (`update()` not retained), render geometry (phase-2b), opponent side,
+  botplay/practice, audio outputs, mod/script bodies, input device
+  timestamps, everything outside bopeebo easy/normal/hard default charts.
+  Field-wise equality on the probe boundary is NOT full native-game parity;
+  real-game integration traces remain a separate obligation. Additional
+  accepted limitation: the gate validates manifest digests/provenance fields
+  but does not authenticate the fixture files themselves (the conductor
+  gate's embedded-manifest trust pattern remains unused here); a coordinated
+  fixture+manifest replacement is out of the threat model and is documented,
+  not independently verified.
+
+
 ## ADR-0018 — M5 slice sim terminal game-over + gate trace conventions
+
+> Addendum 2026-11-07 (native-probe evidence, ADR-0019): the "exact-160
+> boundary release is MANDATORY (bitwise remaining_ms == 160.0)" convention is
+> REVISED: the recipe still releases that gate check at `ceil(t + l - 160)`,
+> but under the real frame order its stale hold snapshot is 161 ms and the
+> release PENALIZES (-20.125, combo break); the zero-penalty boundary is the
+> additional mandatory case released at `ceil(t + l - 159)` (stale snapshot
+> bitwise exactly 160.0). Both cases are embedded fail-closed in the
+> `gameplay_sim_bopeebo` gate and validated against the frozen native rows in
+> `tests/fixtures/note-native/`. Similarly, "hold_end at a full-length
+> sustain" applies only when the key stays held past the end; the recipe's
+> `ceil(t+l)` releases end as zero-penalty drop rows. Details: `docs/
+> M5-CONTRACT.md` §7 corrigendum item 3 and ADR-0019.
 
 - **Context / date:** 2026-11-06, M5 phase 2a implementing the frozen
   `docs/M5-CONTRACT.md`. The contract freezes the game-over transition up to
