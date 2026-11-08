@@ -1138,3 +1138,39 @@ the ledger commit that follows this block.
 - Not started: render/scene.rs row-consumption change (after the sim lands;
   render-diff digest equality is the check), 61/61 corpus prototype run,
   gameplay_sim_corpus gate wiring (6F).
+
+## 2026-11-08 — M6 phase 6A complete (sim + opponent rows + probe round-2 + corpus prototype)
+
+- Phase-0 commit `d6caab7b1`; 6A freeze amendment commit + delegation are in
+  the log above. 6A batch committed as `d66b65287` (no push: the session's
+  git push* permission rule blocks it; human may push).
+- Implementation: two disjoint workers + orchestrator integration landed:
+  schema-2 `OpponentHit` rows in the deterministic sim with per-strumline
+  compacted id spaces; `build_chart` over the corpus-id space (bare
+  hyphenated ids fixed post-review to resolve the default variant);
+  render/scene consumes rows (legacy schema-1 bridge kept for the play mode
+  and current fixtures); NEW native probe round-2 (retained real opponent
+  note/hold loops, NEW frozen tests/fixtures/note-native-opponent/ with
+  44/51/62 rows; round-1 fixtures verified byte-identical after re-runs).
+- Validation (all through the bounded-RAM queue, this machine):
+  1) `cargo xtask note-native --opponent --assets ...` exit 0: Rust sim rows
+     match frozen native rows exactly (44/51/62, f64 tol 1e-9, key order).
+  2) `cargo run -p xtask -- gameplay-sim --corpus --assets ...` exit 0:
+     61 chart-ids / 167 difficulty runs, two-run sha256 equality, zero
+     miss / zero game_over, opponent-row count == chart lanes 4..=7 per run.
+  3) `cargo xtask render-diff --assets ...` exit 0: frozen render-slice-1
+     digests matched; the scene change is digest-neutral.
+  4) gated `schema_two_rows_match_the_schema_one_bridge_frames`: schema-2
+     scene frames byte-identical to the schema-1 bridge through tick 2000
+     (+ exact opponent-row coverage assertion).
+  5) `cargo xtask verify --profile quick` exit 0 (quick only).
+- Review: @oxide-reviewer APPROVE with 5 minor findings (bare-id handling,
+  --opponent asset-drift binding, schema-2 coverage assertion, probe
+  legacy-voice assertion restructure + stale comment, corpus opponent
+  end/count coverage); all applied with re-verification.
+- Honest limits: NOT native-game parity (the native rows are frozen probe
+  execution on the synthesized stream, not a full-game trace); Windows/
+  hardware/CI artifacts and the full 6F gate wiring remain pending; chart
+  song-event CONSUMPTION stays phase 6C; M4/M5 pending obligations unchanged.
+- Next single objective: phase 6B analysis freeze (four renderTypes + 21
+  stages + pixel note style), then the 6B implementation task(s).
