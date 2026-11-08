@@ -1174,3 +1174,29 @@ the ledger commit that follows this block.
   song-event CONSUMPTION stays phase 6C; M4/M5 pending obligations unchanged.
 - Next single objective: phase 6B analysis freeze (four renderTypes + 21
   stages + pixel note style), then the 6B implementation task(s).
+
+## 2026-11-08 — M6 phase 6B opened: behavior-freeze analysis (committed 89e76ef13)
+
+- Analysis round completed and committed (docs/M6-CONTRACT.md §11): observed
+  renderType rules (null -> Sparrow via CharacterDataParser L510-512; 
+  DEFAULT_ISPIXEL false), Sparrow/Packer/MultiSparrow pipelines (frameRate 24
+  default, addByIndices index order, per-animation assetPath sheets),
+  stage prop surface + build semantics (Bopper classification, solid-color
+  props, scroll/alpha/angle/zIndex/flip, antialiasing = !isPixel), Bopper
+  dance semantics (step % (danceEvery*4) == 0, danceLeft-first alternation,
+  forceRestart, correctAnimationName suffix strip), pixel notestyle
+  (scale 6.0, offsets, NEAREST via isPixel, week6: library prefixes), and the
+  library resolution chain with a 0-miss scan over all 169 stage props
+  (157 file hits / 12 solid-color).
+- Engine decisions: renderType-driven loaders + typed fail-closed unknown
+  renderType; stage props as first-class scene items with zIndex painter
+  order; pixel sampler; per-stage cameraZoom; stage/song parameterized
+  front end; fixture growth via the ADR-0020 path only.
+- Planned delegation: ONE oxide-impl-rust worker (crates/oxide-game/src/render*
+  whole-pipeline extension; atlas/data crates already carry the parsed
+  surface) + orchestrator-owned xtask load-inventory tool. Reviews after the
+  first integration.
+- Validation plan: structural load-inventory (21 stages / 43 characters,
+  169 props), bopeebo render-diff digest equality, corpus prototype green,
+  quick verify; ONE representative render-diff establishment (school pixel)
+  prepared as an approval item (ADR-0020 path), not auto-frozen.
