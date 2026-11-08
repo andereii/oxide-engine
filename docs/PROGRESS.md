@@ -783,3 +783,14 @@ the ledger commit that follows this block.
   crate Cargo.toml files); single violation = deletion of my throwaway
   `out.png` probe artifact at the repo root (no code). M5 acceptance stays
   blocked on the pending native rendered-output/window-platform obligations.
+
+## 2026-11-07 — M5 phase-2b batch committed (human approval executed)
+
+- Human-approved local commit of the phase-2b batch (no push): `1ad8727`
+  ("m5(phase-2b): headless Bevy visual slice + render_diff/perf_budget gates
+  (ADR-0020)"). Working tree clean except this ledger entry.
+- Next objective (human approval): interactive playable window mode in the
+  oxide CLI (`oxide play --assets <dir> [--difficulty easy|normal|hard]`):
+  real 1280x720 Bevy window, live audio (Inst + Voices-bf + Voices-dad),
+  WASD/arrow input, HUD/camera/character/strumline rendering for the bopeebo
+  vertical slice.
