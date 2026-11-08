@@ -60,9 +60,14 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
 - **Note styles: `funkin` 53 / `pixel` 8** metadata files; pixel style drives the
   week-3 (school / philosophies/schoolEvil) + weekend-1/… pixel-side presentation.
 - **sserafim content** (`sserafim` stage, character JSONs, 11 custom event
-  names, `sserafimShow/Sing` array-valued payloads) exists in this checkout but
-  is NOT in `corpus.txt` — it is outside the measured acceptance inventory
-  (observed). `oxide-data` already records unknown event names (`events.rs:
+  names, `sserafimShow/Sing` array-valued payloads): CORRECTION (2026-11-08
+  review round): the sserafim CHART-IDS are NOT in `corpus.txt`, but the
+  `sserafim` STAGE and the three `sserafim-*` characters ARE referenced by the
+  corpus chart-id `spaghetti-default` (observed: spaghetti-metadata.json
+  playData.stage = sserafim; characters player sserafim-sakura, gf
+  sserafim-gf, opponent sserafim-kazuha). They are therefore part of the
+  measured inventory's LOAD surface; the sserafim custom EVENTS remain
+  outside the acceptance behavior (no chart in corpus.txt carries them). `oxide-data` already records unknown event names (`events.rs:
   `unknown_event_names``) and preserves the raw payload `Value`.
 
 ## 1. Derived requirements (from the cumulative M1-M5 contracts)
@@ -340,7 +345,9 @@ file set and a schema "2" addition path (M5 §3 add-only rule).
 Observed facts read the installed checkout `$HOME/Descargas/fnf/Funkin` (source
 + assets, read-only, 2026-11-08) under WORKFLOW §2 labels; engine decisions are
 Oxide choices. All corpus files referenced here are outside the acceptance
-inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
+inventory; the sserafim stage and its three characters ARE loaded by the
+corpus chart-id `spaghetti-default` (see the §0 correction), while the
+sserafim custom events stay non-acceptance data.
 
 ### 11.1 Observed data facts
 
@@ -467,7 +474,8 @@ inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
   current level directory first (`week6:assets/week6/...`), then `shared:`,
   then preload. Stage `directory` values observed: week1 (2 stages),
   week2 (2), week3 (2), week4 (2), week5 (3), week6 (4), week7 (2), weekend1
-  (3), sserafim (1, NOT in the acceptance corpus). Resolution CHECK (observed
+  (3), sserafim (1, loaded via the corpus chart-id spaghetti-default).
+  Resolution CHECK (observed
   scan over all 169 props, keys `[directory → shared → preload]`): 157 file/
   dir hits, 12 solid-color, **0 misses**. Characters: plain paths resolve
   under `shared/images` (12/12), explicit prefixes cover the rest.
@@ -527,3 +535,23 @@ inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
   pre-freezes new digests.
 - Windowed human playtest of the generalized stages/characters remains the
   HR visual arbiter for anything not covered by digest equality.
+
+### 11.5 Amendment (2026-11-08, 6B integration review): sserafim stage inventory + MD.W/H tolerance
+
+- CORRECTION to §0: the `sserafim` stage and the three `sserafim-*`
+  characters ARE part of the measured acceptance load surface via the corpus
+  chart-id `spaghetti-default` (spaghetti-metadata.json observed). The
+  sserafim CHART-IDS and custom EVENTS remain outside the acceptance
+  behavior.
+- OBSERVED (sparrow sakura CharacterAn): `shared/images/characters/sserafim/
+  sakura/Animation.json` carries `MD: {"FRT":24}` WITHOUT `W`/`H`; the
+  sibling `spritemap1.json` `meta.size = {w: 2043, h: 1950}` carries the page
+  size. The shipped data must stay loadable (acceptance inventory), so:
+- ENGINE DECISION (approved): `AnimateStage` tolerates missing
+  `MD.W`/`MD.H` by falling back to the spritemap page size
+  (`meta.size.w/h`) — data-equivalent to the MD fields on every file where
+  both exist. Strictness preserved: missing `MD.FRT`, missing BOTH sources
+  of size, or malformed JSON still fail closed; present `MD.W/H` win over
+  the fallback. The equivalence check is: existing frozen parse fixtures
+  (with MD.W/H) emit identical parse results, plus a ship-shaped
+  `MD={"FRT":24}` regression test.
