@@ -516,6 +516,9 @@ inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
   school props with default-Sparrow pixel characters; loader called via the
   senpai chart-id) run in establishment mode and FROZEN ONLY after the
   human approves the fixture-growth step (ADR-0020 path). Additional
+  representative stages (mallXmasErect boppers; weekend1) can follow in a
+  later round with the same approval path.
+
 ### 11.4 Approval items (human)
 
 - The representative render-diff fixture growth (school pixel stage or
