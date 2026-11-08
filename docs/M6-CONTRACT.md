@@ -334,3 +334,189 @@ file set and a schema "2" addition path (M5 §3 add-only rule).
   gameplay` gate wiring itself remains 6F).
 - Quick `cargo xtask verify` green; render-diff digest equality on the
   bopeebo fixtures after the scene change (10.3.3).
+
+## 11. Phase 6B behavior freeze — all renderTypes, 21 stages, pixel note style
+
+Observed facts read the installed checkout `$HOME/Descargas/fnf/Funkin` (source
++ assets, read-only, 2026-11-08) under WORKFLOW §2 labels; engine decisions are
+Oxide choices. All corpus files referenced here are outside the acceptance
+inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
+
+### 11.1 Observed data facts
+
+- **renderType inventory** (observed in the asset checkout, M6 §0): the 43
+  referenced characters split as `animateatlas` 24, `multianimateatlas` 10,
+  `multisparrow` 3, `sparrow` 1, `packer` 1, null 7 (gf-pixel, gf-tankmen,
+  nene-pixel, nene-tankmen, senpai-angry, senpai, spooky,
+  spooky-dark). **Default**: `CharacterDataParser` normalizes a null renderType
+  AFTER parsing (`input.renderType = DEFAULT_RENDERTYPE`, CharacterData.hx
+  L510-512) with `DEFAULT_RENDERTYPE = Sparrow` (L463) and
+  `DEFAULT_ISPIXEL = false` (L457). The `default:` branch of the constructor
+  switch (`Creating character with undefined renderType`, L277-280) is therefore
+  UNREACHABLE for JSON-loaded characters on the shipped path; the 7 null files
+  load as Sparrow characters. Engine decision: Oxide's loader implements
+  exactly `animateatlas | multianimateatlas | multisparrow | sparrow | packer |
+  (null -> sparrow)` and ANY OTHER string fails closed (typed error naming the
+  file), rather than mimicking the Custom/script path (no scripts in the
+  corpus).
+  - Observed scale/isPixel pairing on the pixel characters:
+    `pico-pixel`/`spirit`/`senpai`/`gf-pixel` carry `scale: 6` +
+    `isPixel: true`; non-pixel characters carry `scale` absent/1.
+- **Sparrow/Packer/MultiSparrow pipelines** (observed):
+  - `SparrowCharacter.loadSpritesheet` → `Paths.getSparrowAtlas(assetPath)`
+    (Paths.hx L177-180: `<image>.png` + `images/<key>.xml` via `getPath`),
+    `antialiasing = !(isPixel ?? false)` (L88-97 — the M5 log9 rule),
+    `setScale(_data.scale)` (L99; default scale 1).
+  - `PackerCharacter.loadSpritesheet` → `Paths.getPackerAtlas(assetPath)`
+    (Paths.hx L224-228: `<image>.png` + `images/<key>.txt`), same
+    isPixel/scale block (PackerCharacter.hx L98-115).
+  - `MultiSparrowCharacter`: main sheet from `_data.assetPath` (L66) PLUS one
+    extra sheet per animation that sets `anim.assetPath` (L108); frames
+    collections are combined (`FlxAnimationUtil.combineFramesCollections`);
+    each animation is resolved by prefix on its OWN sheet.
+  - **Animation registration** (FlxAnimationUtil.addAtlasAnimation,
+    FlxAnimationUtil.hx L53-76, used by Sparrow/Packer/MultiSparrow characters
+    AND sparrow/packer stage props): `frameRate = anim.frameRate ?? 24`,
+    `looped = anim.looped ?? false`, per-anim `flipX/flipY ?? false`,
+    `frameIndices != null && non-empty` → `addByIndices(..., frameRate,
+    looped, flipX, flipY)`; otherwise `addByPrefix(...)` (prefix match on
+    frame NAMES). `addByIndices` preserves the INDEX ORDER given in the data
+    (gf-pixel's `danceLeft` 16-entry frameIndices list is the shipped case).
+  - **Character file asset inventory**: 34 character `assetPath` values carry
+    the explicit `shared:` prefix (plus 54 per-animation `shared:` values on
+    animateatlas variants); 12 plain paths exist AND resolve under
+    `shared/images`; one per-animation path carries `week7:`
+    (tankman-bloody). All characters' sparrow/packer XML/TXT data files
+    resolve (0 missing).
+- **AnimateAtlas/MultiAnimateAtlas** machinery is the M5-observed/implemented
+  one (RENDER-BEHAVIOR §4/§5); M5's bf slice uses `multianimateatlas`.
+  Observed: per-animation `assetPath` (54 `shared:` values + 1 `week7:`)
+  selects ANOTHER animate atlas collection; collections combine into one
+  frames surface (MultiAnimateAtlasCharacter). M2's `AnimateStage` covers
+  main-frame/symbol/label playback used by 6B exactly (no new semantics).
+- **Stage prop surface** (observed across all 21 stage files): top level
+  `{name, directory, cameraZoom, characters, props, version}`; per-prop
+  fields seen: `zIndex (164/169)`, `danceEvery (125)`, `position (169)`,
+  `scale (168)`, `name (169)`, `isPixel (108)`, `animType (116)`,
+  `scroll (169)`, `assetPath (169)`, `animations (129)`,
+  `startingAnimation (43)`, `alpha (41)`, `atlasSettings (3)`, `angle (2)`,
+  `flipX (3)`; animTypes: sparrow 110, (none) 53, animateatlas 4, packer 2.
+  danceEvery: 0 (98), 1/1.0 (27), null (44), 2 (2). 24 props carry
+  `isPixel: true` (week6 school family + 2 others), 145 false. 3 props carry
+  `atlasSettings {applyStageMatrix: true}` (animateatlas Erect props).
+  12 props use `#RRGGBB` solid-color assetPaths.
+- **Stage build semantics** (Stage.hx buildStage L181-300, observed):
+  - prop class: `danceEvery != 0 || animations non-empty` → Bopper, else
+    StageProp (L201-209).
+  - animated sheets by `animType`: `packer` → loadPacker (TXT),
+    `animateatlas` → loadTextureAtlas(assetPath, _data.directory,
+    atlasSettings), default (also missing/none-with-animations) →
+    loadSparrow (L212-222).
+  - `#RRGGBB` assetPath → makeSolidColor(width, height, color) with width/
+    height from `scale` (scalar or pair; default 1×1) (L224-244); static
+    (non-animated, non-solid) → loadTexture + `active = false` (L248-251).
+  - failing texture (null frames) SKIPS the prop with an error line, NOT a
+    crash (L252-257; irrelevant — all 46 animated props resolve: 42
+    sparrow/packer + 4 animateatlas directories confirmed present; the
+    resolution order test found 0 misses).
+  - non-solid: scale from data (scalar or pair; default 1), `updateHitbox()`,
+    `x/y = position`, `alpha = dataProp.alpha`, `antialiasing = !isPixel`
+    (L268: the log9 rule for props), scrollFactor from `scroll`, `angle`,
+    `color`, `blend`, `zIndex`, `flipX`/`flipY` (L262-282). The
+    pixel-perfect render overrides (L284-287) are COMMENTED OUT in the
+    shipped build — not a parity obligation.
+  - animation registration per animType (L284-300): packer →
+    `propSprite.animation.add(name, frameIndices)` (+ Bopper offsets via
+    setAnimationOffsets), animateatlas → addTextureAtlasAnimations,
+    sparrow → addAtlasAnimations (+ Bopper offsets for every anim).
+- **Bopper semantics** (Bopper.hx, observed): `onStepHit`: dance iff
+  `danceEvery > 0 && step % (danceEvery * STEPS_PER_BEAT) == 0` (STEPS_PER_BEAT
+  = 4; Constants) → `dance(shouldBop)` with shouldBop true → the dance restarts
+  (forceRestart = true). `dance()` (L179-209): `shouldAlternate = hasAnimation
+  ('danceLeft')`; alternating plays `danceRight`/`danceLeft` in sequence
+  (hasDanced starts false → the FIRST dance plays `danceLeft`, then
+  alternates); non-alternating plays `idle`. `correctAnimationName` strips a
+  `-<suffix>` (e.g. `-scared`) when the name does not exist, recursively
+  (L214-231). `startingAnimation` (stage props + gf) is the first animation
+  played on creation (set in the constructed class/BaseCharacter).
+  idleSuffix/-alt handling: the corpus uses NO idleSuffix (pixel variant
+  swaps `-pixel` ASSETS and `valueSuffix`... observed: the bopper's
+  `set_idleSuffix` (L42-70) only applies `-<suffix>`-suffixed animation names;
+  no corpus prop/character data sets idleSuffix at parse level (the field
+  exists only for bf-christmas style holiday handling? — deliberate EXCLUDED:
+  engine decision: Oxide ignores idleSuffix in 6B; the corpus has none
+  setting it, recorded as a limitation, not a positive behavior).
+- **Camera**: per-stage `cameraZoom` (mainStage 1.1, others e.g. 1.0,
+  phillyTrainErect etc.); the M5 camera algebra (RENDER-BEHAVIOR §3 + follow
+  offsets) stays frozen; the per-stage cameraZoom is consumed as the stage
+  zoom multiplier exactly as mainStage's 1.1 already is.
+- **Note style (pixel)** (observed `preload/data/notestyles/pixel.json`):
+  assets `note`, `noteStrumline`, `holdNote` exist with `scale: 6.0`,
+  `isPixel: true` and `offsets` (`noteStrumline` `offsets [28, 32]`,
+  `holdNote` `offsets [2, 1]`); asset paths carry EXPLICIT library prefixes
+  (`week6:weeb/pixelUI/arrows-pixels`, `week6:weeb/pixelUI/arrowEndsNew`) that
+  resolve under `assets/week6/images/...` (confirmed on disk). The funkin
+  style (M5 frozen) has no library prefixes and no pixel flags.
+  `NoteStyle.hx:87/225/253` (observed in M5 log9): `antialiasing =
+  !(isPixel ?? false)` → pixel pages use NEAREST/box filtering; other pages
+  stay linear. noteSplash/holdNoteCover/countdown/judgement/combo assets
+  EXIST in the pixel and funkin styles; they stay 6D deliverables — 6B renders
+  only note/receptor/hold trails.
+- **Asset resolution chain** (Paths.getPath L44-58 + getLibraryPath L60-73):
+  explicit `week6:`-style prefix → `week6:assets/<lib>/<file>`; plain key →
+  current level directory first (`week6:assets/week6/...`), then `shared:`,
+  then preload. Stage `directory` values observed: week1 (2 stages),
+  week2 (2), week3 (2), week4 (2), week5 (3), week6 (4), week7 (2), weekend1
+  (3), sserafim (1, NOT in the acceptance corpus). Resolution CHECK (observed
+  scan over all 169 props, keys `[directory → shared → preload]`): 157 file/
+  dir hits, 12 solid-color, **0 misses**. Characters: plain paths resolve
+  under `shared/images` (12/12), explicit prefixes cover the rest.
+
+### 11.2 Engine decisions (Oxide integration)
+
+1. ** loaders are renderType-driven in `render/load.rs`** with the frozen
+   bopper/animation semantics of 11.1; the animate pipeline reuses the M5/M2
+   machinery; sparrow/packer reuse the M2 parsers with prefix selection
+   semantics (addByPrefix over frame NAMES sorted by document order;
+   addByIndices reorders by the given indices list; frameRate default 24).
+2. **Stage props** become a first-class scene item class: static texture,
+   solid color, animated (sparrow/packer/animateatlas), with zIndex ordering,
+   scroll factor, isPixel sampling, alpha/angle/flip; boppers dance on the
+   frozen step rule. Prop draw order = the existing z-sorted painter chain
+   (props before/behind characters by zIndex; ties keep document order).
+3. **Pixel**: NEAREST sampler pages when the source data flags `isPixel`
+   (note style assets, pixel characters, pixel props); scale fields (6.0)
+   consumed `setScale`-style; NO pixel-perfect integer snapping (commented out
+   in the native). The M5 geometry chain (content placement with the
+   setup-hitbox term; hold trail geometry) stays FROZEN for all styles — the
+   pixel style reuses it with its own scale/offsets (28/32, 2/1).
+4. **Camera zoom/scroll extended**: per-stage cameraZoom; prop scrollFactor
+   joins the camera matrix (camera scroll 0/1 handling unchanged; camera zoom
+   application per-stage value replaces mainStage's constant).
+5. **Wiring**: the interactive play mode and the render front end become
+   stage/song-parameterized along the 6A `build_cart`-style idsing (engine
+   decision; the M5 bopeebo fixture inputs stay byte-frozen; fixture GROWTH
+   for other stages follows the ADR-0020 establishment path — listed in
+   11.4, not pre-approved).
+
+### 11.3 Validation obligations for 6B
+
+- **Structural load-inventory check** (new xtask gate candidate, wired when
+  the tooling lands): with the explicit assets root, load every stage in
+  `preload/data/stages` (21 files; sserafim parses too but is
+  excluded from acceptance inventory) and every REFERENCED character
+  (43) — fail closed on any missing asset/animation resolution error; print
+  the per-stage prop counts (169 total) and per-renderType character counts.
+- **Registmental ports**: froM5 bopeebo `render-diff` digests stay byte-
+  identical; the corpus gameplay prototype (61 chart-ids) stays green —
+  the sim is out of the render path, but the play-session loader path runs
+  under the same load surface.
+- **Rendered evidence**: ONE representative render-diff establishment draft
+  (proposal: the `school` pixel stage, exercising the pixel note style +
+  school props with default-Sparrow pixel characters; loader called via the
+  senpai chart-id) run in establishment mode and FROZEN ONLY after the
+  human approves the fixture-growth step (ADR-0020 path). Additional
+  representative stages (mallXmasErect boppers; weekend1) can follow in a
+  later round with the same approval path.
+- Windowed human playtest of the generalized stages/characters remains the
+  HR visual arbiter for anything not covered by digest equality.
