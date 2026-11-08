@@ -7,7 +7,8 @@
 //! Bevy 0.20 render-to-image harness.
 //!
 //! Public integration boundary (frozen): [`SliceRenderer`] with `build`,
-//! `step` and `frame`, plus [`RenderError`]. Everything else is private.
+//! `build_for_song`, `step` and `frame`, plus [`RenderError`]. Everything else
+//! is private.
 //!
 //! Numeric conventions:
 //! - Scene geometry, camera, follow and animation deadlines are `f64`.
@@ -69,6 +70,14 @@ pub enum RenderError {
         #[source]
         source: oxide_atlas::AtlasError,
     },
+    #[error("packer atlas {path:?} failed: {source}")]
+    Packer {
+        path: String,
+        #[source]
+        source: oxide_atlas::AtlasError,
+    },
+    #[error("character file {path:?} requests unknown renderType {render_type:?}")]
+    UnknownRenderType { path: String, render_type: String },
     #[error("asset text {path:?} is not valid UTF-8: {detail}")]
     Decode { path: String, detail: String },
     #[error("PNG {path:?} could not be decoded: {detail}")]
@@ -162,6 +171,29 @@ impl SliceRenderer {
         policy: AdapterPolicy,
     ) -> Result<SliceRenderer, RenderError> {
         let loaded = load::load_slice(assets_root, difficulty)?;
+        Self::from_loaded(loaded, policy)
+    }
+
+    /// Loads any `corpus.txt`-style chart id (`<song>`, `<song>-default`, or
+    /// `<song>-<variation>`), mirroring [`crate::slice::GameplaySimState::build_chart`]
+    /// id selection (docs/M6-CONTRACT §11.2.5).
+    ///
+    /// This is the generalized scene front end needed to build non-bopeebo
+    /// stages; it always uses the deterministic [`AdapterPolicy::Software`]
+    /// path. The M5 bopeebo fixture path remains [`SliceRenderer::build`].
+    pub fn build_for_song(
+        assets_root: &Path,
+        chart_id: &str,
+        difficulty: &str,
+    ) -> Result<SliceRenderer, RenderError> {
+        let loaded = load::load_slice_for_song(assets_root, chart_id, difficulty)?;
+        Self::from_loaded(loaded, AdapterPolicy::Software)
+    }
+
+    fn from_loaded(
+        loaded: load::LoadedSlice,
+        policy: AdapterPolicy,
+    ) -> Result<SliceRenderer, RenderError> {
         let (scene, pages) = scene::Scene::new(loaded)?;
         let harness = match policy {
             AdapterPolicy::Software => harness::Harness::new(pages, scene.layer_specs())?,

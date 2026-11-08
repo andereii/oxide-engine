@@ -234,6 +234,20 @@ impl AnimateStage {
         self.data.main.frame_count
     }
 
+    /// Frame count of a named symbol timeline, or `None` when no loaded
+    /// collection defines it.
+    ///
+    /// Native rule implemented: animation data with `animType: "symbol"`
+    /// plays the symbol's OWN timeline, whose length is the maximum `I + DU`
+    /// over that symbol's layer keyframes (the same keyframe expansion as the
+    /// main timeline, RENDER-BEHAVIOR §4). Symbols are looked up in the
+    /// receiver first and then in merged collections in insertion order.
+    pub fn symbol_frame_count(&self, symbol: &str) -> Option<usize> {
+        self.resolver()
+            .find_symbol(symbol)
+            .map(|timeline| timeline.frame_count)
+    }
+
     /// Frame list for a main-timeline label. The receiver's main timeline is
     /// searched first, then each added collection in insertion order. Within a
     /// timeline the first layer containing any match wins. Matching follows the
@@ -569,6 +583,36 @@ fn apply(matrix: [f64; 6], x: f64, y: f64) -> (f64, f64) {
     )
 }
 
+/// Resolves the animate stage size from `MD.W`/`MD.H`, falling back to the
+/// spritemap's `meta.size`.
+///
+/// Observed shipped shape (M6-CONTRACT §11.5): `shared/images/characters/
+/// sserafim/sakura/Animation.json` has `MD: {"FRT":24}` without `W`/`H`; its
+/// sibling `spritemap1.json` declares `meta.size = {w: 2043, h: 1950}`. The
+/// fallback is data-equivalent on every file that carries both sources, and
+/// present `MD.W`/`MD.H` win, so existing parse results are unchanged.
+/// Missing sizes from both sources fail closed and name both paths.
+fn stage_size(
+    metadata: &Map<String, Value>,
+    spritemap: &AnimateAtlas,
+) -> Result<(u32, u32), AnimateStageError> {
+    if let (Some(width), Some(height)) = (metadata.get("W"), metadata.get("H")) {
+        return Ok((
+            as_u32(width, "Animation.json.MD.W")?,
+            as_u32(height, "Animation.json.MD.H")?,
+        ));
+    }
+    if let Some([width, height]) = spritemap.page_size {
+        return Ok((width, height));
+    }
+    Err(AnimateStageError::Invalid {
+        path: "Animation.json.MD".to_string(),
+        message: "stage size missing: `MD.W`/`MD.H` are absent and the sibling \
+                  `spritemap1.json.meta.size` has no integer `w`/`h`"
+            .to_string(),
+    })
+}
+
 fn parse_stage(
     animation: &Value,
     spritemap: &AnimateAtlas,
@@ -577,8 +621,7 @@ fn parse_stage(
 
     let metadata = as_object(field(root, "MD", "Animation.json")?, "Animation.json.MD")?;
     let frame_rate = as_u32(field(metadata, "FRT", "Animation.json.MD")?, "MD.FRT")?;
-    let width = as_u32(field(metadata, "W", "Animation.json.MD")?, "MD.W")?;
-    let height = as_u32(field(metadata, "H", "Animation.json.MD")?, "MD.H")?;
+    let (width, height) = stage_size(metadata, spritemap)?;
 
     let animate = as_object(field(root, "AN", "Animation.json")?, "Animation.json.AN")?;
     let timeline_value = field(animate, "TL", "AN")?;

@@ -356,6 +356,54 @@ fn schema_two_rows_match_the_schema_one_bridge_frames() {
     }
 }
 
+/// Engine-level readback evidence (NOT a frozen fixture): the sserafim stage
+/// loaded by the corpus chart-id `spaghetti-default` must not render its
+/// `solidCover` prop as an opaque black full-screen overlay. `solidCover` is
+/// `#000000`, scale `[10000, 10000]`, `alpha: 0.0`, `zIndex: 9999`
+/// (sserafim.json); with `dataProp.alpha` applied and the integer
+/// `makeSolidColor` dimensions drawn once, the white `solid` underlay and the
+/// stage props stay visible.
+#[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for 6B engine-level readback evidence"]
+fn spaghetti_sserafim_solid_cover_is_not_an_opaque_overlay() {
+    let _lock = test_lock();
+    let root = assets_root();
+    let mut renderer = SliceRenderer::build_for_song(&root, "spaghetti-default", "easy")
+        .unwrap_or_else(|error| panic!("build spaghetti-default renderer: {error}"));
+    renderer.step(0, &[], &[]).expect("step tick 0");
+    let frame = renderer.frame().expect("render spaghetti frame");
+    assert_eq!(frame.len(), FRAME_BYTES, "frame byte length");
+
+    let total = frame.as_chunks::<4>().0.len();
+    let mut non_black = 0usize;
+    let mut distinct = std::collections::BTreeSet::new();
+    for pixel in frame.as_chunks::<4>().0 {
+        let rgb = (pixel[0], pixel[1], pixel[2]);
+        if rgb.0 > 8 || rgb.1 > 8 || rgb.2 > 8 {
+            non_black += 1;
+        }
+        distinct.insert(rgb);
+    }
+    // With the unfixed solid path, the zIndex-9999 black quad blended opaquely
+    // over the whole 1280x720 target (nearly every pixel (0,0,0)). The
+    // sserafim white `solid` underlay (alpha 1, scale 10000) covers the
+    // viewport, so a working composition has a substantial non-black majority.
+    assert!(
+        non_black > total / 2,
+        "solidCover rendered as an opaque overlay: {non_black}/{total} non-black pixels"
+    );
+    assert!(
+        distinct.len() > 8,
+        "frame has too little pixel diversity: {} distinct RGB values",
+        distinct.len()
+    );
+    println!(
+        "spaghetti-default tick 0: sha256={} non_black={non_black}/{total} distinct_rgb={}",
+        sha256_hex(&frame),
+        distinct.len()
+    );
+}
+
 /// ADR-0020 addendum explicit-adapter path: exercise `AnyHardware` when a
 /// hardware GPU is available. On machines with only a software adapter the
 /// harness returns the typed `NoHardwareAdapter` error and the test prints the

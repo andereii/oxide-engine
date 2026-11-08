@@ -42,6 +42,11 @@ fn synthetic_metadata_bounds_and_observed_rtrim_labels() {
     assert_eq!(stage.stage_size(), (640, 360));
     assert_eq!(stage.frame_count(), 14);
     assert_eq!(stage.bounds(), [0.0, 0.0, 20.0, 40.0]);
+    // Symbol animations (`animType: "symbol"`) play the symbol's own timeline;
+    // its frame count follows the same `I + DU` keyframe expansion as the main
+    // timeline.
+    assert_eq!(stage.symbol_frame_count("Nested"), Some(3));
+    assert_eq!(stage.symbol_frame_count("Missing"), None);
 
     // RENDER-BEHAVIOR §4 observed comparison: `name.rtrim() == label`
     // (FlxAnimateController.hx L266-290). Layer 0 is the first layer with
@@ -56,6 +61,128 @@ fn synthetic_metadata_bounds_and_observed_rtrim_labels() {
     assert_eq!(stage.label_frames("walk"), None);
     assert_eq!(stage.label_frames(" Walk"), None);
     assert_eq!(stage.label_frames("Missing"), None);
+}
+
+#[test]
+fn synthetic_md_frt_only_falls_back_to_spritemap_page_size() {
+    // Shipped-data shape observed on `shared/images/characters/sserafim/
+    // sakura` (M6-CONTRACT §11.5): `Animation.json` has only `MD.FRT`; the
+    // page size lives in the sibling spritemap's `meta.size`.
+    let animation = r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": [
+            {"ASI": {"N": "p", "MX": [1, 0, 0, 1, 0, 0]}}
+        ]}]}]}},
+        "MD": {"FRT": 24}
+    }"#;
+    let spritemap = r#"{
+        "ATLAS": {"SPRITES": [
+            {"SPRITE": {"name": "p", "x": 0, "y": 0, "w": 2, "h": 3}}
+        ]},
+        "meta": {"image": "spritemap1.png", "size": {"w": 2043, "h": 1950}}
+    }"#;
+    let stage = AnimateStage::parse(animation, spritemap).expect("FRT-only shipped shape parses");
+
+    assert_eq!(stage.frame_rate(), 24);
+    assert_eq!(stage.stage_size(), (2043, 1950));
+    let quads = stage.resolve_main_frame(0).expect("frame 0 resolves");
+    assert_eq!(quad_names(&quads), ["p"]);
+    assert_eq!(quads[0].atlas_rect, [0, 0, 2, 3]);
+}
+
+#[test]
+fn synthetic_md_stage_size_wins_over_spritemap_page_size() {
+    // Both sources present: `MD.W`/`MD.H` must win so files that carry the
+    // metadata fields keep their frozen parse results.
+    let animation = r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": []}]}]}},
+        "MD": {"W": 640, "H": 360, "FRT": 24}
+    }"#;
+    let spritemap = r#"{
+        "ATLAS": {"SPRITES": []},
+        "meta": {"image": "spritemap1.png", "size": {"w": 100, "h": 100}}
+    }"#;
+    let stage = AnimateStage::parse(animation, spritemap).expect("metadata size wins");
+    assert_eq!(stage.stage_size(), (640, 360));
+}
+
+#[test]
+fn synthetic_partial_md_pair_is_treated_as_pair_absent() {
+    // M6-CONTRACT §11.6: an MD carrying EXACTLY ONE of W/H is treated as a
+    // pair-absent size (the spritemap size fallback applies), so a lone field
+    // can never yield a valid half-size.
+    let spritemap = r#"{
+        "ATLAS": {"SPRITES": []},
+        "meta": {"image": "spritemap1.png", "size": {"w": 100, "h": 100}}
+    }"#;
+    for (animation, label) in [
+        (
+            r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": []}]}]}},
+        "MD": {"W": 640, "FRT": 24}
+    }"#,
+            "lone W",
+        ),
+        (
+            r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": []}]}]}},
+        "MD": {"H": 360, "FRT": 24}
+    }"#,
+            "lone H",
+        ),
+    ] {
+        let stage = AnimateStage::parse(animation, spritemap)
+            .unwrap_or_else(|error| panic!("{label}: parse must fall back cleanly: {error}"));
+        assert_eq!(
+            stage.stage_size(),
+            (100, 100),
+            "{label} falls back to page size"
+        );
+    }
+}
+
+#[test]
+fn synthetic_partial_md_pair_without_fallback_fails_closed() {
+    for (animation, label) in [
+        (
+            r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": []}]}]}},
+        "MD": {"W": 640, "FRT": 24}
+    }"#,
+            "lone W",
+        ),
+        (
+            r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": []}]}]}},
+        "MD": {"H": 360, "FRT": 24}
+    }"#,
+            "lone H",
+        ),
+    ] {
+        let error = AnimateStage::parse(animation, EMPTY_SPRITEMAP)
+            .expect_err(&format!("{label}: no size source must fail closed"));
+        let AnimateStageError::Invalid { path, message } = &error else {
+            panic!("expected Invalid for {label}, got {error:?}");
+        };
+        assert!(path.contains("MD"), "{label}: {path}");
+        assert!(message.contains("meta.size"), "{label}: {message}");
+    }
+}
+
+#[test]
+fn synthetic_missing_stage_size_in_both_sources_fails_closed() {
+    let animation = r#"{
+        "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": []}]}]}},
+        "MD": {"FRT": 24}
+    }"#;
+    let error =
+        AnimateStage::parse(animation, EMPTY_SPRITEMAP).expect_err("missing stage size rejected");
+    let AnimateStageError::Invalid { path, message } = &error else {
+        panic!("expected Invalid, got {error:?}");
+    };
+    assert!(path.contains("MD"), "{path}");
+    assert!(message.contains("MD.W"), "{message}");
+    assert!(message.contains("spritemap1.json"), "{message}");
+    assert!(message.contains("meta.size"), "{message}");
 }
 
 #[test]
@@ -469,6 +596,18 @@ fn real_stage(name: &str) -> AnimateStage {
         .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
     AnimateStage::parse(&animation, &spritemap)
         .unwrap_or_else(|error| panic!("parse {name} stage: {error}"))
+}
+
+#[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
+fn real_sserafim_stage_falls_back_to_spritemap_page_size() {
+    // Observed shipped shape (M6-CONTRACT §11.5): `MD` has only `FRT`; the
+    // stage size comes from the sibling spritemap's `meta.size`.
+    let stage = real_stage("sserafim/sakura");
+    assert_eq!(stage.frame_rate(), 24);
+    assert_eq!(stage.stage_size(), (2043, 1950));
+    assert!(stage.frame_count() > 0);
+    assert!(stage.resolve_main_frame(0).is_ok());
 }
 
 #[test]

@@ -195,11 +195,29 @@ fn packer_malformed_geometry_is_json_error() {
 }
 
 #[test]
+fn packer_text_document_order_and_spaced_names() {
+    let text =
+        "\u{FEFF}idle spirit_0 = 0 1028 128 128\nspirit down_0 = 1 2 128 128\n\nleft_0 = 2 3 4 5\n";
+    let atlas = oxide_atlas::parse_packer_text(text).expect("packer text parses");
+    assert_eq!(atlas.image, "");
+    assert_eq!(atlas.frames.len(), 3);
+    assert_eq!(atlas.frames[0].name, "idle spirit_0");
+    assert_eq!(atlas.frames[0].frame, [0, 1028, 128, 128]);
+    assert_eq!(atlas.frames[1].name, "spirit down_0");
+    assert_eq!(atlas.frames[2].frame, [2, 3, 4, 5]);
+    assert_eq!(atlas.frames[2].source_size, [4, 5]);
+    assert!(!atlas.frames[0].rotated && !atlas.frames[0].trimmed);
+    assert!(oxide_atlas::parse_packer_text("").is_err());
+    assert!(oxide_atlas::parse_packer_text("name 1 2 3 4").is_err());
+}
+
+#[test]
 fn animate_parses_sprites_and_meta_image() {
     let json = "\u{FEFF}{\"ATLAS\":{\"SPRITES\":[{\"SPRITE\":{\"name\":\"0000\",\"x\":0,\"y\":0,\"w\":1401,\"h\":100,\"rotated\":false}},{\"SPRITE\":{\"name\":\"0001\",\"x\":7,\"y\":8,\"w\":9,\"h\":10}}]},\"meta\":{\"image\":\"spritemap1.png\"}}";
     let atlas = parse_animate(json).expect("animate parse");
 
     assert_eq!(atlas.image, "spritemap1.png");
+    assert_eq!(atlas.page_size, None);
     assert_eq!(atlas.sprites.len(), 2);
     assert_eq!(
         atlas.sprites[0],
@@ -223,6 +241,29 @@ fn animate_parses_sprites_and_meta_image() {
             rotated: false,
         }
     );
+}
+
+#[test]
+fn animate_page_size_requires_both_integer_dimensions() {
+    let with_meta = |meta: &str| format!(r#"{{"ATLAS":{{"SPRITES":[]}},"meta":{meta}}}"#);
+
+    let atlas = parse_animate(&with_meta(
+        r#"{"image":"spritemap1.png","size":{"w":2043,"h":1950}}"#,
+    ))
+    .expect("full size parses");
+    assert_eq!(atlas.page_size, Some([2043, 1950]));
+
+    let atlas = parse_animate(&with_meta(r#"{"image":"spritemap1.png"}"#))
+        .expect("missing size is not an error here");
+    assert_eq!(atlas.page_size, None);
+
+    let atlas = parse_animate(&with_meta(r#"{"size":{"w":2043}}"#))
+        .expect("partial size is not an error here");
+    assert_eq!(atlas.page_size, None);
+
+    let atlas = parse_animate(&with_meta(r#"{"size":{"w":2043,"h":-1}}"#))
+        .expect("negative size is not an error here");
+    assert_eq!(atlas.page_size, None);
 }
 
 #[test]

@@ -42,18 +42,22 @@ pub(crate) const BACKGROUND_ALPHA: f64 = 0.0;
 /// `NOTE_hold_assets` is a 416x87 sheet with 8 columns (RENDER-BEHAVIOR §3).
 pub(crate) const HOLD_TEXTURE_COLUMNS: usize = 8;
 /// `NOTE_hold_assets` width (RENDER-BEHAVIOR §3).
+#[cfg(test)]
 pub(crate) const HOLD_TEXTURE_WIDTH: f64 = 416.0;
 /// `NOTE_hold_assets` height (RENDER-BEHAVIOR §3).
+#[cfg(test)]
 pub(crate) const HOLD_TEXTURE_HEIGHT: f64 = 87.0;
 /// SustainTrail `bottomHeight` (`graphic.height * zoom * endOffset` =
 /// `87 * 0.7 * 0.5 = 30.45`): the distance from `graphicHeight` down to the
 /// cap-vertex top — NOT the full rendered cap height (SustainTrail.hx:324).
 /// The pre-fix name `SUSTAIN_CAP_HEIGHT` blamed the lower value; renamed
 /// 2026-11-08 with the user surgical fix round.
+#[cfg(test)]
 pub(crate) const SUSTAIN_BOTTOM_HEIGHT: f64 = HOLD_TEXTURE_HEIGHT * 0.7 * 0.5;
 /// SustainTrail `extraCapTail` (`graphic.height * zoom * (bottomClip -
 /// endOffset)` = `87 * 0.7 * 0.4 = 24.36`); the cap bottom sits this far
 /// BELOW `graphicHeight` (SustainTrail.hx:391-392).
+#[cfg(test)]
 pub(crate) const SUSTAIN_EXTRA_CAP_TAIL: f64 =
     HOLD_TEXTURE_HEIGHT * 0.7 * (SUSTAIN_CAP_BOTTOM_CLIP - 0.5);
 /// End-cap/un-hit texture bottom clip bound (RENDER-BEHAVIOR §3).
@@ -223,6 +227,20 @@ pub(crate) fn sustain_height(remaining_ms: f64, scroll_speed: f64) -> f64 {
     PIXELS_PER_MS * remaining_ms * scroll_speed
 }
 
+/// SustainTrail `bottomHeight = graphic.height * zoom * 0.5`
+/// (SustainTrail.hx:324). The frozen algebra keeps the `0.5` term; the sheet
+/// height and style zoom become parameters so the pixel style (6 px * 6.0)
+/// uses the same chain as funkin (87 px * 0.7).
+pub(crate) fn sustain_bottom_height(page_height: f64, zoom: f64) -> f64 {
+    page_height * zoom * 0.5
+}
+
+/// SustainTrail `extraCapTail = graphic.height * zoom * (bottomClip - 0.5)`
+/// (SustainTrail.hx:391-392), parameterized by the style sheet height/zoom.
+pub(crate) fn sustain_extra_cap_tail(page_height: f64, zoom: f64) -> f64 {
+    page_height * zoom * (SUSTAIN_CAP_BOTTOM_CLIP - 0.5)
+}
+
 /// Dropped hold offset: `(fullFullLen - currentLen) * 0.45`.
 ///
 /// The renderer keeps this formula for the record, but a dropped hold is
@@ -251,12 +269,22 @@ pub(crate) fn hold_columns(direction: usize) -> (usize, usize) {
     (body, body + 1)
 }
 
-/// UV rect for one hold column.
+/// UV rect for one hold column. The funkin default page is 416 px wide; the
+/// pixel style passes its own page width through
+/// [`hold_column_uv_for`].
+#[cfg(test)]
 pub(crate) fn hold_column_uv(column: usize) -> ([f64; 2], [f64; 2]) {
+    hold_column_uv_for(column, HOLD_TEXTURE_WIDTH)
+}
+
+/// [`hold_column_uv`] with the style page width (`graphic.width / 8` per
+/// column; RENDER-BEHAVIOR §3). The frozen algebra is unchanged: only the
+/// sheet width becomes a style parameter (pixel: 72/8 = 9 px per column).
+pub(crate) fn hold_column_uv_for(column: usize, page_width: f64) -> ([f64; 2], [f64; 2]) {
     let column = column.min(HOLD_TEXTURE_COLUMNS - 1);
-    let width = HOLD_TEXTURE_WIDTH / HOLD_TEXTURE_COLUMNS as f64;
-    let x0 = column as f64 * width / HOLD_TEXTURE_WIDTH;
-    let x1 = (column as f64 + 1.0) * width / HOLD_TEXTURE_WIDTH;
+    let width = page_width / HOLD_TEXTURE_COLUMNS as f64;
+    let x0 = column as f64 * width / page_width;
+    let x1 = (column as f64 + 1.0) * width / page_width;
     ([x0, 0.0], [x1, 1.0])
 }
 

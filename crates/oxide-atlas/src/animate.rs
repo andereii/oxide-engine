@@ -20,6 +20,16 @@ pub struct AnimateSprite {
 pub struct AnimateAtlas {
     pub image: String,
     pub sprites: Vec<AnimateSprite>,
+    /// `meta.size` as `[width, height]` when the spritemap declares both.
+    ///
+    /// Observed shipped shape: `shared/images/characters/sserafim/sakura/
+    /// spritemap1.json` carries `meta.size = {w: 2043, h: 1950}` while the
+    /// sibling `Animation.json` has `MD: {"FRT":24}` without `W`/`H`
+    /// (M6-CONTRACT §11.5). On files that do carry `MD.W`/`MD.H`, the two
+    /// sources are data-equivalent; [`crate::AnimateStage`] only consults this
+    /// value as the documented fallback, so existing parse results keep using
+    /// the metadata fields.
+    pub page_size: Option<[u32; 2]>,
 }
 
 /// Parses the structural contents of an Animate Atlas `spritemap1.json`:
@@ -28,13 +38,20 @@ pub struct AnimateAtlas {
 pub fn parse_animate(json: &str) -> Result<AnimateAtlas, AtlasError> {
     let value = parse_json(json)?;
 
-    let image = value
-        .get("meta")
-        .and_then(Value::as_object)
+    let meta = value.get("meta").and_then(Value::as_object);
+    let image = meta
         .and_then(|meta| meta.get("image"))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    let page_size = meta
+        .and_then(|meta| meta.get("size"))
+        .and_then(Value::as_object)
+        .and_then(|size| {
+            let width = u32::try_from(size.get("w").and_then(Value::as_u64)?).ok()?;
+            let height = u32::try_from(size.get("h").and_then(Value::as_u64)?).ok()?;
+            Some([width, height])
+        });
 
     let entries = value
         .get("ATLAS")
@@ -69,7 +86,11 @@ pub fn parse_animate(json: &str) -> Result<AnimateAtlas, AtlasError> {
         });
     }
 
-    Ok(AnimateAtlas { image, sprites })
+    Ok(AnimateAtlas {
+        image,
+        sprites,
+        page_size,
+    })
 }
 
 fn parse_json(json: &str) -> Result<Value, AtlasError> {

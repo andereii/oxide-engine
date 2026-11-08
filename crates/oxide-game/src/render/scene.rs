@@ -12,15 +12,14 @@ use super::RenderError;
 use super::anim::CharacterScheduler;
 use super::geometry::{
     self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, Camera, GAME_HEIGHT, HALF_HEIGHT, HALF_WIDTH,
-    HOLD_TEXTURE_HEIGHT, OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y,
-    SUSTAIN_BOTTOM_HEIGHT, SUSTAIN_CAP_BOTTOM_CLIP, SUSTAIN_EXTRA_CAP_TAIL,
-    SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP, TICK_SECONDS, Vec2, hold_column_uv,
+    OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y, SUSTAIN_CAP_BOTTOM_CLIP,
+    SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP, TICK_SECONDS, Vec2, hold_column_uv_for,
     hold_columns, note_top_left, note_y_offset, receptor_top_left, render_distance_ms,
     sustain_height, sustain_held_top, sustain_top_left_x,
 };
 use super::load::{
-    LoadedCharacter, LoadedNote, LoadedNoteStyle, LoadedSlice, LoadedStageProp, PageImage, Role,
-    SpriteFrame,
+    LoadedCharacter, LoadedNote, LoadedNoteStyle, LoadedSlice, LoadedStageProp, PageImage,
+    PropVisual, Role, Sheet, SpriteFrame,
 };
 use crate::slice::{InputEvent, TraceEvent};
 
@@ -48,19 +47,26 @@ pub(crate) struct LayerSpec {
     pub(crate) color: [f32; 4],
 }
 
+/// One sorted stage-group member plus the draw layers it may write.
+struct StageItem {
+    kind: StageItemKind,
+    /// `(page, layer_specs index)`; `None` is an untextured solid color.
+    layers: Vec<(Option<usize>, usize)>,
+}
+
 #[derive(Debug, Clone, Copy)]
-enum StageItem {
+enum StageItemKind {
     Prop(usize),
     Character(usize),
 }
 
-/// Per-character runtime state: scheduler plus the static atlas placement.
+/// Per-character runtime state: scheduler plus the loaded sheet set.
 struct CharacterRig {
     role: Role,
     id: String,
     scheduler: CharacterScheduler,
-    stage: oxide_atlas::AnimateStage,
-    bounds: [f64; 4],
+    sheets: Vec<Sheet>,
+    sprite_hitbox: Option<[i32; 2]>,
     data_offsets: (f64, f64),
     scale: f64,
     flip_x: bool,
@@ -68,8 +74,6 @@ struct CharacterRig {
     scroll: Vec2,
     camera_focus: Vec2,
     z_index: f64,
-    page: usize,
-    page_size: [f64; 2],
 }
 
 impl CharacterRig {
@@ -80,12 +84,16 @@ impl CharacterRig {
             loaded.sing_time_steps,
             loaded.role == Role::Player,
         );
-        // Native characters start on idle; girlfriend has no idle animation,
-        // so show her first dance pose without consuming the first alternation.
-        if scheduler.has("idle") {
-            scheduler.play("idle", true);
-        } else if scheduler.has("danceLeft") {
-            scheduler.play("danceLeft", true);
+        // `startingAnimation` is the first animation played on creation
+        // (stage props + gf); without one the native characters start on idle
+        // (girlfriend has no idle and shows her first dance pose).
+        let started = scheduler.start_animation(loaded.starting_animation.as_deref());
+        if !started {
+            if scheduler.has("idle") {
+                scheduler.play("idle", true);
+            } else if scheduler.has("danceLeft") {
+                scheduler.play("danceLeft", true);
+            }
         }
         let scale = loaded.scale;
         let bounds = loaded.bounds;
@@ -100,8 +108,8 @@ impl CharacterRig {
             role: loaded.role,
             id: loaded.id,
             scheduler,
-            stage: loaded.stage,
-            bounds,
+            sheets: loaded.sheets,
+            sprite_hitbox: loaded.sprite_hitbox,
             data_offsets: loaded.data_offsets,
             scale,
             flip_x: loaded.flip_x,
@@ -109,55 +117,174 @@ impl CharacterRig {
             scroll: [loaded.slot.scroll.0, loaded.slot.scroll.1],
             camera_focus,
             z_index: loaded.slot.z_index,
-            page: loaded.page,
-            page_size: loaded.page_size,
         }
     }
 
-    fn draw(&self, camera: &Camera) -> Result<Vec<Quad>, RenderError> {
-        let Some(timeline_frame) = self.scheduler.current_timeline_frame() else {
-            return Ok(Vec::new());
+    /// Pages this character may draw on, main sheet first (deterministic
+    /// layer order for mixed multi-sheet characters).
+    fn pages(&self) -> Vec<Option<usize>> {
+        let mut pages = Vec::new();
+        for sheet in &self.sheets {
+            let page = sheet.page();
+            if !pages.contains(&Some(page)) {
+                pages.push(Some(page));
+            }
+        }
+        pages
+    }
+
+    fn draw(&self, camera: &Camera) -> Result<Vec<(Option<usize>, Quad)>, RenderError> {
+        let (sheet_index, frame_value, animation) = match self.scheduler.current_visual_frame() {
+            Some((animation, frame)) => (animation.sheet, frame, Some(animation)),
+            None => (0, 0, None),
         };
-        let quads = self
-            .stage
-            .resolve_main_frame(timeline_frame)
-            .map_err(|source| RenderError::AtlasStage {
-                path: format!("character {} ({})", self.id, self.role.label()),
-                source,
-            })?;
-        let bw = self.bounds[2];
-        let scale = self.scale;
-        let top_left = [
-            self.position[0] - bw * scale / 2.0,
-            self.position[1] - self.bounds[3] * scale,
-        ];
-        let animation_offsets = self
-            .scheduler
-            .current_animation()
+        let Some(sheet) = self.sheets.get(sheet_index) else {
+            // Loaded characters always have a main sheet; an animation index
+            // outside the sheet set would be a loader bug.
+            return Err(RenderError::Unsupported {
+                detail: format!(
+                    "character {} ({}) animation selects missing sheet {sheet_index}",
+                    self.id,
+                    self.role.label()
+                ),
+            });
+        };
+        let animation_offsets = animation
             .and_then(|animation| animation.offsets)
             .unwrap_or(self.data_offsets);
         let shift = [
-            -(animation_offsets.0 - self.data_offsets.0) * scale,
-            -(animation_offsets.1 - self.data_offsets.1) * scale,
+            -(animation_offsets.0 - self.data_offsets.0) * self.scale,
+            -(animation_offsets.1 - self.data_offsets.1) * self.scale,
         ];
-
         let projection = camera_projection_matrix(camera, self.scroll);
-        let world = character_world_matrix(self.bounds, scale, self.flip_x, top_left, shift);
-        let mut out = Vec::with_capacity(quads.len());
-        for quad in &quads {
-            let [_, _, width, height] = quad.atlas_rect;
-            // Frozen composition: gameQuad(p) = spriteTopLeft + (p - boundsTopLeft),
-            // with the Bopper shift already folded into `world`, and the
-            // atlas quad matrix carrying sprite-local -> atlas coordinates.
-            let matrix = concat(projection, concat(world, quad.matrix));
-            out.push(quad_from_matrix(
-                matrix,
-                width as f64,
-                height as f64,
-                quad_uv(quad.atlas_rect, self.page_size),
-            ));
+
+        match sheet {
+            Sheet::Atlas(sheet) => {
+                let quads = match animation.and_then(|animation| animation.symbol.as_deref()) {
+                    Some(symbol) => sheet
+                        .stage
+                        .resolve_symbol_frame(symbol, frame_value)
+                        .map_err(|source| RenderError::AtlasStage {
+                            path: format!("character {} ({})", self.id, self.role.label()),
+                            source,
+                        })?,
+                    None => sheet
+                        .stage
+                        .resolve_main_frame(frame_value)
+                        .map_err(|source| RenderError::AtlasStage {
+                            path: format!("character {} ({})", self.id, self.role.label()),
+                            source,
+                        })?,
+                };
+                let bounds = sheet.bounds;
+                let top_left = [
+                    self.position[0] - bounds[2] * self.scale / 2.0,
+                    self.position[1] - bounds[3] * self.scale,
+                ];
+                let world =
+                    character_world_matrix(bounds, self.scale, self.flip_x, top_left, shift);
+                let mut out = Vec::with_capacity(quads.len());
+                for quad in &quads {
+                    let [_, _, width, height] = quad.atlas_rect;
+                    let matrix = concat(projection, concat(world, quad.matrix));
+                    out.push((
+                        Some(sheet.page),
+                        quad_from_matrix(
+                            matrix,
+                            width as f64,
+                            height as f64,
+                            quad_uv(quad.atlas_rect, sheet.page_size),
+                        ),
+                    ));
+                }
+                Ok(out)
+            }
+            Sheet::Sprite(sheet) => {
+                let frame = sheet
+                    .frame(frame_value)
+                    .ok_or_else(|| RenderError::MissingFrame {
+                        path: format!("character {} ({})", self.id, self.role.label()),
+                        prefix: format!("frame {frame_value}"),
+                    })?;
+                let hitbox = self
+                    .sprite_hitbox
+                    .or_else(|| sheet.first_dest())
+                    .ok_or_else(|| RenderError::Unsupported {
+                        detail: format!("character {} has a sprite sheet with no frames", self.id),
+                    })?;
+                let sprite_top_left = [
+                    self.position[0] - hitbox[0] as f64 * self.scale / 2.0 + shift[0],
+                    self.position[1] - hitbox[1] as f64 * self.scale + shift[1],
+                ];
+                let flip_x = self.flip_x ^ animation.is_some_and(|animation| animation.flip_x);
+                let flip_y = animation.is_some_and(|animation| animation.flip_y);
+                let (matrix, uv) = sprite_frame_matrix(
+                    sprite_top_left,
+                    &frame,
+                    [self.scale, self.scale],
+                    hitbox,
+                    flip_x,
+                    flip_y,
+                    0.0,
+                    sheet.page_size,
+                );
+                Ok(vec![(
+                    Some(sheet.page),
+                    quad_from_matrix(matrix, frame.rect[2] as f64, frame.rect[3] as f64, uv),
+                )])
+            }
         }
-        Ok(out)
+    }
+}
+
+/// Animated/static prop runtime state.
+struct PropRig {
+    prop: LoadedStageProp,
+    scheduler: Option<CharacterScheduler>,
+    /// One-shot structured deviation log for `applyStageMatrix` props that are
+    /// loaded but intentionally not drawn (M6-CONTRACT §11.6).
+    stage_matrix_log: std::sync::Once,
+}
+
+impl PropRig {
+    fn from_loaded(prop: LoadedStageProp) -> Self {
+        let scheduler = prop.bopper.then(|| {
+            let mut scheduler = CharacterScheduler::new(
+                prop.animations.clone(),
+                prop.dance_every,
+                super::anim::DEFAULT_SING_TIME_STEPS,
+                false,
+            );
+            scheduler.start_animation(prop.starting_animation.as_deref());
+            scheduler
+        });
+        Self {
+            prop,
+            scheduler,
+            stage_matrix_log: std::sync::Once::new(),
+        }
+    }
+
+    fn pages(&self) -> Vec<Option<usize>> {
+        match &self.prop.visual {
+            PropVisual::Solid { .. } => vec![None],
+            PropVisual::Static { page, .. } => vec![Some(*page)],
+            PropVisual::Sprite { sheet, .. } => vec![Some(sheet.page)],
+            PropVisual::Atlas { sheet, .. } => vec![Some(sheet.page)],
+        }
+    }
+}
+
+/// Per-layer material tint for one stage prop. Solid colors carry their own
+/// RGB; `dataProp.alpha` multiplies the material alpha unconditionally for
+/// solid and textured props alike (`propSprite.alpha = dataProp.alpha`,
+/// Stage.hx; M6-CONTRACT §11.6). A zero-alpha solid therefore contributes an
+/// invisible blended quad instead of an opaque overlay.
+fn prop_layer_color(prop: &LoadedStageProp) -> [f32; 4] {
+    let alpha = prop.alpha as f32;
+    match &prop.visual {
+        PropVisual::Solid { color, .. } => [color[0], color[1], color[2], color[3] * alpha],
+        _ => [1.0, 1.0, 1.0, alpha],
     }
 }
 
@@ -227,10 +354,12 @@ impl LineState {
 pub(crate) struct Scene {
     camera: Camera,
     conductor: Conductor,
-    props: Vec<LoadedStageProp>,
+    props: Vec<PropRig>,
     characters: Vec<CharacterRig>,
     stage_items: Vec<StageItem>,
     layer_specs: Vec<LayerSpec>,
+    /// First overlay layer (background, receptors, holds, notes).
+    overlay_start: usize,
     note_style: LoadedNoteStyle,
     notes: Vec<NoteState>,
     player_note_indices: Vec<usize>,
@@ -269,54 +398,54 @@ impl Scene {
         for character in loaded_characters {
             characters.push(CharacterRig::from_loaded(character));
         }
-        let opponent = Role::Opponent.index();
+        let props: Vec<PropRig> = props.into_iter().map(PropRig::from_loaded).collect();
         let follow_focus = characters
-            .get(opponent)
+            .iter()
+            .find(|character| character.role == Role::Opponent)
+            .map(|character| character.camera_focus)
             .ok_or_else(|| RenderError::Unsupported {
                 detail: "opponent character was not loaded".to_string(),
-            })?
-            .camera_focus;
+            })?;
         let mut camera = Camera::new(stage_zoom);
         camera.focus_on(follow_focus);
 
-        let mut stage_items: Vec<(f64, usize, StageItem)> = Vec::new();
+        let mut sorted: Vec<(f64, usize, StageItemKind)> = Vec::new();
         for (index, prop) in props.iter().enumerate() {
-            stage_items.push((prop.z_index, stage_items.len(), StageItem::Prop(index)));
+            sorted.push((prop.prop.z_index, sorted.len(), StageItemKind::Prop(index)));
         }
         for (index, character) in characters.iter().enumerate() {
-            stage_items.push((
+            sorted.push((
                 character.z_index,
-                stage_items.len(),
-                StageItem::Character(index),
+                sorted.len(),
+                StageItemKind::Character(index),
             ));
         }
-        stage_items.sort_by(|left, right| {
+        sorted.sort_by(|left, right| {
             left.0
                 .total_cmp(&right.0)
                 .then_with(|| left.1.cmp(&right.1))
         });
-        let stage_items: Vec<StageItem> =
-            stage_items.into_iter().map(|(_, _, item)| item).collect();
 
-        let mut layer_specs = Vec::with_capacity(stage_items.len() + 4);
-        for item in &stage_items {
-            match item {
-                StageItem::Prop(index) => {
-                    let prop = &props[*index];
-                    layer_specs.push(LayerSpec {
-                        page: Some(prop.page),
-                        color: [1.0, 1.0, 1.0, prop.alpha as f32],
-                    });
+        let mut layer_specs = Vec::new();
+        let mut stage_items = Vec::with_capacity(sorted.len());
+        for (_, _, kind) in sorted {
+            let (pages, color) = match kind {
+                StageItemKind::Prop(index) => {
+                    (props[index].pages(), prop_layer_color(&props[index].prop))
                 }
-                StageItem::Character(index) => {
-                    let character = &characters[*index];
-                    layer_specs.push(LayerSpec {
-                        page: Some(character.page),
-                        color: [1.0, 1.0, 1.0, 1.0],
-                    });
+                StageItemKind::Character(index) => {
+                    (characters[index].pages(), [1.0, 1.0, 1.0, 1.0])
                 }
+            };
+            let mut layers = Vec::with_capacity(pages.len());
+            for page in pages {
+                layers.push((page, layer_specs.len()));
+                layer_specs.push(LayerSpec { page, color });
             }
+            stage_items.push(StageItem { kind, layers });
         }
+
+        let overlay_start = layer_specs.len();
         layer_specs.push(LayerSpec {
             page: None,
             color: [0.0, 0.0, 0.0, BACKGROUND_ALPHA as f32],
@@ -365,6 +494,7 @@ impl Scene {
                 characters,
                 stage_items,
                 layer_specs,
+                overlay_start,
                 note_style,
                 notes: notes
                     .into_iter()
@@ -442,6 +572,11 @@ impl Scene {
                 for character in &mut self.characters {
                     character.scheduler.on_step(step);
                 }
+                for prop in &mut self.props {
+                    if let Some(scheduler) = &mut prop.scheduler {
+                        scheduler.on_step_forced(step);
+                    }
+                }
             }
         }
 
@@ -479,12 +614,17 @@ impl Scene {
         prune_opponent_holds(&mut self.opponent_holds, self.sim_ms);
 
         let holding = self.player_holds.iter().any(Option::is_some);
-        if let Some(player) = self.characters.get_mut(Role::Player.index()) {
+        if let Some(player) = self.character_mut(Role::Player) {
             player.scheduler.set_holding(holding);
         }
         let step_length_ms = self.conductor.step_length_ms();
         for character in &mut self.characters {
             character.scheduler.update(TICK_SECONDS, step_length_ms);
+        }
+        for prop in &mut self.props {
+            if let Some(scheduler) = &mut prop.scheduler {
+                scheduler.update(TICK_SECONDS, step_length_ms);
+            }
         }
         self.camera.follow(self.follow_focus, TICK_SECONDS);
         Ok(())
@@ -503,7 +643,7 @@ impl Scene {
                 if let Ok(direction) = usize::try_from(direction)
                     && direction < 4
                 {
-                    if let Some(player) = self.characters.get_mut(Role::Player.index()) {
+                    if let Some(player) = self.character_mut(Role::Player) {
                         player.scheduler.on_sing(direction, false);
                     }
                     // A release later in the same tick must win over the hit
@@ -522,7 +662,7 @@ impl Scene {
                 self.notes[index].missed = true;
                 if let Ok(direction) = usize::try_from(*note_direction)
                     && direction < 4
-                    && let Some(player) = self.characters.get_mut(Role::Player.index())
+                    && let Some(player) = self.character_mut(Role::Player)
                 {
                     player.scheduler.on_sing(direction, true);
                 }
@@ -532,7 +672,7 @@ impl Scene {
                 // mirroring the native miss-note reaction.
                 if let Ok(direction) = usize::try_from(*note_direction)
                     && direction < 4
-                    && let Some(player) = self.characters.get_mut(Role::Player.index())
+                    && let Some(player) = self.character_mut(Role::Player)
                 {
                     player.scheduler.on_sing(direction, true);
                 }
@@ -630,7 +770,7 @@ impl Scene {
                 if let Ok(direction) = usize::try_from(direction)
                     && direction < 4
                 {
-                    if let Some(opponent) = self.characters.get_mut(Role::Opponent.index()) {
+                    if let Some(opponent) = self.character_mut(Role::Opponent) {
                         opponent.scheduler.on_sing(direction, false);
                     }
                     self.opponent_line.confirm_opponent(direction, self.sim_ms);
@@ -660,7 +800,7 @@ impl Scene {
             }
             self.notes[index].hit = true;
             let direction = note.direction;
-            if let Some(opponent) = self.characters.get_mut(Role::Opponent.index()) {
+            if let Some(opponent) = self.character_mut(Role::Opponent) {
                 opponent.scheduler.on_sing(direction, false);
             }
             self.opponent_line.confirm_opponent(direction, now);
@@ -689,48 +829,207 @@ impl Scene {
             .filter(|index| *index != usize::MAX)
     }
 
-    /// Composes all draw layers in painter order.
+    /// Loaded characters keep their role; the girlfriend role is absent when
+    /// the metadata selects none.
+    fn character_mut(&mut self, role: Role) -> Option<&mut CharacterRig> {
+        self.characters
+            .iter_mut()
+            .find(|character| character.role == role)
+    }
+
+    /// Composes all draw layers in painter order. Stage items may own several
+    /// page layers (mixed multi-sheet characters); each quad is routed to the
+    /// layer registered for its page.
     pub(crate) fn draw(&self) -> Result<Vec<Vec<Quad>>, RenderError> {
-        let mut layers: Vec<Vec<Quad>> = Vec::with_capacity(self.layer_specs.len());
+        let mut layers: Vec<Vec<Quad>> = vec![Vec::new(); self.layer_specs.len()];
         for item in &self.stage_items {
-            match item {
-                StageItem::Prop(index) => {
-                    layers.push(self.draw_prop(&self.props[*index]));
-                }
-                StageItem::Character(index) => {
-                    layers.push(self.characters[*index].draw(&self.camera)?);
-                }
+            let quads = match item.kind {
+                StageItemKind::Prop(index) => Scene::draw_prop(&self.camera, &self.props[index])?,
+                StageItemKind::Character(index) => self.characters[index].draw(&self.camera)?,
+            };
+            for (page, quad) in quads {
+                let Some((_, layer)) = item.layers.iter().find(|(item_page, _)| *item_page == page)
+                else {
+                    return Err(RenderError::Renderer {
+                        detail: format!("stage item drew page {page:?} without a registered layer"),
+                    });
+                };
+                layers[*layer].push(quad);
             }
         }
-        layers.push(self.draw_backgrounds());
-        layers.push(self.draw_receptors());
-        layers.push(self.draw_holds());
-        layers.push(self.draw_notes());
+        layers[self.overlay_start] = self.draw_backgrounds();
+        layers[self.overlay_start + 1] = self.draw_receptors();
+        layers[self.overlay_start + 2] = self.draw_holds();
+        layers[self.overlay_start + 3] = self.draw_notes();
         Ok(layers)
     }
 
-    fn draw_prop(&self, prop: &LoadedStageProp) -> Vec<Quad> {
-        let projection = camera_projection_matrix(&self.camera, [prop.scroll.0, prop.scroll.1]);
-        let sx = prop.scale.0;
-        let sy = prop.scale.1;
-        let width = prop.image_size[0];
-        let height = prop.image_size[1];
-        let mut world = [sx, 0.0, 0.0, sy, prop.position.0, prop.position.1];
-        if prop.flip_x {
-            world[0] = -sx;
-            world[4] = prop.position.0 + width * sx;
+    fn draw_prop(
+        camera: &Camera,
+        rig: &PropRig,
+    ) -> Result<Vec<(Option<usize>, Quad)>, RenderError> {
+        let prop = &rig.prop;
+        if let PropVisual::Atlas {
+            apply_stage_matrix: true,
+            ..
+        } = &prop.visual
+        {
+            // M6-CONTRACT §11.6: the native symbol-instance matrix semantics
+            // are not frozen yet. Load for inventory, skip the draw, and name
+            // the prop in a structured deviation line (never draw invented
+            // geometry, never skip silently).
+            rig.stage_matrix_log.call_once(|| {
+                eprintln!(
+                    "oxide render: deviation kind=apply_stage_matrix prop={:?} \
+                     action=skip_draw detail=\"atlasSettings.applyStageMatrix=true is a \
+                     6C follow-up (M6-CONTRACT 11.6)\"",
+                    prop.name
+                );
+            });
+            return Ok(Vec::new());
         }
-        if prop.flip_y {
-            world[3] = -sy;
-            world[5] = prop.position.1 + height * sy;
+        let projection = camera_projection_matrix(camera, [prop.scroll.0, prop.scroll.1]);
+        let position = [prop.position.0, prop.position.1];
+        let scale = [prop.scale.0, prop.scale.1];
+        let (sheet_index, frame_value, animation) = match &rig.scheduler {
+            Some(scheduler) => match scheduler.current_visual_frame() {
+                Some((animation, frame)) => (animation.sheet, frame, Some(animation)),
+                None => (0, 0, None),
+            },
+            None => (0, 0, None),
+        };
+        let animation_offsets = animation.and_then(|animation| animation.offsets);
+        let shift = animation_offsets.map_or([0.0, 0.0], |offsets| {
+            [-offsets.0 * scale[0], -offsets.1 * scale[1]]
+        });
+        match &prop.visual {
+            PropVisual::Solid { size, .. } => {
+                // `makeSolidColor` consumed `scale` at load time as the
+                // INTEGER graphic dimensions; Stage.hx skips `scale.set` for
+                // solids, so the draw applies a unit transform. `prop.scale`
+                // is NOT used here (M6-CONTRACT §11.6).
+                let (width, height) = (size[0] as f64, size[1] as f64);
+                let center = [position[0] + width / 2.0, position[1] + height / 2.0];
+                let matrix = rotate_about(
+                    [1.0, 0.0, 0.0, 1.0, position[0], position[1]],
+                    center,
+                    prop.angle,
+                );
+                Ok(vec![(
+                    None,
+                    quad_from_matrix(
+                        concat(projection, matrix),
+                        width,
+                        height,
+                        [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+                    ),
+                )])
+            }
+            PropVisual::Static { page, image_size } => {
+                let hitbox = [image_size[0].round() as i32, image_size[1].round() as i32];
+                let frame = SpriteFrame {
+                    page: *page,
+                    rect: [0, 0, hitbox[0], hitbox[1]],
+                    dest_offset: [0, 0],
+                    dest_size: hitbox,
+                    rotated: false,
+                };
+                let (matrix, uv) = sprite_frame_matrix(
+                    position,
+                    &frame,
+                    [scale[0], scale[1]],
+                    hitbox,
+                    prop.flip_x,
+                    prop.flip_y,
+                    prop.angle,
+                    *image_size,
+                );
+                Ok(vec![(
+                    Some(*page),
+                    quad_from_matrix(
+                        concat(projection, matrix),
+                        frame.rect[2] as f64,
+                        frame.rect[3] as f64,
+                        uv,
+                    ),
+                )])
+            }
+            PropVisual::Sprite { sheet, hitbox_dest } => {
+                let frame = sheet
+                    .frame(frame_value)
+                    .ok_or_else(|| RenderError::MissingFrame {
+                        path: format!("stage prop {:?}", prop.name),
+                        prefix: format!("frame {frame_value}"),
+                    })?;
+                let flip_x = prop.flip_x ^ animation.is_some_and(|animation| animation.flip_x);
+                let flip_y = prop.flip_y ^ animation.is_some_and(|animation| animation.flip_y);
+                let (matrix, uv) = sprite_frame_matrix(
+                    [position[0] + shift[0], position[1] + shift[1]],
+                    &frame,
+                    [scale[0], scale[1]],
+                    *hitbox_dest,
+                    flip_x,
+                    flip_y,
+                    prop.angle,
+                    sheet.page_size,
+                );
+                Ok(vec![(
+                    Some(sheet.page),
+                    quad_from_matrix(
+                        concat(projection, matrix),
+                        frame.rect[2] as f64,
+                        frame.rect[3] as f64,
+                        uv,
+                    ),
+                )])
+            }
+            PropVisual::Atlas { sheet, .. } => {
+                let quads = match animation.and_then(|animation| animation.symbol.as_deref()) {
+                    Some(symbol) => sheet
+                        .stage
+                        .resolve_symbol_frame(symbol, frame_value)
+                        .map_err(|source| RenderError::AtlasStage {
+                            path: format!("stage prop {:?} ({sheet_index})", prop.name),
+                            source,
+                        })?,
+                    None => sheet
+                        .stage
+                        .resolve_main_frame(frame_value)
+                        .map_err(|source| RenderError::AtlasStage {
+                            path: format!("stage prop {:?} ({sheet_index})", prop.name),
+                            source,
+                        })?,
+                };
+                let bounds = sheet.bounds;
+                let world = prop_world_matrix(
+                    bounds,
+                    [scale[0], scale[1]],
+                    prop.flip_x,
+                    prop.flip_y,
+                    position,
+                    shift,
+                );
+                let center = [
+                    position[0] + shift[0] + bounds[2] * scale[0] / 2.0,
+                    position[1] + shift[1] + bounds[3] * scale[1] / 2.0,
+                ];
+                let world = rotate_about(world, center, prop.angle);
+                let mut out = Vec::with_capacity(quads.len());
+                for quad in &quads {
+                    let [_, _, width, height] = quad.atlas_rect;
+                    out.push((
+                        Some(sheet.page),
+                        quad_from_matrix(
+                            concat(projection, concat(world, quad.matrix)),
+                            width as f64,
+                            height as f64,
+                            quad_uv(quad.atlas_rect, sheet.page_size),
+                        ),
+                    ));
+                }
+                Ok(out)
+            }
         }
-        let matrix = concat(projection, world);
-        vec![quad_from_matrix(
-            matrix,
-            width,
-            height,
-            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-        )]
     }
 
     fn draw_backgrounds(&self) -> Vec<Quad> {
@@ -890,17 +1189,22 @@ impl Scene {
         }
         let (body_column, cap_column) = hold_columns(direction);
         // Observed `graphicWidth = (graphic.width / 8) * zoom =
-        // (416/8) * 0.7 = 36.4` Dx (the pre-zoom 52 was a transcription error).
+        // (416/8) * 0.7 = 36.4` Dx for funkin; the pixel style uses its own
+        // 72-px sheet and 6.0 scale through the same frozen formula.
         let width = self.note_style.hold_width;
-        let x = sustain_top_left_x(line_x, direction, width);
-        let part = clip_height - SUSTAIN_BOTTOM_HEIGHT;
+        let x = sustain_top_left_x(line_x, direction, width) + self.note_style.hold_offsets.0;
+        let anchor_y = anchor_y + self.note_style.hold_offsets.1;
+        let hold_page_width = self.note_style.hold_page_size[0];
+        let strip = self.note_style.hold_strip_height();
+        let bottom_height = self.note_style.sustain_bottom_height();
+        let extra_cap_tail = self.note_style.sustain_extra_cap_tail();
+        let part = clip_height - bottom_height;
         if part > 0.0 {
             // Body spans [anchor, anchor + part]; sampled with the strip's
-            // own 87*0.7 proportion (the sanctioned interior-row choice of
+            // own style proportion (the sanctioned interior-row choice of
             // the native negative-v range).
-            let (uv_min, uv_max) = hold_column_uv(body_column);
+            let (uv_min, uv_max) = hold_column_uv_for(body_column, hold_page_width);
             let v_span = uv_max[1] - uv_min[1];
-            let strip = HOLD_TEXTURE_HEIGHT * 0.7;
             let v_top = uv_max[1] - v_span * (part / strip);
             let uv = [
                 [uv_min[0], v_top],
@@ -918,18 +1222,17 @@ impl Scene {
         // End cap: top = anchor + max(part, 0); bottom = anchor + clip +
         // extraCapTail — the tip RISES toward the anchor as `clip` shrinks.
         let cap_top = anchor_y + part.max(0.0);
-        let cap_bottom = anchor_y + clip_height + SUSTAIN_EXTRA_CAP_TAIL;
+        let cap_bottom = anchor_y + clip_height + extra_cap_tail;
         let cap_height = cap_bottom - cap_top;
         if cap_height <= 0.0 {
             return;
         }
-        let (uv_min, uv_max) = hold_column_uv(cap_column);
+        let (uv_min, uv_max) = hold_column_uv_for(cap_column, hold_page_width);
         let v_span = uv_max[1] - uv_min[1];
-        let strip = HOLD_TEXTURE_HEIGHT * 0.7;
         let cap_v0 = if part > 0.0 {
             uv_min[1]
         } else {
-            uv_min[1] + v_span * ((SUSTAIN_BOTTOM_HEIGHT - clip_height) / strip)
+            uv_min[1] + v_span * ((bottom_height - clip_height) / strip)
         };
         let cap_v1 = uv_min[1] + v_span * SUSTAIN_CAP_BOTTOM_CLIP;
         let uv = [
@@ -1045,6 +1348,120 @@ fn character_world_matrix(
             sprite_top_left[1] + shift[1] - scale * by,
         ]
     }
+}
+
+/// Stage-prop variant of [`character_world_matrix`]: independent x/y scale,
+/// optional `flipY`, and the sprite top-left (not a feet anchor). Props use
+/// `x/y = position` directly (Stage.hx L262-282).
+fn prop_world_matrix(
+    bounds: [f64; 4],
+    scale: Vec2,
+    flip_x: bool,
+    flip_y: bool,
+    sprite_top_left: Vec2,
+    shift: Vec2,
+) -> [f64; 6] {
+    let [bx, by, bw, bh] = bounds;
+    let a = if flip_x { -scale[0] } else { scale[0] };
+    let d = if flip_y { -scale[1] } else { scale[1] };
+    let tx = if flip_x {
+        sprite_top_left[0] + shift[0] + scale[0] * (bx + bw)
+    } else {
+        sprite_top_left[0] + shift[0] - scale[0] * bx
+    };
+    let ty = if flip_y {
+        sprite_top_left[1] + shift[1] + scale[1] * (by + bh)
+    } else {
+        sprite_top_left[1] + shift[1] - scale[1] * by
+    };
+    [a, 0.0, 0.0, d, tx, ty]
+}
+
+/// Rotates `matrix` around `center` by `degrees` (Flixel y-down convention).
+/// `0.0` returns `matrix` untouched so the frozen angle-free bopeebo frames
+/// keep bit-identical matrices.
+fn rotate_about(matrix: [f64; 6], center: Vec2, degrees: f64) -> [f64; 6] {
+    if degrees == 0.0 {
+        return matrix;
+    }
+    let radians = degrees.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let rotation = [cos, sin, -sin, cos, 0.0, 0.0];
+    let to_center = [1.0, 0.0, 0.0, 1.0, center[0], center[1]];
+    let from_center = [1.0, 0.0, 0.0, 1.0, -center[0], -center[1]];
+    concat(to_center, concat(rotation, concat(from_center, matrix)))
+}
+
+/// Flixel ANGLE_NEG_90 tile chain for a `rotated` Sparrow page entry:
+/// `(x, y) -> (y, width - x)` (FlxFrame.hx:196-199, FlxMatrix.hx:60-65).
+fn rotated_tile_matrix(width: i32) -> [f64; 6] {
+    [0.0, -1.0, 1.0, 0.0, 0.0, width as f64]
+}
+
+/// Position of a sprite-sheet frame's content inside the sprite box, with the
+/// frozen setup-hitbox term:
+/// `spriteTopLeft + scale * ((hitbox - dest_size) * 0.5 + dest_offset)`.
+/// A whole-sprite flip mirrors the content rect inside the hitbox and swaps
+/// the frame UVs in [`sprite_frame_matrix`].
+fn sprite_content_top_left(
+    sprite_top_left: Vec2,
+    frame: &SpriteFrame,
+    scale: Vec2,
+    hitbox: [i32; 2],
+    flip_x: bool,
+    flip_y: bool,
+) -> Vec2 {
+    let term = |hitbox: i32, dest: i32, offset: i32| -> f64 {
+        0.5 * (hitbox as f64 - dest as f64) + offset as f64
+    };
+    let unflipped_x = term(hitbox[0], frame.dest_size[0], frame.dest_offset[0]);
+    let unflipped_y = term(hitbox[1], frame.dest_size[1], frame.dest_offset[1]);
+    let mirrored_x = term(hitbox[0], frame.dest_size[0], -frame.dest_offset[0]);
+    let mirrored_y = term(hitbox[1], frame.dest_size[1], -frame.dest_offset[1]);
+    [
+        sprite_top_left[0] + scale[0] * if flip_x { mirrored_x } else { unflipped_x },
+        sprite_top_left[1] + scale[1] * if flip_y { mirrored_y } else { unflipped_y },
+    ]
+}
+
+/// Composes one sprite-sheet frame into game-screen space and returns the
+/// quad UVs (mirrored when the whole sprite flips). `sprite_top_left` is the
+/// sprite's unrotated top-left (a feet-adjusted point for characters,
+/// `position` for stage props).
+#[allow(clippy::too_many_arguments)]
+fn sprite_frame_matrix(
+    sprite_top_left: Vec2,
+    frame: &SpriteFrame,
+    scale: Vec2,
+    hitbox: [i32; 2],
+    flip_x: bool,
+    flip_y: bool,
+    degrees: f64,
+    page_size: [f64; 2],
+) -> ([f64; 6], [[f64; 2]; 4]) {
+    let content = sprite_content_top_left(sprite_top_left, frame, scale, hitbox, flip_x, flip_y);
+    let center = [
+        sprite_top_left[0] + hitbox[0] as f64 * scale[0] / 2.0,
+        sprite_top_left[1] + hitbox[1] as f64 * scale[1] / 2.0,
+    ];
+    let mut matrix = rotate_about(
+        [scale[0], 0.0, 0.0, scale[1], content[0], content[1]],
+        center,
+        degrees,
+    );
+    if frame.rotated {
+        matrix = concat(matrix, rotated_tile_matrix(frame.rect[2]));
+    }
+    let mut uv = quad_uv(frame.rect, page_size);
+    if flip_x {
+        uv.swap(0, 1);
+        uv.swap(2, 3);
+    }
+    if flip_y {
+        uv.swap(0, 3);
+        uv.swap(1, 2);
+    }
+    (matrix, uv)
 }
 
 fn hold_flags<T>(holds: &[Option<T>; 4]) -> [bool; 4] {
@@ -1176,15 +1593,19 @@ fn sprite_frame_quad(
     // [`native_content_top_left`]; the matrix translate is that point and the
     // locals are the raw source rect, so the scale is applied exactly once
     // (ADR-0020 addendum 4 item 4).
+    let mut matrix = [
+        scale,
+        0.0,
+        0.0,
+        scale,
+        content_top_left[0],
+        content_top_left[1],
+    ];
+    if frame.rotated {
+        matrix = concat(matrix, rotated_tile_matrix(frame.rect[2]));
+    }
     quad_from_matrix(
-        [
-            scale,
-            0.0,
-            0.0,
-            scale,
-            content_top_left[0],
-            content_top_left[1],
-        ],
+        matrix,
         frame.rect[2] as f64,
         frame.rect[3] as f64,
         quad_uv(frame.rect, page_size),
@@ -1283,7 +1704,70 @@ mod tests {
             rect,
             dest_offset,
             dest_size,
+            rotated: false,
         }
+    }
+
+    /// A loaded solid prop with the loader's integer makeSolidColor size and
+    /// the original data `scale` pair kept beside it.
+    fn solid_prop(size: [i32; 2], scale: (f64, f64), alpha: f64) -> LoadedStageProp {
+        LoadedStageProp {
+            name: "solidCover".to_string(),
+            z_index: 9999.0,
+            position: (100.0, 200.0),
+            scale,
+            scroll: (1.0, 1.0),
+            alpha,
+            angle: 0.0,
+            flip_x: false,
+            flip_y: false,
+            visual: PropVisual::Solid {
+                size,
+                color: [0.0, 0.0, 0.0, 1.0],
+            },
+            animations: std::collections::BTreeMap::new(),
+            dance_every: 0.0,
+            starting_animation: None,
+            bopper: false,
+        }
+    }
+
+    #[test]
+    fn solid_prop_quad_consumes_scale_once_as_make_solid_color_dimensions() {
+        // scale [2400, 2000] is already consumed at load time; the draw path
+        // must emit ONE 2400x2000 rect with a unit transform (a second scale
+        // application would produce 5,760,000 x 4,000,000).
+        let prop = solid_prop([2400, 2000], (2400.0, 2000.0), 1.0);
+        let rig = PropRig::from_loaded(prop);
+        let quads = Scene::draw_prop(&Camera::new(1.0), &rig).expect("solid prop draws");
+        assert_eq!(quads.len(), 1, "one solid rect");
+        let (page, quad) = &quads[0];
+        assert_eq!(*page, None, "solid props are untextured");
+        close(quad.pos[1][0] - quad.pos[0][0], 2400.0);
+        close(quad.pos[0][1] - quad.pos[3][1], 2000.0);
+        // Camera::new(1.0) has scroll 0/zoom 1 and the prop scroll factor is
+        // 1, so the screen-space top-left is the prop position.
+        close(quad.pos[0][0] + HALF_WIDTH, 100.0);
+        close(HALF_HEIGHT - quad.pos[0][1], 200.0);
+        assert!(quad.uv.iter().all(|uv| *uv == [0.0, 0.0]));
+    }
+
+    #[test]
+    fn zero_alpha_solid_layer_contributes_no_visible_color() {
+        // sserafim solidCover: alpha 0.0 over the whole screen. The material
+        // tint must carry that alpha; the quad itself stays geometrically
+        // present and blends invisibly (harness AlphaMode2d::Blend).
+        let cover = solid_prop([10000, 10000], (10000.0, 10000.0), 0.0);
+        assert_eq!(prop_layer_color(&cover), [0.0, 0.0, 0.0, 0.0]);
+        let half = solid_prop([2400, 2000], (2400.0, 2000.0), 0.5);
+        assert_eq!(prop_layer_color(&half), [0.0, 0.0, 0.0, 0.5]);
+        // Non-solid props keep white RGB and apply the data alpha too.
+        let mut textured = solid_prop([1, 1], (1.0, 1.0), 0.25);
+        textured.visual = PropVisual::Static {
+            page: 0,
+            image_size: [1.0, 1.0],
+        };
+        assert_eq!(prop_layer_color(&textured), [1.0, 1.0, 1.0, 0.25]);
     }
 
     #[test]

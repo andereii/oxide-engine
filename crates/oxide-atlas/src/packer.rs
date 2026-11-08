@@ -1,4 +1,4 @@
-//! TexturePacker JSON (hash and array) parser.
+//! TexturePacker JSON (hash and array) and shipped Packer-text parsers.
 
 use serde_json::{Map, Value};
 
@@ -67,6 +67,70 @@ pub fn parse_packer(json: &str) -> Result<PackerAtlas, AtlasError> {
     };
 
     Ok(PackerAtlas { image, frames })
+}
+
+/// Parses the shipped Packer-text sibling format observed through
+/// `Paths.getPackerAtlas` (`Paths.hx` L224-228: `<key>.png` + `<key>.txt`).
+///
+/// The observed format is one `frameName = x y width height` record per line
+/// in document order (spaces are allowed inside the frame name before the
+/// `" = "` separator). The native Packer sprite builds its animation frame
+/// list from the collection order, so line order is the frame order.
+/// `PackerFrame::source_size` equals the page rect because the shipped records
+/// carry no trim/rotation data.
+pub fn parse_packer_text(text: &str) -> Result<PackerAtlas, AtlasError> {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    let mut frames = Vec::new();
+    for (line_number, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (name, geometry) = line.split_once(" = ").ok_or_else(|| {
+            AtlasError::json(format!(
+                "packer text line {} has no ` = ` separator: {line:?}",
+                line_number + 1
+            ))
+        })?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AtlasError::json(format!(
+                "packer text line {} has an empty frame name",
+                line_number + 1
+            )));
+        }
+        let values: Vec<&str> = geometry.split_whitespace().collect();
+        if values.len() != 4 {
+            return Err(AtlasError::json(format!(
+                "packer text line {} must carry x y width height, got {geometry:?}",
+                line_number + 1
+            )));
+        }
+        let mut parsed = [0i32; 4];
+        for (slot, value) in parsed.iter_mut().zip(values) {
+            *slot = value.parse().map_err(|_| {
+                AtlasError::json(format!(
+                    "packer text line {} has a non-integer geometry value {value:?}",
+                    line_number + 1
+                ))
+            })?;
+        }
+        frames.push(PackerFrame {
+            name: name.to_string(),
+            frame: parsed,
+            rotated: false,
+            trimmed: false,
+            sprite_source_size: [0, 0, parsed[2], parsed[3]],
+            source_size: [parsed[2], parsed[3]],
+        });
+    }
+    if frames.is_empty() {
+        return Err(AtlasError::json("packer text has no frame records"));
+    }
+    Ok(PackerAtlas {
+        image: String::new(),
+        frames,
+    })
 }
 
 fn parse_json(json: &str) -> Result<Value, AtlasError> {

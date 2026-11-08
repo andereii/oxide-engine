@@ -27,22 +27,50 @@ pub(crate) const DEFAULT_DANCE_EVERY: f64 = 1.0;
 /// Note direction names in V-Slice `NoteDirection` order (LEFT/DOWN/UP/RIGHT).
 pub(crate) const DIRECTION_NAMES: [&str; 4] = ["LEFT", "DOWN", "UP", "RIGHT"];
 
-/// One bound character animation resolved from `Animation.json` labels.
+/// One bound character/prop animation resolved from its sheet data.
+///
+/// `frames` are indices into the selected sheet's own frame space: sprite
+/// sheets use document-order frame indices, animate sheets use main-timeline
+/// frames (or symbol-timeline frames when `symbol` is set). `sheet` selects
+/// the loaded sheet; `0` is the character/prop main sheet.
 #[derive(Debug, Clone)]
 pub(crate) struct AnimationDef {
-    /// Timeline frames in playback order (labels plus data `frameIndices`).
+    /// Frames in playback order (data `frameIndices` reorder them).
     pub(crate) frames: Vec<usize>,
     /// Playback rate; `frameRate ?? 24`.
     pub(crate) frame_rate: f64,
     /// Whether the animation wraps; `looped ?? false`.
     pub(crate) looped: bool,
     /// Per-animation offsets used by the Bopper position shift. `None` when
-    /// the data has no animation override (the global character offsets then
-    /// apply, so the observable shift is zero).
+    /// the data has no animation override (the global offsets then apply, so
+    /// the observable shift is zero for characters without per-anim offsets).
     pub(crate) offsets: Option<(f64, f64)>,
+    /// Index into the owner's loaded sheets (main sheet is `0`).
+    pub(crate) sheet: usize,
+    /// `animType: "symbol"` animation: the symbol timeline to resolve.
+    pub(crate) symbol: Option<String>,
+    /// Per-animation frame flip flags (`flipX/flipY ?? false`), applied to
+    /// sprite-sheet frames.
+    pub(crate) flip_x: bool,
+    pub(crate) flip_y: bool,
 }
 
 impl AnimationDef {
+    /// Main-sheet animation definition for tests and simple constructors.
+    #[cfg(test)]
+    pub(crate) fn test(frames: &[usize], frame_rate: f64, looped: bool) -> Self {
+        Self {
+            frames: frames.to_vec(),
+            frame_rate,
+            looped,
+            offsets: None,
+            sheet: 0,
+            symbol: None,
+            flip_x: false,
+            flip_y: false,
+        }
+    }
+
     fn frame_index(&self, elapsed_seconds: f64) -> usize {
         if self.frames.is_empty() {
             return 0;
@@ -141,10 +169,17 @@ impl CharacterScheduler {
     }
 
     /// Starts or continues `name`. Returns `false` (and records the request)
-    /// when the data does not define it. `restart=false` keeps the current
+    /// when neither the name nor a suffix-stripped fallback is defined.
+    ///
+    /// Native `Bopper.correctAnimationName` rule: when an animation name does
+    /// not exist, strip one trailing `-<suffix>` and retry recursively (e.g.
+    /// `danceLeft-scared` -> `danceLeft`). `restart=false` keeps the current
     /// playhead only when the same animation is already current.
     pub(crate) fn play(&mut self, name: &str, restart: bool) -> bool {
         let Some(animation) = self.animations.get(name) else {
+            if let Some((base, _suffix)) = name.rsplit_once('-') {
+                return self.play(base, restart);
+            }
             self.missing_requests.insert(name.to_string());
             return false;
         };
@@ -167,14 +202,27 @@ impl CharacterScheduler {
         self.missing_requests.insert(name.to_string());
     }
 
-    /// Current animation frame as a main-timeline frame index.
-    pub(crate) fn current_timeline_frame(&self) -> Option<usize> {
+    /// Current animation frame as an index into the selected sheet's frame
+    /// space (main-timeline frame, symbol frame or sprite frame).
+    #[cfg(test)]
+    pub(crate) fn current_frame(&self) -> Option<usize> {
         let playing = self.current.as_ref()?;
         let animation = self.animations.get(&playing.name)?;
         animation
             .frames
             .get(animation.frame_index(playing.elapsed_seconds))
             .copied()
+    }
+
+    /// The current animation definition plus its selected sheet index.
+    pub(crate) fn current_visual_frame(&self) -> Option<(&AnimationDef, usize)> {
+        let playing = self.current.as_ref()?;
+        let animation = self.animations.get(&playing.name)?;
+        let frame = animation
+            .frames
+            .get(animation.frame_index(playing.elapsed_seconds))
+            .copied()?;
+        Some((animation, frame))
     }
 
     fn current_finished(&self) -> bool {
@@ -196,6 +244,24 @@ impl CharacterScheduler {
         {
             self.dance(false);
         }
+    }
+
+    /// `Bopper.onStepHit` dance gate. Stage props pass `shouldBop = true`, so
+    /// a qualifying step calls `dance(true)` (forceRestart) instead of the
+    /// character `dance(false)` path.
+    pub(crate) fn on_step_forced(&mut self, step: i32) {
+        if self.dance_every > 0.0
+            && (step as f64 % (self.dance_every * DANCE_STEPS_PER_BEAT)) == 0.0
+        {
+            self.dance(true);
+        }
+    }
+
+    /// Plays `startingAnimation` first when the data defines one. Returns
+    /// whether a starting animation was started; absence is not an error (the
+    /// native constructor simply leaves the first frame showing).
+    pub(crate) fn start_animation(&mut self, starting: Option<&str>) -> bool {
+        starting.is_some_and(|name| self.play(name, true))
     }
 
     /// `BaseCharacter.dance(force)`.
@@ -314,12 +380,7 @@ mod tests {
     use super::*;
 
     fn animation(frames: &[usize], looped: bool) -> AnimationDef {
-        AnimationDef {
-            frames: frames.to_vec(),
-            frame_rate: 24.0,
-            looped,
-            offsets: None,
-        }
+        AnimationDef::test(frames, 24.0, looped)
     }
 
     fn scheduler(defs: &[(&str, AnimationDef)], sing_time_steps: f64) -> CharacterScheduler {
@@ -328,6 +389,67 @@ mod tests {
             animations.insert((*name).to_string(), def.clone());
         }
         CharacterScheduler::new(animations, 1.0, sing_time_steps, false)
+    }
+
+    #[test]
+    fn bopper_forced_step_gate_restarts_alternation_and_starts_left() {
+        let mut sched = scheduler(
+            &[
+                ("idle", animation(&[0, 1], false)),
+                ("danceLeft", animation(&[10, 11], false)),
+                ("danceRight", animation(&[20, 21], false)),
+            ],
+            4.0,
+        );
+        // startingAnimation plays first and does not consume the alternation.
+        assert!(sched.start_animation(Some("danceRight")));
+        assert_eq!(sched.current_name(), Some("danceRight"));
+        // DanceEvery 1 -> every 4 steps; first forced dance still goes LEFT.
+        sched.on_step(3);
+        assert_eq!(sched.current_name(), Some("danceRight"));
+        sched.on_step(4);
+        assert_eq!(sched.current_name(), Some("danceLeft"));
+        sched.on_step(8);
+        assert_eq!(sched.current_name(), Some("danceRight"));
+        // Non-zero danceEvery 2 -> every 8 steps.
+        let mut animations = BTreeMap::new();
+        animations.insert("danceLeft".to_string(), animation(&[10], false));
+        let mut slow = CharacterScheduler::new(animations, 2.0, 4.0, false);
+        slow.on_step(4);
+        assert_eq!(slow.current_name(), None);
+        slow.on_step(8);
+        assert_eq!(slow.current_name(), Some("danceLeft"));
+    }
+
+    #[test]
+    fn missing_suffixed_animation_falls_back_to_the_base_name() {
+        let mut sched = scheduler(
+            &[
+                ("danceLeft", animation(&[10], false)),
+                ("idle", animation(&[0], false)),
+            ],
+            4.0,
+        );
+        assert!(sched.play("danceLeft-scared", true));
+        assert_eq!(sched.current_name(), Some("danceLeft"));
+        assert!(sched.play("idle-tired-scared", true));
+        assert_eq!(sched.current_name(), Some("idle"));
+    }
+
+    #[test]
+    fn existing_suffixed_animation_resolves_to_itself() {
+        // `correctAnimationName` only strips a suffix when the requested
+        // animation does NOT exist; an exact `danceLeft-scared` entry wins.
+        let mut sched = scheduler(
+            &[
+                ("danceLeft", animation(&[10], false)),
+                ("danceLeft-scared", animation(&[7, 8], false)),
+            ],
+            4.0,
+        );
+        assert!(sched.play("danceLeft-scared", true));
+        assert_eq!(sched.current_name(), Some("danceLeft-scared"));
+        assert_eq!(sched.current_frame(), Some(7));
     }
 
     #[test]
@@ -371,15 +493,7 @@ mod tests {
     fn finished_animation_progresses_into_hold() {
         let mut sched = scheduler(
             &[
-                (
-                    "singLEFT",
-                    AnimationDef {
-                        frames: vec![1, 2],
-                        frame_rate: 24.0,
-                        looped: false,
-                        offsets: None,
-                    },
-                ),
+                ("singLEFT", AnimationDef::test(&[1, 2], 24.0, false)),
                 ("singLEFT-hold", animation(&[3, 4, 5], true)),
             ],
             8.0,
@@ -389,7 +503,7 @@ mod tests {
         assert_eq!(sched.current_name(), Some("singLEFT"));
         sched.update(0.05, 150.0);
         assert_eq!(sched.current_name(), Some("singLEFT-hold"));
-        assert_eq!(sched.current_timeline_frame(), Some(3));
+        assert_eq!(sched.current_frame(), Some(3));
     }
 
     #[test]
@@ -483,10 +597,10 @@ mod tests {
         assert!(sched.play("idle", true));
         sched.update(0.010, 150.0);
         sched.on_step(4);
-        assert_eq!(sched.current_timeline_frame(), Some(0));
+        assert_eq!(sched.current_frame(), Some(0));
         sched.update(0.500, 150.0);
         sched.on_step(8);
-        assert_eq!(sched.current_timeline_frame(), Some(0));
+        assert_eq!(sched.current_frame(), Some(0));
     }
 
     #[test]
