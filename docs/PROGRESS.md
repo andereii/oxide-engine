@@ -1103,3 +1103,38 @@ the ledger commit that follows this block.
   objective: phase 6A behavior freeze (song-agnostic sim + opponent rows +
   trace schema 2), beginning with the approved scoped gameplay/opponent
   probe round.
+
+## 2026-11-08 — M6 phase-0 committed; push deferred to the human
+
+- Committed `docs/M6-CONTRACT.md` (phase-0 APPROVED): commit `d6caab7b1`.
+  The authorized `git push origin raw` is blocked by the
+  OpenCode shell permission rule on `git push*` (local-only work continues
+  per the instruction; human pushes from their terminal).
+
+## 2026-11-08 — M6 phase 6A opened (delegation + push log)
+
+- 6A behavior freeze amendment written into docs/M6-CONTRACT.md (section 10):
+  OBSERVED opponent pipeline with line citations (opponent note loop
+  L2806-2833 auto-hit at windowCenter with HitNoteScriptEvent 'perfect'; no
+  opponent miss/score path; opponent hold loop L2840-2869 with holdTimer and
+  playSingAnimation(miss form); strumline split getStrumlineIndex=data/4;
+  mirrorSongData false in the shipped pipeline; direction=data%4; note-kind
+  scoreability exists but corpus kinds are all null), probe round-2 spec
+  (driver native-note-probe-2, NEW tests/fixtures/note-native-opponent/; M5
+  round-1 fixtures stay byte-frozen), and engine decisions (schema-2
+  OpponentHit rows recorded BEFORE player rows per native frame order;
+  chart-id parameterization; scene.rs consumes rows instead of the internal
+  approximation; song-event consumption stays 6C).
+- Committed the amendment (hash in this entry's surrounding commits; push
+  blocked by the local git push* permission rule; deferred to the human per
+  instruction). Commits this round so far: d6caab7b1 (phase-0) and the 6A
+  amendment commit.
+- Two disjoint background workers launched (write sets listed in their
+  briefs): (1) native opponent probe round-2 (tools/oracle note-probe + NEW
+  tests/fixtures/note-native-opponent/, retained opponent loops); (2) 6A sim
+  implementation (crates/oxide-game/src/slice*, schema-2 OpponentHit,
+  chart-id selection). The orchestrator keeps crates/oxide-game/src/render/**
+  and xtask/**. Bounded-RAM queue policy is binding for both workers.
+- Not started: render/scene.rs row-consumption change (after the sim lands;
+  render-diff digest equality is the check), 61/61 corpus prototype run,
+  gameplay_sim_corpus gate wiring (6F).
