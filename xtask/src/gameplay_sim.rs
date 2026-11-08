@@ -74,7 +74,7 @@ use crate::replay::{INPUT_SOURCE, Key, LaneNote, PROVENANCE_JSON, StreamEvent};
 pub(crate) const DIFFICULTIES: [&str; 3] = ["easy", "normal", "hard"];
 pub(crate) const CHART_ID: &str = "bopeebo-default";
 const SCHEMA_VERSION: &str = "1";
-const CLI_USAGE: &str = "usage: gameplay-sim [--assets <dir>]";
+const CLI_USAGE: &str = "usage: gameplay-sim [--assets <dir>] [--corpus]";
 const TRACE_DIR: &str = "target/gameplay-sim";
 /// The only stream format the native-note probe and this harness accept.
 pub(crate) const STREAM_SCHEMA: &str = "note-stream-1";
@@ -173,6 +173,23 @@ pub fn run(rest: &[String]) -> ExitCode {
     // Normalize the `..` in the workspace-relative path for the printed report.
     let trace_dir = trace_dir.canonicalize().unwrap_or(trace_dir);
 
+    if cli.corpus {
+        println!(
+            "gameplay-sim --corpus: prototype run over the measured corpus inventory \
+             (61 chart-ids; two-run sha256 per difficulty; synthesized taps; NOT a gate)"
+        );
+        return match run_corpus(&cli.assets_root, &trace_dir) {
+            Ok(summary) => {
+                println!("{summary}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("gameplay-sim --corpus: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     println!(
         "gameplay-sim: assets {}; schema {SCHEMA_VERSION:?}; difficulties {}",
         cli.assets_root.display(),
@@ -214,11 +231,13 @@ pub fn run(rest: &[String]) -> ExitCode {
 
 struct Cli {
     assets_root: PathBuf,
+    corpus: bool,
 }
 
 impl Cli {
     fn parse(rest: &[String]) -> Result<Self, String> {
         let mut assets = None;
+        let mut corpus = false;
         let mut iter = rest.iter();
         while let Some(flag) = iter.next() {
             match flag.as_str() {
@@ -228,6 +247,7 @@ impl Cli {
                     };
                     assets = Some(value.clone());
                 }
+                "--corpus" => corpus = true,
                 other => {
                     return Err(format!("unsupported argument {other:?}; {CLI_USAGE}"));
                 }
@@ -246,7 +266,10 @@ impl Cli {
                 }
             },
         };
-        Ok(Self { assets_root })
+        Ok(Self {
+            assets_root,
+            corpus,
+        })
     }
 }
 
@@ -824,6 +847,9 @@ fn count_kinds(trace: &[TraceEvent]) -> KindCounts {
             TraceEvent::HoldDrop { .. } => counts.hold_drop += 1,
             TraceEvent::HoldEnd { .. } => counts.hold_end += 1,
             TraceEvent::GameOver { .. } => counts.game_over += 1,
+            // Compile-only arm authorized for the schema-2 variant: the M5
+            // schema-1 gate path never produces opponent rows.
+            TraceEvent::OpponentHit { .. } => {}
         }
     }
     counts
@@ -854,7 +880,8 @@ fn input_time_us(event: &TraceEvent) -> f64 {
         | TraceEvent::HoldTick { input_time_us, .. }
         | TraceEvent::HoldDrop { input_time_us, .. }
         | TraceEvent::HoldEnd { input_time_us, .. }
-        | TraceEvent::GameOver { input_time_us, .. } => *input_time_us,
+        | TraceEvent::GameOver { input_time_us, .. }
+        | TraceEvent::OpponentHit { input_time_us, .. } => *input_time_us,
     }
 }
 
@@ -2384,11 +2411,309 @@ fn note_events(trace: &[TraceEvent], note_id: u32) -> Vec<String> {
                     judgement,
                     note_id,
                     ..
+                }
+                | TraceEvent::OpponentHit {
+                    kind,
+                    sim,
+                    judgement,
+                    note_id,
+                    ..
                 } => (kind, sim, judgement, note_id),
             };
             (*event_note_id == note_id).then(|| format!("{kind} sim={sim} judgement={judgement}"))
         })
         .collect()
+}
+
+/// Corpus prototype runner (`gameplay-sim --corpus`): one two-run deterministic
+/// pass per `corpus.txt` chart-id and each declared difficulty. Input
+/// synthesis is the M4 recipe basis WITHOUT the scripted negative phase:
+/// presses at `ceil(t)`, releases at `ceil(t + l)` on the 1 ms grid, no ghost
+/// taps (every lane 0..=3 note of a difficulty is pressed exactly once). Per
+/// run the prototype asserts the two-run sha256 equality on the compact
+/// serialized trace, zero `miss` events and zero `game_over` events and that
+/// the round-2 replay keeps the recorded-trace identity. It does NOT
+/// re-derive the M4-provenance bound checks of the bopeebo gate; the
+/// acceptance `full_chart_gameplay` gate (M6 phase 6F) owns the final wiring.
+/// Prototype evidence only; difficulty lists are read from the explicit
+/// assets root.
+const CORPUS: &str = include_str!("../../tools/oracle/corpus.txt");
+
+const CHART_ID_VARIATIONS: [&str; 4] = ["default", "erect", "pico", "bf"];
+
+fn corpus_ids() -> Vec<&'static str> {
+    CORPUS
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn split_chart_id(chart_id: &str) -> (String, String) {
+    for suffix in CHART_ID_VARIATIONS.iter() {
+        let tail = format!("-{suffix}");
+        if let Some(base) = chart_id.strip_suffix(tail.as_str()) {
+            // `-default` keeps no file suffix; the others append to the file
+            // names (`2hot-default` -> `2hot-chart.json`).
+            if *suffix == "default" {
+                return (base.to_owned(), String::new());
+            }
+            return (base.to_owned(), tail);
+        }
+    }
+    (chart_id.to_owned(), String::new())
+}
+
+struct CorpusRun {
+    event_count: usize,
+    opponent_count: usize,
+    tap_count: usize,
+    digest: String,
+}
+
+fn run_corpus(assets_root: &Path, trace_dir: &Path) -> Result<String, String> {
+    let mut lines = Vec::new();
+    for chart_id in corpus_ids() {
+        let (song, suffix) = split_chart_id(chart_id);
+        let metadata_path = format!("preload/data/songs/{song}/{song}-metadata{suffix}.json");
+        let metadata_bytes = fs::read(assets_root.join(&metadata_path)).map_err(|error| {
+            format!(
+                "cannot read metadata for chart-id {chart_id:?} (path {metadata_path:?}): {error}"
+            )
+        })?;
+        let metadata: serde_json::Value = serde_json::from_slice(&metadata_bytes)
+            .map_err(|error| format!("metadata {metadata_path:?} is not valid JSON: {error}"))?;
+        let difficulty_values = metadata
+            .get("playData")
+            .and_then(|data| data.get("difficulties"))
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| format!("{metadata_path:?} lacks playData.difficulties"))?;
+        let mut difficulties = Vec::with_capacity(difficulty_values.len());
+        for value in difficulty_values {
+            difficulties.push(value.as_str().map(str::to_owned).ok_or_else(|| {
+                format!("{metadata_path:?}: playData.difficulties must be strings")
+            })?);
+        }
+        if difficulties.is_empty() {
+            return Err(format!(
+                "{metadata_path:?} declares an empty difficulty list"
+            ));
+        }
+        for difficulty in &difficulties {
+            let run = corpus_run(assets_root, chart_id, difficulty, trace_dir)?;
+            lines.push(format!(
+                "{chart_id}/{difficulty}: {} events ({} opponent_hit, {} taps) two-run sha256 {}",
+                run.event_count, run.opponent_count, run.tap_count, run.digest
+            ));
+        }
+    }
+    let mut summary = format!(
+        "gameplay-sim --corpus: PASS: {} chart-ids over the measured corpus inventory; every \
+         difficulty ran the deterministic schema-2 sim on the 1 ms grid without misses or \
+         game-over; digests below are prototype evidence (not milestone acceptance; not \
+         native-game parity)",
+        corpus_ids().len()
+    );
+    summary.push('\n');
+    summary.push_str(&lines.join("\n"));
+    Ok(summary)
+}
+
+fn corpus_run(
+    assets_root: &Path,
+    chart_id: &str,
+    difficulty: &str,
+    trace_dir: &Path,
+) -> Result<CorpusRun, String> {
+    let first_sim = GameplaySimState::build_chart(assets_root, chart_id, difficulty)
+        .map_err(|error| format!("{chart_id}/{difficulty}: sim build: {error}"))?;
+    let second_sim = GameplaySimState::build_chart(assets_root, chart_id, difficulty)
+        .map_err(|error| format!("{chart_id}/{difficulty}: second sim build: {error}"))?;
+    let mut sims = [first_sim, second_sim];
+    let (notes, last_end_ms, opponent_notes) = player_notes_for(assets_root, chart_id, difficulty)?;
+    if notes.is_empty() {
+        return Err(format!(
+            "{chart_id}/{difficulty}: the difficulty has zero player notes; a run without \
+             notes is not evidence"
+        ));
+    }
+    let mut taps: Vec<(u64, i64)> = notes
+        .iter()
+        .map(|note| Ok((grid_ms(note.time_ms)?, note.direction)))
+        .collect::<Result<Vec<_>, String>>()?;
+    taps.sort_unstable();
+    let mut releases = notes
+        .iter()
+        .map(|note| Ok((grid_ms(note.time_ms + note.hold_ms)?, note.direction)))
+        .collect::<Result<Vec<_>, String>>()?;
+    releases.sort_unstable();
+    let end_ms = grid_ms(last_end_ms)?
+        .checked_add(END_TAIL_MS)
+        .ok_or_else(|| format!("{chart_id}/{difficulty}: simulation end overflows u64 ms"))?;
+
+    let mut traces = [Vec::new(), Vec::new()];
+    let mut tap_next = 0usize;
+    let mut release_next = 0usize;
+    for sim_ms in 0..=end_ms {
+        let mut tick_inputs = Vec::new();
+        while let Some(&(input_ms, lane)) = taps.get(tap_next) {
+            if input_ms != sim_ms {
+                break;
+            }
+            tick_inputs.push(InputEvent::Press {
+                sim_ms: input_ms,
+                direction: lane,
+            });
+            tap_next += 1;
+        }
+        while let Some(&(input_ms, lane)) = releases.get(release_next) {
+            if input_ms != sim_ms {
+                break;
+            }
+            tick_inputs.push(InputEvent::Release {
+                sim_ms: input_ms,
+                direction: lane,
+            });
+            release_next += 1;
+        }
+        if tap_next != taps.len() || release_next != releases.len() {
+            // Both queues are sorted, so any remaining event is scheduled at a
+            // future tick; the loop terminates and the post-loop check below
+            // fails closed on leftovers.
+        }
+        for (sim, trace) in sims.iter_mut().zip(traces.iter_mut()) {
+            let tick_events = sim.step(sim_ms, &tick_inputs);
+            trace.extend(tick_events.iter().cloned());
+        }
+    }
+    if tap_next != taps.len() || release_next != releases.len() {
+        return Err(format!(
+            "{chart_id}/{difficulty}: synthesized inputs remain after the {end_ms} ms end"
+        ));
+    }
+    let recorded = sims[0].record();
+    if recorded != traces[0] {
+        return Err(format!(
+            "{chart_id}/{difficulty}: sim.record() differs from the per-tick dispatched trace"
+        ));
+    }
+    for event in &traces[0] {
+        match event {
+            TraceEvent::Miss { .. } => {
+                return Err(format!(
+                    "{chart_id}/{difficulty}: synthesized exact taps must never miss a note"
+                ));
+            }
+            TraceEvent::GameOver { .. } => {
+                return Err(format!(
+                    "{chart_id}/{difficulty}: exact taps must never reach the game-over boundary"
+                ));
+            }
+            _ => {}
+        }
+    }
+    let trace_bytes = serialize_trace(&traces[0])?;
+    let digest = sha_hex(&trace_bytes);
+    let opponent_count = traces[0]
+        .iter()
+        .filter(|event| matches!(event, TraceEvent::OpponentHit { .. }))
+        .count();
+    if opponent_count != opponent_notes {
+        // Fail-closed review finding 5: every opponent note auto-hits in the
+        // native semantics, so the row count must equal the lane 4..=7 chart
+        // count exactly. A missing opponent block never passes silently.
+        return Err(format!(
+            "{chart_id}/{difficulty}: {opponent_count} opponent rows != {opponent_notes} \
+             opponent chart notes"
+        ));
+    }
+    let second_bytes = serialize_trace(&traces[1])?;
+    let second_digest = sha_hex(&second_bytes);
+    if trace_bytes != second_bytes || digest != second_digest {
+        return Err(format!(
+            "{chart_id}/{difficulty}: two-run determinism failure ({digest} vs {second_digest})"
+        ));
+    }
+    // Assert equality of the two serialized traces on the full byte level
+    // (serialize_trace output order stable; already compared).
+    let trace_path = trace_dir.join(format!("corpus-{chart_id}-{difficulty}.jsonl"));
+    let written = write_and_hash(&trace_path, &trace_bytes)?;
+    if written != digest {
+        return Err(format!(
+            "{chart_id}/{difficulty}: serialized trace digest changed across the write: \
+             computed {digest} but wrote {written}"
+        ));
+    }
+    Ok(CorpusRun {
+        event_count: traces[0].len(),
+        opponent_count,
+        tap_count: taps.len(),
+        digest,
+    })
+}
+
+/// Corpus notes split for the synthesis (review finding 5): player notes feed
+/// the taps; the shared end and the expected opponent-note count come from
+/// ALL notes, so an opponent hold ending after the last player note is still
+/// simulated. Paths are read-only files under the explicit assets root; the
+/// bopeebo M4-provenance chain is NOT re-derived here (prototype scope,
+/// documented).
+fn player_notes_for(
+    assets_root: &Path,
+    chart_id: &str,
+    difficulty: &str,
+) -> Result<(Vec<LaneNote>, f64, usize), String> {
+    let (song, suffix) = split_chart_id(chart_id);
+    let chart_path = format!("preload/data/songs/{song}/{song}-chart{suffix}.json");
+    let bytes = fs::read(assets_root.join(&chart_path))
+        .map_err(|error| format!("cannot read chart {chart_path:?}: {error}"))?;
+    let chart: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("chart {chart_path:?} is not valid JSON: {error}"))?;
+    let values = chart
+        .get("notes")
+        .and_then(|notes| notes.get(difficulty))
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{chart_path:?} lacks notes[\"{difficulty}\"]"))?;
+    let mut notes = Vec::with_capacity(values.len());
+    let mut last_end = 0.0_f64;
+    let mut opponent_note_count = 0usize;
+    for (index, value) in values.iter().enumerate() {
+        let direction = value
+            .get("d")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| format!("{chart_path:?}[{index}] lacks integer d"))?;
+        if !(0..=7).contains(&direction) {
+            return Err(format!(
+                "{chart_path:?}[{index}]: direction {direction} is outside the corpus 0..=7 \
+                 lane range"
+            ));
+        }
+        let time_ms = value
+            .get("t")
+            .and_then(serde_json::Value::as_f64)
+            .ok_or_else(|| format!("{chart_path:?}[{index}] lacks numeric t"))?;
+        let hold_ms = value
+            .get("l")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        if !time_ms.is_finite() || time_ms < 0.0 || hold_ms < 0.0 || !hold_ms.is_finite() {
+            return Err(format!(
+                "{chart_path:?}[{index}]: time/sustain must be finite and non-negative"
+            ));
+        }
+        last_end = last_end.max(time_ms + hold_ms);
+        if direction >= 4 {
+            opponent_note_count += 1;
+            continue;
+        }
+        notes.push(LaneNote {
+            direction,
+            difficulty: difficulty.to_owned(),
+            time_ms,
+            hold_ms,
+        });
+    }
+    Ok((notes, last_end, opponent_note_count))
 }
 
 #[cfg(test)]

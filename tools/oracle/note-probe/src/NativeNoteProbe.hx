@@ -2,6 +2,7 @@ import flixel.FlxG;
 import flixel.sound.FlxSound;
 import funkin.Conductor;
 import funkin.Highscore;
+import funkin.audio.VoicesGroup;
 import funkin.Highscore.Tallies;
 import funkin.Preferences;
 import funkin.data.song.SongData.SongNoteData;
@@ -13,11 +14,13 @@ import funkin.modding.events.ScriptEvent.HitNoteScriptEvent;
 import funkin.modding.events.ScriptEvent.GhostMissNoteScriptEvent;
 import funkin.modding.events.ScriptEvent.HoldNoteScriptEvent;
 import funkin.play.PlayState;
+import funkin.play.character.BaseCharacter;
 import funkin.play.components.PopUpStuff;
 import funkin.play.notes.NoteSprite;
 import funkin.play.notes.Strumline;
 import funkin.play.notes.SustainTrail;
 import funkin.play.scoring.Scoring;
+import funkin.play.stage.Stage;
 import funkin.util.Constants;
 import haxe.Int64;
 import sys.io.File;
@@ -25,33 +28,67 @@ import sys.io.File;
 /**
  * Native hxcpp note-score probe (tools/oracle/NOTE-BEHAVIOR.md).
  *
- * Executes the REAL installed PlayState note-score frame path
- * (processInputQueue -> processNotes, plus goodNoteHit/onNoteMiss/
- * ghostNoteMiss/applyScore), the REAL PBOT1 Scoring and the REAL GRhythmUtil
- * window processing, driven by one `note-stream-1` stream whose Conductor
- * music times are replayed through the REAL retained Conductor.
+ * Round 1 (default, driver `native-note-probe-1`) executes the REAL installed
+ * PlayState note-score frame path (processInputQueue -> processNotes, plus
+ * goodNoteHit/onNoteMiss/ghostNoteMiss/applyScore), the REAL PBOT1 Scoring and
+ * the REAL GRhythmUtil window processing, driven by one `note-stream-1`
+ * stream whose Conductor music times are replayed through the REAL retained
+ * Conductor. Rows are emitted only for events delivered to
+ * PlayState.dispatchEvent (NOTE-BEHAVIOR.md section 6): hit, miss,
+ * ghost_press, hold_drop.
  *
- * Rows are emitted only for events delivered to PlayState.dispatchEvent
- * (NOTE-BEHAVIOR.md section 6): hit, miss, ghost_press, hold_drop. The engine
- * decision kinds hold_start/hold_tick/hold_end/game_over are NOT dispatched by
- * the retained path and therefore have no native row. Field order is the exact
- * serde order of crates/oxide-game/src/slice.rs TraceEvent; input_time_us is
- * pinned to 0.0.
+ * Round 2 (PROBE_ROUND=2, driver `native-note-probe-2`) drives the SAME real
+ * `processNotes` with opponent notes/holds constructed from the same chart
+ * (lanes 4..7, chart array order, direction = data % 4). The player strumlines
+ * are empty and the round-1 stream's input events are not replayed, so the
+ * retained opponent loops are the only event source. Only `opponent_hit` rows
+ * (schema "2", header-only; NOTE-BEHAVIOR.md section 10) are emitted. Multiple
+ * opponent hits on one tick are allowed; any other dispatch fails closed.
  *
- * Honesty: synthesized stream; not native-game parity. Excluded: opponent side,
- * audio/visuals, botplay/practice, scripts, input device latency (the latency
- * term is stubbed to exactly 0), runtime clamp/death ordering in update().
+ * Field order is the exact serde order of crates/oxide-game/src/slice.rs
+ * TraceEvent; input_time_us is pinned to 0.0.
+ *
+ * Honesty: synthesized stream; not native-game parity. Excluded: audio/visuals,
+ * botplay/practice, scripts, input device latency (the latency term is stubbed
+ * to exactly 0), runtime clamp/death ordering in update(), opponent hold
+ * lifecycle/sing scheduling rows.
  */
 @:privateAccess
 class NativeNoteProbe
 {
-  static inline final VERSION = "native-note-probe-1";
+  static inline final DRIVER_ROUND_1 = "native-note-probe-1";
+  static inline final DRIVER_ROUND_2 = "native-note-probe-2";
+
+  /** Driver tag recorded by note_probe.sh; set from PROBE_ROUND in main(). */
+  static var driverTag:String = DRIVER_ROUND_1;
 
   static function main():Void
   {
+    var round = probeRound();
     var streamPath = envRequired("PROBE_STREAM_JSON");
     var outDir = envRequired("PROBE_OUT_DIR");
     var assetsRoot = envRequired("PROBE_ASSETS");
+    if (round == 2)
+    {
+      runOpponentRound(streamPath, outDir, assetsRoot);
+      return;
+    }
+    runPlayerRound(streamPath, outDir, assetsRoot);
+  }
+
+  /** PROBE_ROUND defaults to 1 so the frozen round-1 run stays reproducible. */
+  static function probeRound():Int
+  {
+    var raw = Sys.getEnv("PROBE_ROUND");
+    if (raw == null || raw.length == 0 || raw == "1") return 1;
+    if (raw == "2") return 2;
+    fail('PROBE_ROUND="' + raw + '" is not 1|2');
+    return 1;
+  }
+
+  static function runPlayerRound(streamPath:String, outDir:String, assetsRoot:String):Void
+  {
+    driverTag = DRIVER_ROUND_1;
     Sys.stderr().writeString(honesty());
 
     var stream = loadStream(streamPath);
@@ -172,18 +209,238 @@ class NativeNoteProbe
     }
     var outPath = outDir + "/" + stream.difficulty + ".jsonl";
     File.saveContent(outPath, buffer.toString());
-    Sys.stderr().writeString('native-note-probe: difficulty ${stream.difficulty}; ticks ${stream.ticks.length}; '
+    Sys.stderr().writeString('${driverTag}: difficulty ${stream.difficulty}; ticks ${stream.ticks.length}; '
       + 'rows ${rowCount}; wrote ${outPath}\n');
     Sys.stderr().writeString(honesty());
   }
 
+  /**
+   * Round 2: opponent-side run over the same note-stream-1 ticks.
+   *
+   * Retains the real `processNotes` call, so the opponent note loop
+   * (PlayState.hx L2806-2837) and hold loop (L2840-2866) execute unchanged.
+   * Player strumlines are empty and the stream's input events are not replayed:
+   * the opponent loops read no input state, so the player path cannot dispatch
+   * and only opponent_hit rows can be produced. Multiple opponent hits on one
+   * tick are allowed (their rows carry no post-event state); anything else
+   * aborts fail-closed.
+   */
+  static function runOpponentRound(streamPath:String, outDir:String, assetsRoot:String):Void
+  {
+    driverTag = DRIVER_ROUND_2;
+    Sys.stderr().writeString(honestyOpponent());
+
+    var stream = loadStream(streamPath);
+    var notes = loadOpponentNotes(assetsRoot, stream.difficulty);
+    var changes = loadTimeChanges(assetsRoot);
+
+    Conductor.reset();
+    var conductor = Conductor.instance;
+    conductor.instrumentalOffset = 0.0;
+    conductor.formatOffset = 0.0;
+    Preferences.globalOffset = 0;
+    funkin.save.Save.instance = null;
+    FlxG.sound.music = null;
+    conductor.mapTimeChanges(changes);
+
+    var ps = buildPlayState(notes, true);
+    var stage = ps.currentStage;
+    if (stage == null || stage.getDad() == null || stage.getOpponent() == null)
+    {
+      fail('round 2 requires the [S] stage/character shells (dad/opponent)');
+    }
+    var dad = stage.getDad();
+
+    if (!sys.FileSystem.exists(outDir))
+    {
+      sys.FileSystem.createDirectory(outDir);
+    }
+
+    var buffer = new StringBuf();
+    var rowCount = 0;
+    var hitSeen:Array<Bool> = [];
+    for (index in 0...notes.notes.length)
+    {
+      hitSeen.push(false);
+    }
+
+    for (tick in stream.ticks)
+    {
+      // The retained L2848-2851 body only writes holdTimer when the dad shell
+      // is singing. Preset the [S] field so a missing reset is observable.
+      dad.holdTimer = 1.0;
+
+      conductor.update(tick.music_ms, false);
+      if (conductor.songPosition != tick.sim * 1.0)
+      {
+        fail('tick ${tick.sim}: retained Conductor.songPosition '
+          + Std.string(conductor.songPosition)
+          + ' does not equal the exported slice position ${tick.sim}');
+      }
+
+      var healthBefore = ps.health;
+      var scoreBefore = ps.songScore;
+      var comboBefore = Highscore.tallies.combo;
+      var talliesBefore = tallyState();
+
+      @:privateAccess ps.processNotes(1.0 / 1000.0);
+      checkHealth(ps, tick.sim);
+
+      if (ps.health != healthBefore || ps.songScore != scoreBefore || Highscore.tallies.combo != comboBefore
+        || tallyState() != talliesBefore)
+      {
+        fail('tick ' + tick.sim + ': retained opponent loops mutated player state (health '
+          + fnum(healthBefore) + '->' + fnum(ps.health) + ', score ' + fnum(scoreBefore) + '->'
+          + fnum(ps.songScore) + ', combo ' + comboBefore + '->' + Highscore.tallies.combo
+          + ', tallies ' + talliesBefore + '->' + tallyState() + ')');
+      }
+      if (hasActiveOpponentHold(ps) && dad.holdTimer != 0.0)
+      {
+        fail('tick ' + tick.sim + ': an opponent hold is active but the retained holdTimer reset did not run');
+      }
+
+      var records = NoteProbeRuntime.take();
+      for (record in records)
+      {
+        if (record.event.eventCanceled)
+        {
+          fail('tick ' + tick.sim + ': a script event was canceled; the probe has no scripts, so this is a contract violation');
+        }
+        if (!Std.isOfType(record.event, HitNoteScriptEvent))
+        {
+          fail('tick ' + tick.sim + ': opponent round saw non-opponent event ' + describeEvent(record.event)
+            + '; only opponent_hit dispatches are allowed (NOTE-BEHAVIOR.md section 10)');
+        }
+        var hit:HitNoteScriptEvent = cast record.event;
+        var noteIndex = notes.notes.indexOf(hit.note);
+        if (noteIndex < 0 || noteIndex >= hitSeen.length)
+        {
+          fail('tick ' + tick.sim + ': opponent hit references a note outside the driven opponent-note list');
+        }
+        if (hitSeen[noteIndex])
+        {
+          fail('tick ' + tick.sim + ': opponent note id ' + noteIndex + ' was hit twice');
+        }
+        hitSeen[noteIndex] = true;
+
+        var direction = hit.note.noteData.getDirection();
+        var spriteDirection = Std.int(hit.note.direction);
+        if (spriteDirection != direction)
+        {
+          fail('tick ' + tick.sim + ': opponent note id ' + noteIndex + ' sprite direction '
+            + spriteDirection + ' does not equal data % 4 = ' + direction);
+        }
+        var expectedSim = Math.ceil(hit.note.noteData.time);
+        if (tick.sim != expectedSim)
+        {
+          fail('tick ' + tick.sim + ': opponent note id ' + noteIndex + ' hit at the wrong tick; '
+            + 'the botplay branch fires first at ceil(strumTime) = ' + expectedSim);
+        }
+        if (hit.judgement != "perfect" || hit.score != 0.0 || hit.healthChange != 0.0
+          || hit.isComboBreak || hit.hitDiff != 0.0 || hit.comboCount != 0 || hit.doesNotesplash)
+        {
+          fail('tick ' + tick.sim + ': opponent HitNoteScriptEvent differs from the retained L2812 construction'
+            + ' (judgement=' + hit.judgement + ', score=' + fnum(hit.score)
+            + ', healthChange=' + fnum(hit.healthChange) + ', hitDiff=' + fnum(hit.hitDiff)
+            + ', comboCount=' + hit.comboCount + ')');
+        }
+
+        buffer.add(opponentHitRow(tick.sim, noteIndex, direction));
+        buffer.add("\n");
+        rowCount++;
+      }
+    }
+
+    for (index in 0...hitSeen.length)
+    {
+      if (!hitSeen[index])
+      {
+        fail('opponent note id ' + index
+          + ' was never hit; the contiguous tick stream should reach every opponent note');
+      }
+    }
+    if (rowCount != notes.notes.length)
+    {
+      fail('opponent rows ' + rowCount + ' do not equal the constructed opponent note count ' + notes.notes.length);
+    }
+    if (ps.vocals == null)
+    {
+      fail('round 2 requires the [S] legacy-voice shell; ps.vocals is null');
+    }
+    if (!ps.vocals.legacyVoiceSystem || ps.vocals.legacyVoiceUsesPlayer)
+    {
+      fail('round 2 legacy-voice shell is unconfigured (legacyVoiceSystem='
+        + boolJson(ps.vocals.legacyVoiceSystem) + ', legacyVoiceUsesPlayer='
+        + boolJson(ps.vocals.legacyVoiceUsesPlayer) + ')');
+    }
+    if (ps.vocals.opponentVolume != ps.opponentVocalsVolume)
+    {
+      fail('the retained legacy-voice opponentVolume assignment did not run (got '
+        + fnum(ps.vocals.opponentVolume) + ', expected ' + fnum(ps.opponentVocalsVolume) + ')');
+    }
+
+    if (!sys.FileSystem.exists(outDir))
+    {
+      sys.FileSystem.createDirectory(outDir);
+    }
+    var outPath = outDir + "/" + stream.difficulty + ".jsonl";
+    File.saveContent(outPath, buffer.toString());
+    Sys.stderr().writeString('${driverTag}: difficulty ${stream.difficulty}; ticks ${stream.ticks.length}; '
+      + 'rows ${rowCount}; wrote ${outPath}\n');
+    Sys.stderr().writeString(honestyOpponent());
+  }
+
+  static function hasActiveOpponentHold(ps:PlayState):Bool
+  {
+    for (hold in ps.opponentStrumline.holdNotes.members)
+    {
+      if (hold == null || !hold.alive || hold.noteData == null) continue;
+      if (hold.hitNote && !hold.missedNote && hold.sustainLength > 0) return true;
+    }
+    return false;
+  }
+
+  /** Ordered tally snapshot used to prove the opponent loops never score. */
+  static function tallyState():String
+  {
+    return Std.string(Highscore.tallies.sick) + ','
+      + Std.string(Highscore.tallies.good) + ','
+      + Std.string(Highscore.tallies.bad) + ','
+      + Std.string(Highscore.tallies.shit) + ','
+      + Std.string(Highscore.tallies.missed) + ','
+      + Std.string(Highscore.tallies.totalNotesHit);
+  }
+
+  /** Exact M6 section 10.2 opponent_hit row: schema 2 shared header only. */
+  static function opponentHitRow(sim:Int, noteId:Int, direction:Int):String
+  {
+    return '{"schema":"2","kind":"opponent_hit"'
+      + ',"sim":' + Std.string(sim)
+      + ',"input_ms":0.0'
+      + ',"input_time_us":0.0'
+      + ',"note_id":' + Std.string(noteId)
+      + ',"note_direction":' + Std.string(direction)
+      + ',"judgement":"perfect"'
+      + ',"raw_note_diff":0.0'
+      + ',"note_diff_int":0}';
+  }
+
   static function honesty():String
   {
-    return 'native-note-probe honesty: synthesized note-stream-1 input; NOT native-game parity; '
+    return driverTag + ' honesty: synthesized note-stream-1 input; NOT native-game parity; '
       + 'driver hold rows follow NOTE-BEHAVIOR.md section 6.1 round-3 (mirror on previous songPos before the conductor update); '
       + 'game_over is not retained; opponent side, audio/visuals, botplay/practice, scripts and '
       + 'input-device timestamping excluded; input latency term stubbed to 0; input_time_us = 0.0 '
       + 'canonical; hold_drop input_ms = 0.0; defines: NO_FEATURE_GHOST_TAPPING\n';
+  }
+
+  static function honestyOpponent():String
+  {
+    return driverTag + ' honesty: opponent-side run; synthesized note-stream-1 ticks; NOT native-game parity; '
+      + 'retained PlayState processNotes opponent note/hold loops (real bodies); player strumlines empty and stream '
+      + 'input events not replayed; only schema-2 opponent_hit rows (no score/health/combo/tallies); opponent hold '
+      + 'lifecycle/sing scheduling, audio/visuals, scripts and input-device timestamping excluded; input latency '
+      + 'term stubbed to 0; input_time_us = 0.0 canonical\n';
   }
 
   static function envRequired(name:String):String
@@ -525,7 +782,109 @@ class NativeNoteProbe
     return {notes: notes, holds: holds, holdNoteIds: holdNoteIds, lastReleaseMs: [-1, -1, -1, -1]};
   }
 
-  static function buildPlayState(loaded:LoadedNotes):PlayState
+  /**
+   * Round-2 opponent-note construction (M6 contract section 10.2): lanes 4..7
+   * from the same bopeebo chart JSON, chart array order, compacted opponent
+   * index as note_id, and the strumline direction = data % 4 (SongData.hx
+   * L1129-1131). Player notes are excluded; the two id spaces are independent.
+   */
+  static function loadOpponentNotes(assetsRoot:String, difficulty:String):LoadedNotes
+  {
+    var path = assetsRoot + "/preload/data/songs/bopeebo/bopeebo-chart.json";
+    var chart:Dynamic;
+    try
+    {
+      chart = haxe.Json.parse(File.getContent(path));
+    }
+    catch (error:Dynamic)
+    {
+      fail('cannot read/parse bopeebo chart ' + path + ': ' + Std.string(error));
+      return null;
+    }
+    var notesByDifficulty:Dynamic = Reflect.field(chart, "notes");
+    if (notesByDifficulty == null)
+    {
+      fail('bopeebo chart has no notes object');
+    }
+    var rawNotes:Array<Dynamic> = cast Reflect.field(notesByDifficulty, difficulty);
+    if (rawNotes == null)
+    {
+      fail('bopeebo chart has no "' + difficulty + '" difficulty');
+    }
+
+    var notes:Array<NoteSprite> = [];
+    var holds:Array<SustainTrail> = [];
+    var holdNoteIds:Array<Int> = [];
+    var sentinel:Dynamic = {};
+    for (index in 0...rawNotes.length)
+    {
+      var raw = rawNotes[index];
+      var t = reqFloat(raw, "t", "chart note " + index);
+      var d = reqInt(raw, "d", "chart note " + index);
+      if (d < 0 || d > 7)
+      {
+        fail('chart note ' + index + ' direction ' + d + ' is outside the V-Slice 0..=7 lane range');
+      }
+      if (d < 4)
+      {
+        // Player-side notes are not part of the round-2 opponent list.
+        continue;
+      }
+      if (!Math.isFinite(t) || t < 0.0)
+      {
+        fail('chart note ' + index + ' time ' + Std.string(t) + ' must be finite and non-negative');
+      }
+      var length = 0.0;
+      if (Reflect.hasField(raw, "l") && Reflect.field(raw, "l") != null)
+      {
+        length = reqFloat(raw, "l", "chart note " + index);
+      }
+      if (!Math.isFinite(length) || length < 0.0)
+      {
+        fail('chart note ' + index + ' sustain ' + Std.string(length) + ' must be finite and non-negative');
+      }
+      var kind = "";
+      if (Reflect.hasField(raw, "k") && Reflect.field(raw, "k") != null)
+      {
+        kind = reqString(raw, "k", "chart note " + index);
+      }
+
+      var direction = d % 4;
+      var data = new SongNoteData(t, d, length, kind);
+      var note = new NoteSprite();
+      // Same verbatim-setter path as the player construction: frames is null at
+      // rest and a sentinel only makes the real setter store the value.
+      note.frames = sentinel;
+      note.direction = direction;
+      note.frames = null;
+      note.noteData = data;
+      note.scoreable = true;
+      note.alive = true;
+      notes.push(note);
+
+      if (length > 0.0)
+      {
+        var hold = new SustainTrail();
+        hold.strumTime = t;
+        hold.noteDirection = direction;
+        hold.sustainLength = length;
+        hold.fullSustainLength = length;
+        hold.noteData = data;
+        hold.scoreable = true;
+        hold.alive = true;
+        note.holdNoteSprite = hold;
+        holds.push(hold);
+        holdNoteIds.push(notes.length - 1);
+      }
+    }
+    if (notes.length == 0)
+    {
+      fail('bopeebo ' + difficulty + ' holds no opponent notes');
+    }
+    return {notes: notes, holds: holds, holdNoteIds: holdNoteIds, lastReleaseMs: [-1, -1, -1, -1]};
+  }
+
+  static function buildPlayState(loaded:LoadedNotes, opponentSide:Bool = false):PlayState
   {
     var ps:PlayState = Type.createEmptyInstance(PlayState);
     PlayState.instance = ps;
@@ -547,19 +906,57 @@ class NativeNoteProbe
     ps.opponentStrumline = new Strumline();
     ps.opponentStrumline.isPlayer = false;
 
-    for (note in loaded.notes)
+    if (opponentSide)
     {
-      ps.playerStrumline.notes.members.push(note);
+      for (note in loaded.notes)
+      {
+        ps.opponentStrumline.notes.members.push(note);
+      }
+      for (hold in loaded.holds)
+      {
+        ps.opponentStrumline.holdNotes.members.push(hold);
+      }
     }
-    for (hold in loaded.holds)
+    else
     {
-      ps.playerStrumline.holdNotes.members.push(hold);
+      for (note in loaded.notes)
+      {
+        ps.playerStrumline.notes.members.push(note);
+      }
+      for (hold in loaded.holds)
+      {
+        ps.playerStrumline.holdNotes.members.push(hold);
+      }
     }
 
-    ps.vocals = null;
     ps.playerVocalsVolume = 1.0;
-    ps.opponentVocalsVolume = 1.0;
-    ps.currentStage = null;
+    if (opponentSide)
+    {
+      // [S] Legacy-voice surface: non-null and configured so the retained
+      // opponent hit branch (PlayState.hx L2818-2826) executes and can be
+      // checked. No audio exists in the probe.
+      var vocals = new VoicesGroup();
+      vocals.legacyVoiceSystem = true;
+      vocals.legacyVoiceUsesPlayer = false;
+      vocals.opponentVolume = 1.0;
+      ps.vocals = vocals;
+      ps.opponentVocalsVolume = 0.75;
+
+      // [S] Stage character shells for the retained opponent hold loop read
+      // (PlayState.hx L2848/L2863). `singing` is a probe switch, not animation
+      // state; it makes the holdTimer reset body observable.
+      var stage = new Stage();
+      stage.dad = new BaseCharacter();
+      stage.dad.singing = true;
+      stage.opponent = new BaseCharacter();
+      ps.currentStage = stage;
+    }
+    else
+    {
+      ps.vocals = null;
+      ps.opponentVocalsVolume = 1.0;
+      ps.currentStage = null;
+    }
     ps.currentSong = null;
     @:privateAccess ps.songEvents = [];
     ps.currentConversation = null;

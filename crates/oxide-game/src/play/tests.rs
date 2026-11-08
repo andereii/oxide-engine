@@ -390,7 +390,7 @@ fn song_end_is_the_last_full_chart_tick_plus_hit_window_and_hold_guard() {
         direction: 0,
         sustain_ms: 500.0,
         opponent: false,
-        player_id: Some(0),
+        note_id: Some(0),
     };
     // ceil(1500 + 160) + 2
     assert_eq!(last_song_tick(&[note]), 1_662);

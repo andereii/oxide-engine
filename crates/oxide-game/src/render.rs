@@ -94,6 +94,10 @@ pub enum RenderError {
     },
     #[error("event at {tick_ms} ms references unknown player note id {note_id}")]
     UnknownEventNote { tick_ms: u64, note_id: u32 },
+    #[error("sim event at {tick_ms} ms references unknown opponent note id {note_id}")]
+    UnknownOpponentNote { tick_ms: u64, note_id: u32 },
+    #[error("duplicate opponent hit for note id {note_id} at tick {tick_ms} ms")]
+    DuplicateOpponentNote { tick_ms: u64, note_id: u32 },
     #[error("render adapter is {name:?}, not the pinned llvmpipe software raster")]
     AdapterNotPinned { name: String },
     #[error(

@@ -541,6 +541,11 @@ fn event_categories(event: &TraceEvent) -> Result<Vec<EventCategory>, String> {
              live trace"
                 .to_string(),
         ),
+        // Compile-only arm authorized for the schema-2 variant: the frozen
+        // schema-1 canonical render stream never carries opponent rows.
+        TraceEvent::OpponentHit { .. } => {
+            Err("a schema-2 opponent row reached the schema-1 canonical render stream".to_string())
+        }
     }
 }
 
@@ -553,7 +558,8 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HoldTick { sim, .. }
         | TraceEvent::HoldDrop { sim, .. }
         | TraceEvent::HoldEnd { sim, .. }
-        | TraceEvent::GameOver { sim, .. } => *sim,
+        | TraceEvent::GameOver { sim, .. }
+        | TraceEvent::OpponentHit { sim, .. } => *sim,
     }
 }
 

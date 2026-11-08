@@ -234,6 +234,9 @@ pub(crate) struct Scene {
     note_style: LoadedNoteStyle,
     notes: Vec<NoteState>,
     player_note_indices: Vec<usize>,
+    /// Opponent note ids (compacted opponent-only, matching the sim's
+    /// per-strumline convention) mapped to `notes` indexes.
+    opponent_note_indices: Vec<usize>,
     scroll_speed: f64,
     sim_ms: f64,
     last_tick: Option<u64>,
@@ -331,11 +334,25 @@ impl Scene {
             color: [1.0, 1.0, 1.0, 1.0],
         });
 
-        let player_note_indices = notes
-            .iter()
-            .enumerate()
-            .filter_map(|(index, note)| note.player_id.map(|_| index))
-            .collect();
+        let mut player_note_indices = vec![usize::MAX; notes.len()];
+        let mut opponent_note_indices = vec![usize::MAX; notes.len()];
+        for (index, note) in notes.iter().enumerate() {
+            if let Some(note_id) = note.note_id {
+                let slot = if note.opponent {
+                    &mut opponent_note_indices
+                } else {
+                    &mut player_note_indices
+                };
+                let slot_index = note_id as usize; // id spaces are compacted, bounded by len
+                if slot_index >= slot.len() || slot[slot_index] != usize::MAX {
+                    return Err(RenderError::UnknownEventNote {
+                        tick_ms: 0,
+                        note_id,
+                    });
+                }
+                slot[slot_index] = index;
+            }
+        }
 
         let mut conductor = Conductor::new();
         conductor.map_time_changes(&conductor_changes);
@@ -358,6 +375,7 @@ impl Scene {
                     })
                     .collect(),
                 player_note_indices,
+                opponent_note_indices,
                 scroll_speed,
                 sim_ms: 0.0,
                 last_tick: None,
@@ -590,10 +608,49 @@ impl Scene {
                 // scene at the substate boundary; the sim stops dispatching.
                 self.dead = true;
             }
+            TraceEvent::OpponentHit {
+                note_id,
+                note_direction,
+                ..
+            } => {
+                // Schema-2 sim rows REPLACE the renderer's internal opponent
+                // approximation (docs/M6-CONTRACT.md §10.3.3): the native
+                // auto-hit decision comes from the sim stream, not from a
+                // renderer-side `note.time > now` pass.
+                let index = self.opponent_note_index(*note_id, self.last_tick.unwrap_or(0))?;
+                if self.notes[index].hit {
+                    return Err(RenderError::DuplicateOpponentNote {
+                        tick_ms: self.last_tick.unwrap_or(0),
+                        note_id: *note_id,
+                    });
+                }
+                let note = self.notes[index].note;
+                self.notes[index].hit = true;
+                let direction = *note_direction;
+                if let Ok(direction) = usize::try_from(direction)
+                    && direction < 4
+                {
+                    if let Some(opponent) = self.characters.get_mut(Role::Opponent.index()) {
+                        opponent.scheduler.on_sing(direction, false);
+                    }
+                    self.opponent_line.confirm_opponent(direction, self.sim_ms);
+                    if note.sustain_ms > 0.0 {
+                        self.opponent_holds[direction] = Some(OpponentHold {
+                            end_ms: note.time + note.sustain_ms,
+                        });
+                    }
+                }
+            }
         }
         Ok(())
     }
 
+    /// Legacy bridge for schema-1 trace feeds (the M5 play mode and render
+    /// fixtures, which carry no `OpponentHit` rows). Schema-2 streams consume
+    /// the same decisions from the sim's rows in `process_event`; the
+    /// `notes[index].hit` guard makes this pass a no-op for any note a row
+    /// already covered. Removal waits for the play mode/render generation
+    /// to flip to `build_chart` (6B/6C).
     fn trigger_opponent_notes(&mut self) {
         let now = self.sim_ms;
         for index in 0..self.notes.len() {
@@ -616,10 +673,20 @@ impl Scene {
     }
 
     fn player_note_index(&self, note_id: u32, tick_ms: u64) -> Result<usize, RenderError> {
-        self.player_note_indices
-            .get(note_id as usize)
-            .copied()
+        self.note_index(&self.player_note_indices, note_id, tick_ms)
             .ok_or(RenderError::UnknownEventNote { tick_ms, note_id })
+    }
+
+    fn opponent_note_index(&self, note_id: u32, tick_ms: u64) -> Result<usize, RenderError> {
+        self.note_index(&self.opponent_note_indices, note_id, tick_ms)
+            .ok_or(RenderError::UnknownOpponentNote { tick_ms, note_id })
+    }
+
+    fn note_index(&self, indices: &[usize], note_id: u32, _tick_ms: u64) -> Option<usize> {
+        indices
+            .get(usize::try_from(note_id).ok()?)
+            .copied()
+            .filter(|index| *index != usize::MAX)
     }
 
     /// Composes all draw layers in painter order.
@@ -1194,7 +1261,8 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HoldTick { sim, .. }
         | TraceEvent::HoldDrop { sim, .. }
         | TraceEvent::HoldEnd { sim, .. }
-        | TraceEvent::GameOver { sim, .. } => *sim,
+        | TraceEvent::GameOver { sim, .. }
+        | TraceEvent::OpponentHit { sim, .. } => *sim,
     }
 }
 

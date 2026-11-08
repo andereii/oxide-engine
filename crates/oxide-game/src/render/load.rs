@@ -144,14 +144,16 @@ pub(crate) struct LoadedNoteStyle {
     pub(crate) hold_width: f64,
 }
 
-/// One chart note (both chart sides; player ids match the sim's note ids).
+/// One chart note (both chart sides; `note_id` matches the sim's per-
+/// strumline convention: player notes carry the compacted player id, opponent
+/// notes the compacted opponent id; exactly one side is `Some`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LoadedNote {
     pub(crate) time: f64,
     pub(crate) direction: usize,
     pub(crate) sustain_ms: f64,
     pub(crate) opponent: bool,
-    pub(crate) player_id: Option<u32>,
+    pub(crate) note_id: Option<u32>,
 }
 
 /// Everything the scene builder and headless harness need.
@@ -227,6 +229,7 @@ pub(crate) fn load_slice(assets_root: &Path, difficulty: &str) -> Result<LoadedS
 
     let mut notes = Vec::with_capacity(chart_notes.len());
     let mut player_id = 0u32;
+    let mut opponent_id = 0u32;
     for (index, note) in chart_notes.iter().enumerate() {
         if !(0..=7).contains(&note.direction) {
             return Err(RenderError::Unsupported {
@@ -247,18 +250,20 @@ pub(crate) fn load_slice(assets_root: &Path, difficulty: &str) -> Result<LoadedS
         let opponent = note.direction >= 4;
         let direction = (note.direction % 4) as usize;
         let id = if opponent {
-            None
+            let id = opponent_id;
+            opponent_id += 1;
+            id
         } else {
             let id = player_id;
             player_id += 1;
-            Some(id)
+            id
         };
         notes.push(LoadedNote {
             time: note.time,
             direction,
             sustain_ms,
             opponent,
-            player_id: id,
+            note_id: Some(id),
         });
     }
 

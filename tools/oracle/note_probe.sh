@@ -7,17 +7,30 @@
 # M5 `native_note_reference` gate. The original Funkin' checkout is NEVER
 # written; only byte-exact copies under target/ are compiled.
 #
+# Round 2 (PROBE_ROUND=2, driver `native-note-probe-2`, M6 contract §10.2):
+# constructs the opponent notes/holds (chart lanes 4..7, chart array order,
+# direction = data % 4) from the same bopeebo chart JSON and drives the REAL
+# retained `processNotes` opponent loops. Player strumlines stay empty and the
+# stream input events are not replayed, so the run emits only schema-2
+# header-only `opponent_hit` rows. Multiple opponent hits per tick are allowed;
+# any other dispatched event fails closed. The same stream files are consumed
+# and re-hashed; round-1 artifacts stay untouched. Not native-game parity.
+#
 # CLI environment:
 #   PROBE_STREAM_DIR   required: directory with *.stream.jsonl files
 #   PROBE_OUT_DIR      required: directory for <difficulty>.jsonl rows
 #   PROBE_ASSETS       optional: assets root (default $FUNKIN_DIR/assets)
 #   PROBE_BUILD_DIR    optional: persistent build dir under target/ (reuse)
+#   PROBE_ROUND        optional: 1 (default, player note-score path) or 2
+#                      (opponent-side `opponent_hit` run)
 #
 # Evidence boundary: this is a REAL PlayState/Scoring/GRhythmUtil execution on
 # a synthesized stream and simulated conductor time; NOT a native-game parity
-# claim and NOT a human replay. Rows are emitted only for events dispatched by
-# the retained path (hit/miss/ghost_press/hold_drop); engine-decision kinds
-# hold_start/hold_tick/hold_end/game_over are not dispatched and have no row.
+# claim and NOT a human replay. Round 1 rows are emitted only for events
+# dispatched by the retained path (hit/miss/ghost_press/hold_drop); engine-
+# decision kinds hold_start/hold_tick/hold_end/game_over are not dispatched and
+# have no row. Round 2 emits only the retained opponent HitNoteScriptEvent as
+# `opponent_hit`; opponent hold/drop/sing effects have no trace row.
 set -euo pipefail
 export LC_ALL=C
 
@@ -35,6 +48,12 @@ fail() {
   echo "native-note-probe: FAIL: $*" >&2
   exit 2
 }
+
+PROBE_ROUND="${PROBE_ROUND:-1}"
+case "$PROBE_ROUND" in
+  1|2) ;;
+  *) fail "PROBE_ROUND must be 1 or 2 (got '$PROBE_ROUND')" ;;
+esac
 
 [[ -f "$GAME/source/funkin/play/PlayState.hx" ]] || fail "installed PlayState.hx missing (set FUNKIN_DIR)"
 [[ -f "$GAME/source/funkin/play/scoring/Scoring.hx" ]] || fail "installed Scoring.hx missing"
@@ -64,8 +83,12 @@ else
 fi
 rm -rf "$WORK/native" "$WORK/game-copy" "$WORK/home"
 mkdir -p "$WORK/home"
-echo "native-note-probe: build dir $WORK"
-echo "native-note-probe honesty: synthesized stream; not native-game parity; driver hold rows follow NOTE-BEHAVIOR.md section 6.1"
+echo "native-note-probe: round $PROBE_ROUND; build dir $WORK"
+if [[ "$PROBE_ROUND" == "1" ]]; then
+  echo "native-note-probe honesty: synthesized stream; not native-game parity; driver hold rows follow NOTE-BEHAVIOR.md section 6.1"
+else
+  echo "native-note-probe honesty: round 2 opponent-side run; synthesized stream; not native-game parity; only schema-2 opponent_hit rows; opponent hold lifecycle excluded"
+fi
 
 # ---------------------------------------------------------------------------
 # Byte-exact copies of the REAL retained modules (game tree stays read-only)
@@ -84,7 +107,8 @@ cp "$HERE/note-probe/shim/funkin/import.hx"         "$GAMECOPY/funkin/import.hx"
 PROVENANCE="$WORK/provenance.txt"
 : > "$PROVENANCE"
 record() { echo "$1" >> "$PROVENANCE"; }
-record "driver: native-note-probe-1"
+record "driver: native-note-probe-${PROBE_ROUND}"
+record "round: ${PROBE_ROUND}$([[ "$PROBE_ROUND" == "2" ]] && echo " (opponent notes/holds, lanes 4..7, chart array order; compacted opponent note_id; only opponent_hit rows)")"
 record "probe-script-sha256: $(sha256sum "$HERE/note_probe.sh" | awk '{print $1}')"
 record "probe-src-sha256: $(sha256sum "$HERE/note-probe/src/NativeNoteProbe.hx" | awk '{print $1}')"
 record "sliver-playstate: $(sha256sum "$HERE/note-probe/src/NotePlayStateSlice.hx" | awk '{print $1}')"
@@ -174,12 +198,17 @@ for stream in "${STREAMS[@]}"; do
   PROBE_STREAM_JSON="$stream" \
   PROBE_OUT_DIR="$PROBE_OUT_DIR" \
   PROBE_ASSETS="$PROBE_ASSETS" \
+  PROBE_ROUND="$PROBE_ROUND" \
     timeout 900s "$WORK/native/NativeNoteProbe"
 done
 
 cp -f "$PROVENANCE" "$PROBE_OUT_DIR/provenance.txt"
 echo "native-note-probe: rows in $PROBE_OUT_DIR; provenance $PROBE_OUT_DIR/provenance.txt"
-echo "native-note-probe: honesty: synthesized stream; not native-game parity; input_time_us = 0.0 canonical; input latency term stubbed to 0"
+if [[ "$PROBE_ROUND" == "1" ]]; then
+  echo "native-note-probe: honesty: synthesized stream; not native-game parity; input_time_us = 0.0 canonical; input latency term stubbed to 0"
+else
+  echo "native-note-probe: honesty: round 2 opponent-side run; synthesized stream; not native-game parity; only schema-2 opponent_hit rows; input_time_us = 0.0 canonical; input latency term stubbed to 0"
+fi
 if [[ "$KEEP_BUILD" == "1" ]]; then
   echo "native-note-probe: kept build dir $WORK"
 fi

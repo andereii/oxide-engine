@@ -1,7 +1,8 @@
-//! M5 phase-1 deterministic bopeebo gameplay simulation.
+//! M5 phase-1 / M6 phase-6A deterministic gameplay simulation.
 //!
 //! This module is the frozen integration boundary from `docs/M5-CONTRACT.md`
-//! §3. It is Bevy-free: it reads the shipped chart/metadata through
+//! §3, extended by the add-only schema "2" rules from `docs/M6-CONTRACT.md`
+//! §10. It is Bevy-free: it reads the shipped chart/metadata through
 //! `oxide-data` + `oxide-vfs`, advances on an explicit millisecond grid and
 //! emits the §2 event trace. The conductor clock stays in `oxide-audio`; this
 //! sim consumes the already-derived `sim_ms` position instead of duplicating
@@ -12,16 +13,33 @@
 //!
 //! - `sim_ms` is the song position in milliseconds; one [`GameplaySimState::step`]
 //!   is one grid tick. The canonical harness calls it once per millisecond.
-//! - Only player lanes `0..=3` participate. Chart directions `4..=7` are the
-//!   opponent side, which the contract explicitly excludes; input events
-//!   outside `0..=3` are ignored rather than converted into ghost presses.
-//!   Chart directions outside `0..=7` are invalid data and fail `build`.
-//! - `game_over` is terminal for the phase-1 sim. The death check opens the
+//! - [`GameplaySimState::build`] keeps the frozen M5 player-only schema "1"
+//!   path (bopeebo default chart). [`GameplaySimState::build_chart`] selects a
+//!   corpus-style chart id and emits schema "2" rows for BOTH sides.
+//! - Player lanes `0..=3` accept input. Chart directions `4..=7` are the
+//!   opponent side: they never accept input (opponent-lane presses are
+//!   ignored rather than converted into ghost presses) and, in schema "2",
+//!   they auto-hit on the grid. Chart directions outside `0..=7` are invalid
+//!   data and fail `build`/`build_chart`.
+//! - `game_over` is terminal for the sim. The death check opens the
 //!   GameOverSubState boundary (`persistentUpdate = false`), so the detecting
-//!   step and every later step process no inputs, notes or holds; phase 1 has
-//!   no retry/reset input.
+//!   step and every later step process no inputs, notes, opponent hits or
+//!   holds; there is no retry/reset input.
 //! - `note_id` is the zero-based index inside the selected difficulty's
-//!   player-note list (chart order after filtering the opponent lanes).
+//!   player-note list (chart order after filtering the opponent lanes). The
+//!   schema-2 opponent rows use an INDEPENDENT zero-based index over that
+//!   difficulty's opponent-note list (lanes `4..=7` in chart array order);
+//!   the two id spaces never shift one another.
+//! - Opponent notes auto-hit at the first tick whose song position is
+//!   `>= note.time` (the 1 ms grid), dispatch a literal `"perfect"` row, and
+//!   never mutate score, health, combo or tallies (no opponent miss rows
+//!   exist). Their rows are recorded before the player rows produced by the
+//!   same tick's `processNotes` loops; player rows dispatched by
+//!   `processInputQueue` precede them, per the frozen frame order.
+//! - Chart ids follow the `corpus.txt` spelling (`<song>-default`,
+//!   `<song>-<variant>`; a bare `<song>` means the default variation) and
+//!   resolve `<song>-chart[<variant>].json` / `<song>-metadata[<variant>].json`
+//!   under `preload/data/songs/<song>/` through the VFS.
 //! - `total_notes_hit` counts every judged note reached through the hit path,
 //!   including the 161 ms hit-path `miss`; window misses bump only the `missed`
 //!   tally (the real `applyScore` on a windowed miss never touches
@@ -49,15 +67,17 @@ use thiserror::Error;
 use oxide_data::Typed;
 use oxide_vfs::Vfs;
 
-/// The phase-1 wire schema version (`docs/M5-CONTRACT.md` §2).
-const SCHEMA_VERSION: &str = "1";
+/// The frozen phase-1 player-only wire schema (`docs/M5-CONTRACT.md` §2).
+const SCHEMA_V1: &str = "1";
+/// The add-only phase-6A wire schema (`docs/M6-CONTRACT.md` §10.2).
+const SCHEMA_V2: &str = "2";
 
-/// Bopeebo default chart, relative to the caller's assets directory.
-const CHART_PATH: &str = "preload/data/songs/bopeebo/bopeebo-chart.json";
-/// Bopeebo metadata, relative to the caller's assets directory.
-const METADATA_PATH: &str = "preload/data/songs/bopeebo/bopeebo-metadata.json";
 /// Upper bound for the two small JSON assets, matching the VFS read contract.
 const ASSET_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// The default `corpus.txt` chart id. The legacy [`GameplaySimState::build`]
+/// path resolves this id explicitly instead of carrying module path constants.
+const BOPEEBO_CHART_ID: &str = "bopeebo-default";
 
 // Observed gameplay constants (docs/M5-CONTRACT.md §1.2, §1.3).
 const HIT_WINDOW_MS: f64 = 160.0;
@@ -117,13 +137,18 @@ pub struct TallyCounts {
     pub total_notes_hit: u32,
 }
 
-/// The §2 event trace.
+/// The §2 event trace, extended add-only with the schema "2" opponent row.
 ///
 /// Every variant carries the shared header first, in wire order:
 /// `schema`, `kind`, `sim`, `input_ms`, `input_time_us`, `note_id`,
 /// `note_direction`, `judgement`, `raw_note_diff`, `note_diff_int`.
 /// `serde(untagged)` makes each struct variant serialize as a flat JSON
 /// object; the declaration order is the wire order.
+///
+/// Schema "1" rows come only from the frozen [`GameplaySimState::build`]
+/// path. Schema "2" rows come from [`GameplaySimState::build_chart`];
+/// [`TraceEvent::OpponentHit`] is schema "2"-only and carries no
+/// score/health/combo/tallies fields.
 ///
 /// No `Eq` derive: several fields are `f64`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -251,11 +276,26 @@ pub enum TraceEvent {
         note_diff_int: i32,
         death_count: u32,
     },
+    /// Opponent-side auto-hit (`docs/M6-CONTRACT.md` §10.2): the shared
+    /// header only, no player scoring/health/combo/tallies fields.
+    OpponentHit {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        note_id: u32,
+        note_direction: i64,
+        judgement: &'static str,
+        raw_note_diff: f64,
+        note_diff_int: i32,
+    },
 }
 
 /// Shared §2 header values used by the private constructors below.
 #[derive(Debug, Clone, Copy)]
 struct Header {
+    schema: &'static str,
     sim: u64,
     input_ms: f64,
     note_id: u32,
@@ -266,8 +306,9 @@ struct Header {
 }
 
 impl Header {
-    fn new(sim: u64) -> Self {
+    fn new(sim: u64, schema: &'static str) -> Self {
         Self {
+            schema,
             sim,
             input_ms: 0.0,
             note_id: 0,
@@ -310,7 +351,7 @@ macro_rules! trace_event {
     ($variant:ident, $kind:literal, $header:expr $(, $field:ident : $value:expr)* $(,)?) => {{
         let header = $header;
         TraceEvent::$variant {
-            schema: SCHEMA_VERSION,
+            schema: header.schema,
             kind: $kind,
             sim: header.sim,
             input_ms: header.input_ms,
@@ -332,31 +373,35 @@ macro_rules! trace_event {
 /// to the harness and this variant is currently not produced by the sim.
 #[derive(Debug, Error)]
 pub enum SliceError {
-    #[error("unknown difficulty {0:?}; the bopeebo slice supports easy, normal and hard")]
+    #[error("unknown difficulty {0:?}; the selected chart's metadata does not declare it")]
     UnknownDifficulty(String),
+    #[error("invalid chart id {0:?}; expected <song>, <song>-default or <song>-<variant>")]
+    InvalidChartId(String),
+    #[error("metadata {path:?} does not declare playData.difficulties")]
+    MissingDifficultyList { path: String },
     #[error("asset {path:?} is missing from the asset layers")]
-    MissingAsset { path: &'static str },
+    MissingAsset { path: String },
     #[error("failed to read asset {path:?}: {source}")]
     Read {
-        path: &'static str,
+        path: String,
         #[source]
         source: oxide_vfs::VfsError,
     },
     #[error("failed to parse asset {path:?}: {source}")]
     Parse {
-        path: &'static str,
+        path: String,
         #[source]
         source: oxide_data::DataError,
     },
     #[error("asset {path:?} parsed as {actual:?}, but a {expected} document was required")]
     WrongKind {
-        path: &'static str,
+        path: String,
         expected: &'static str,
         actual: oxide_data::DataKind,
     },
     #[error("chart {path:?} has an invalid note at index {index}: {detail}")]
     InvalidNote {
-        path: &'static str,
+        path: String,
         index: usize,
         detail: &'static str,
     },
@@ -364,9 +409,15 @@ pub enum SliceError {
     OutOfGridEvent { event_ms: u64, step_ms: u64 },
 }
 
-/// Deterministic player-side simulation state for one bopeebo difficulty.
+/// Deterministic simulation state for one chart difficulty.
+///
+/// `notes` holds the compacted player notes (schema "1" and "2");
+/// `opponent_notes` holds the independently compacted opponent notes and is
+/// empty on the frozen [`GameplaySimState::build`] path.
 pub struct GameplaySimState {
     notes: Vec<SimNote>,
+    opponent_notes: Vec<SimNote>,
+    schema: &'static str,
     health: f64,
     song_score: f64,
     combo: u32,
@@ -461,55 +512,100 @@ impl Judgement {
 }
 
 impl GameplaySimState {
-    /// Builds the player-land bopeebo slice sim for `difficulty`.
+    /// Builds the frozen M5 player-only bopeebo slice sim for `difficulty`.
+    ///
+    /// This is the byte-frozen schema "1" entry point used by the M5 gates
+    /// and the existing play session. It resolves the `bopeebo-default`
+    /// corpus id (the module no longer carries bopeebo path constants) but
+    /// keeps the player-only trace and the `easy|normal|hard` guard.
     ///
     /// `assets_root` is the assets directory supplied by the caller (for the
     /// shipped game, `<checkout>/assets`). Chart and metadata are resolved
-    /// through [`Vfs`] at `preload/data/songs/bopeebo/...`, then parsed with
+    /// through [`Vfs`] under `preload/data/songs/...`, then parsed with
     /// `oxide-data` so the M1 schemas stay authoritative.
     pub fn build(assets_root: &Path, difficulty: &str) -> Result<Self, SliceError> {
         if !matches!(difficulty, "easy" | "normal" | "hard") {
             return Err(SliceError::UnknownDifficulty(difficulty.to_owned()));
         }
+        let (chart_path, metadata_path) = chart_paths(BOPEEBO_CHART_ID)?;
+        Self::build_selected(assets_root, &chart_path, &metadata_path, difficulty, false)
+    }
 
+    /// Builds the schema "2" sim for any `corpus.txt`-style chart id.
+    ///
+    /// Ids resolve as `<song>-default` -> `<song>-chart.json`, and
+    /// `<song>-<variant>` -> `<song>-chart-<variant>.json` (metadata uses the
+    /// same suffix). A bare `<song>` is the default variation. The difficulty
+    /// keys are the metadata `playData.difficulties`; missing ids, malformed
+    /// ids, absent files and undeclared difficulties fail closed with
+    /// [`SliceError`].
+    ///
+    /// Unlike [`Self::build`], this path records the opponent-side auto-hit
+    /// rows and tags every row with schema "2".
+    pub fn build_chart(
+        assets_root: &Path,
+        chart_id: &str,
+        difficulty: &str,
+    ) -> Result<Self, SliceError> {
+        let (chart_path, metadata_path) = chart_paths(chart_id)?;
+        Self::build_selected(assets_root, &chart_path, &metadata_path, difficulty, true)
+    }
+
+    /// Shared chart/metadata loading. `opponent_side` selects the add-only
+    /// schema "2" behavior; `false` is the frozen M5 player-only path.
+    fn build_selected(
+        assets_root: &Path,
+        chart_path: &str,
+        metadata_path: &str,
+        difficulty: &str,
+        opponent_side: bool,
+    ) -> Result<Self, SliceError> {
         let vfs = Vfs::new(assets_root.to_path_buf());
-        let chart_bytes = read_asset(&vfs, CHART_PATH)?;
-        let metadata_bytes = read_asset(&vfs, METADATA_PATH)?;
+        let chart_bytes = read_asset(&vfs, chart_path)?;
+        let metadata_bytes = read_asset(&vfs, metadata_path)?;
 
         let chart_document =
-            oxide_data::parse_file(Path::new(CHART_PATH), &chart_bytes).map_err(|source| {
+            oxide_data::parse_file(Path::new(chart_path), &chart_bytes).map_err(|source| {
                 SliceError::Parse {
-                    path: CHART_PATH,
+                    path: chart_path.to_owned(),
                     source,
                 }
             })?;
         let Typed::Chart(chart) = chart_document.typed else {
             return Err(SliceError::WrongKind {
-                path: CHART_PATH,
+                path: chart_path.to_owned(),
                 expected: "chart",
                 actual: chart_document.kind,
             });
         };
 
-        let metadata_document = oxide_data::parse_file(Path::new(METADATA_PATH), &metadata_bytes)
+        let metadata_document = oxide_data::parse_file(Path::new(metadata_path), &metadata_bytes)
             .map_err(|source| SliceError::Parse {
-            path: METADATA_PATH,
+            path: metadata_path.to_owned(),
             source,
         })?;
         let Typed::Metadata(metadata) = metadata_document.typed else {
             return Err(SliceError::WrongKind {
-                path: METADATA_PATH,
+                path: metadata_path.to_owned(),
                 expected: "metadata",
                 actual: metadata_document.kind,
             });
         };
 
-        // Metadata is required input, not decoration: when it declares the
-        // difficulty list, an unknown selection fails closed.
-        if let Some(play_data) = &metadata.play_data
-            && !play_data.difficulties.is_empty()
-            && !play_data
-                .difficulties
+        // The M5 path keeps the frozen permissive rule (an absent/empty
+        // difficulty list is tolerated); the schema-2 path requires the
+        // metadata difficulty list as its authority.
+        let declared_difficulties = metadata
+            .play_data
+            .as_ref()
+            .map_or(&[][..], |play_data| play_data.difficulties.as_slice());
+        if opponent_side && declared_difficulties.is_empty() {
+            return Err(SliceError::MissingDifficultyList {
+                path: metadata_path.to_owned(),
+            });
+        }
+        if !declared_difficulties.is_empty()
+            && !declared_difficulties
                 .iter()
                 .any(|known| known == difficulty)
         {
@@ -522,23 +618,26 @@ impl GameplaySimState {
             .ok_or_else(|| SliceError::UnknownDifficulty(difficulty.to_owned()))?;
 
         let mut notes = Vec::with_capacity(chart_notes.len());
+        let mut opponent_notes = Vec::new();
         for (index, note) in chart_notes.iter().enumerate() {
-            // Directions 4..=7 are the opponent side and are excluded from
-            // the phase-1 player trace. Anything outside the chart's 0..=7
-            // lane range is invalid data rather than an ignorable side.
+            // Directions 4..=7 are the opponent side. Anything outside the
+            // chart's 0..=7 lane range is invalid data rather than an
+            // ignorable side. The M5 path skips the opponent side exactly as
+            // the frozen schema "1" trace did (including its validation).
             if !(0..=7).contains(&note.direction) {
                 return Err(SliceError::InvalidNote {
-                    path: CHART_PATH,
+                    path: chart_path.to_owned(),
                     index,
                     detail: "note direction must be in 0..=7",
                 });
             }
-            if !(0..=3).contains(&note.direction) {
+            let opponent = note.direction >= 4;
+            if opponent && !opponent_side {
                 continue;
             }
             if !note.time.is_finite() || note.time < 0.0 {
                 return Err(SliceError::InvalidNote {
-                    path: CHART_PATH,
+                    path: chart_path.to_owned(),
                     index,
                     detail: "note time must be finite and non-negative",
                 });
@@ -546,24 +645,46 @@ impl GameplaySimState {
             let sustain_length = note.sustain.unwrap_or(0.0);
             if !sustain_length.is_finite() || sustain_length < 0.0 {
                 return Err(SliceError::InvalidNote {
-                    path: CHART_PATH,
+                    path: chart_path.to_owned(),
                     index,
                     detail: "sustain length must be finite and non-negative",
                 });
             }
-            notes.push(SimNote {
-                id: notes.len() as u32,
-                time: note.time,
-                direction: note.direction,
-                sustain_length,
-                hit: false,
-                missed: false,
-                may_hit: false,
-            });
+            // Opponent ids are compacted over opponent notes only and the
+            // direction is the strumline direction `data % 4`; player ids and
+            // directions keep the frozen schema "1" semantics.
+            let sim_note = if opponent {
+                SimNote {
+                    id: opponent_notes.len() as u32,
+                    time: note.time,
+                    direction: note.direction % 4,
+                    sustain_length,
+                    hit: false,
+                    missed: false,
+                    may_hit: false,
+                }
+            } else {
+                SimNote {
+                    id: notes.len() as u32,
+                    time: note.time,
+                    direction: note.direction,
+                    sustain_length,
+                    hit: false,
+                    missed: false,
+                    may_hit: false,
+                }
+            };
+            if opponent {
+                opponent_notes.push(sim_note);
+            } else {
+                notes.push(sim_note);
+            }
         }
 
         let mut state = Self {
             notes,
+            opponent_notes,
+            schema: if opponent_side { SCHEMA_V2 } else { SCHEMA_V1 },
             health: HEALTH_STARTING,
             song_score: 0.0,
             combo: 0,
@@ -584,8 +705,8 @@ impl GameplaySimState {
 
     /// One sim tick: clamp + death check, then the hold mirror with
     /// `P = T-1`, then the input events, then the window/process-notes
-    /// updates. Returns only the events dispatched during this tick, in
-    /// dispatch order.
+    /// updates (opponent auto-hit rows first inside `processNotes`). Returns
+    /// only the events dispatched during this tick, in dispatch order.
     ///
     /// The death check is terminal: the tick that reaches it dispatches the
     /// single `game_over` event after the `moveToGameOver` score/health reset
@@ -607,7 +728,7 @@ impl GameplaySimState {
             let game_over = trace_event!(
                 GameOver,
                 "game_over",
-                Header::new(sim_ms),
+                Header::new(sim_ms, self.schema),
                 death_count: self.death_count,
             );
             // moveToGameOver resets the score/health track before the substate
@@ -665,7 +786,7 @@ impl GameplaySimState {
         } else {
             self.health += HEALTH_GHOST_MISS_PENALTY;
             self.song_score += SCORE_GHOST_MISS_PENALTY;
-            let header = Header::new(step_ms)
+            let header = Header::new(step_ms, self.schema)
                 .with_input(event_ms)
                 .with_note(0, direction);
             dispatched.push(trace_event!(
@@ -731,7 +852,7 @@ impl GameplaySimState {
         self.notes[index].hit = true;
         self.notes[index].may_hit = false;
 
-        let header = Header::new(step_ms)
+        let header = Header::new(step_ms, self.schema)
             .with_input(event_ms)
             .with_note(note.id, note.direction)
             .with_diff(judgement.as_str(), raw_note_diff, note_diff_int);
@@ -773,7 +894,7 @@ impl GameplaySimState {
             dispatched.push(trace_event!(
                 HoldStart,
                 "hold_start",
-                Header::new(step_ms)
+                Header::new(step_ms, self.schema)
                     .with_input(event_ms)
                     .with_note(note.id, note.direction),
             ));
@@ -781,6 +902,10 @@ impl GameplaySimState {
     }
 
     fn process_notes(&mut self, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
+        // Native processNotes runs the opponent note loop first. The M5
+        // schema "1" path has no opponent notes, so this call is inert there.
+        self.process_opponent_notes(sim_ms, dispatched);
+
         let position = sim_ms as f64;
         for index in 0..self.notes.len() {
             let note = self.notes[index];
@@ -799,6 +924,27 @@ impl GameplaySimState {
         }
     }
 
+    /// Opponent auto-hit: the first tick at or after the note time dispatches
+    /// one schema "2" row in chart array order. Opponent rows never mutate
+    /// player score/health/combo/tallies and there is no opponent miss path.
+    fn process_opponent_notes(&mut self, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
+        let position = sim_ms as f64;
+        for index in 0..self.opponent_notes.len() {
+            let note = self.opponent_notes[index];
+            if note.hit || position < note.time {
+                continue;
+            }
+            self.opponent_notes[index].hit = true;
+            dispatched.push(trace_event!(
+                OpponentHit,
+                "opponent_hit",
+                Header::new(sim_ms, self.schema)
+                    .with_note(note.id, note.direction)
+                    .with_diff("perfect", 0.0, 0),
+            ));
+        }
+    }
+
     fn miss_window_note(&mut self, index: usize, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
         let note = self.notes[index];
         let raw_note_diff = sim_ms as f64 - note.time;
@@ -813,7 +959,7 @@ impl GameplaySimState {
         self.tallies.missed += 1;
         self.combo = 0;
 
-        let header = Header::new(sim_ms)
+        let header = Header::new(sim_ms, self.schema)
             .with_note(note.id, note.direction)
             .with_diff("miss", raw_note_diff, note_diff_int);
         dispatched.push(trace_event!(
@@ -900,7 +1046,7 @@ impl GameplaySimState {
                 HoldDrop,
                 "hold_drop",
                 // A hold drop is a non-input event: the §2 schema pins 0.0.
-                Header::new(sim_ms).with_note(note.id, note.direction),
+                Header::new(sim_ms, self.schema).with_note(note.id, note.direction),
                 score_penalty: score_penalty,
                 health_change: health_change,
                 combo_before: combo_before,
@@ -927,7 +1073,7 @@ impl GameplaySimState {
         dispatched.push(trace_event!(
             HoldEnd,
             "hold_end",
-            Header::new(sim_ms).with_note(note.id, note.direction),
+            Header::new(sim_ms, self.schema).with_note(note.id, note.direction),
         ));
     }
 
@@ -937,7 +1083,7 @@ impl GameplaySimState {
         self.health += health_delta;
         self.song_score += score_delta;
         let note = self.notes[hold.note_index];
-        let header = Header::new(sim_ms).with_note(note.id, note.direction);
+        let header = Header::new(sim_ms, self.schema).with_note(note.id, note.direction);
         dispatched.push(trace_event!(
             HoldTick,
             "hold_tick",
@@ -992,10 +1138,57 @@ fn player_lane(direction: i64) -> Option<usize> {
     usize::try_from(direction).ok().filter(|lane| *lane < 4)
 }
 
-fn read_asset(vfs: &Vfs, path: &'static str) -> Result<Vec<u8>, SliceError> {
-    let source = vfs.resolve(path).ok_or(SliceError::MissingAsset { path })?;
+/// Maps a `corpus.txt`-style chart id to the chart/metadata paths.
+///
+/// `<song>-default` and the bare `<song>` shorthand use the unsuffixed file
+/// names; `<song>-<variant>` appends `-<variant>` to both. The variant is the
+/// trailing `-<variant>` ONLY when `<variant>` is a known corpus variation
+/// (`default`/`erect`/`pico`/`bf`); otherwise the whole id is the song name
+/// (`philly-nice`, `winter-horrorland`). This keeps hyphenated song names
+/// intact for the bare-id shorthand.
+fn chart_paths(chart_id: &str) -> Result<(String, String), SliceError> {
+    // A bare `<song>` (the DEFAULT variant) may itself contain hyphens
+    // (`philly-nice`, `winter-horrorland`), so the variant suffix must be one
+    // of the KNOWN corpus variations; an unknown/absent suffix is the default.
+    const VARIATIONS: [&str; 4] = ["default", "erect", "pico", "bf"];
+    let (song, variant) = chart_id
+        .rsplit_once('-')
+        .filter(|(_, variant)| VARIATIONS.contains(variant))
+        .unwrap_or((chart_id, "default"));
+    let valid_part = |part: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    };
+    let song_valid =
+        !song.is_empty() && !song.starts_with('-') && !song.ends_with('-') && valid_part(song);
+    let variant_valid = valid_part(variant);
+    if !song_valid || !variant_valid {
+        return Err(SliceError::InvalidChartId(chart_id.to_owned()));
+    }
+
+    let suffix = if variant == "default" {
+        String::new()
+    } else {
+        format!("-{variant}")
+    };
+    let stem = format!("preload/data/songs/{song}/{song}");
+    Ok((
+        format!("{stem}-chart{suffix}.json"),
+        format!("{stem}-metadata{suffix}.json"),
+    ))
+}
+
+fn read_asset(vfs: &Vfs, path: &str) -> Result<Vec<u8>, SliceError> {
+    let source = vfs.resolve(path).ok_or_else(|| SliceError::MissingAsset {
+        path: path.to_owned(),
+    })?;
     vfs.read(&source, ASSET_SIZE_LIMIT)
-        .map_err(|source| SliceError::Read { path, source })
+        .map_err(|source| SliceError::Read {
+            path: path.to_owned(),
+            source,
+        })
 }
 
 #[cfg(test)]

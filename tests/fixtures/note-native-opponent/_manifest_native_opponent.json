@@ -1,0 +1,65 @@
+{
+  "schema": 2,
+  "round": 2,
+  "driver": "native-note-probe-2",
+  "recipe": "synthesized-bopeebo-slice-1ms-v1",
+  "reference": "native real-funkin PlayState processNotes opponent note/hold loops (PlayState.hx L2806-2869) hxcpp execution (note_probe.sh, driver native-note-probe-2); retained-bodies-only probe per tools/oracle/NOTE-BEHAVIOR.md \u00a710; player path inert (empty player strumlines, round-1 stream input events not replayed)",
+  "chart_id": "bopeebo-default",
+  "stream_schema": "note-stream-1",
+  "trace_schema": 2,
+  "difficulties": [
+    "easy",
+    "normal",
+    "hard"
+  ],
+  "streams": {
+    "easy.stream.jsonl": "9737e8a0e1a0b8dc80c1688d659a938e00c4e58680ea45f128d209f183e1f01e",
+    "normal.stream.jsonl": "b3c02ffae92937ac9bbbcc479ae10544a98f5b7005fd26b2bfa2767a543ec308",
+    "hard.stream.jsonl": "a1cd8b4c42e205d62cf2a6d29774db29d4f0b76ad3425411d8a95aee0a025a8f"
+  },
+  "rows": {
+    "easy.jsonl": "c4756c80734591f085239eafd137ba0f84201ad5a6a50854124183739e5b0f8e",
+    "normal.jsonl": "a3620ee69ba411cc5ed34354371a13615d0109f4ba2243fb9f238f3a6e09096d",
+    "hard.jsonl": "191f757f891b4c517a1a97ce859c77c15680d1f031f93b75697c8d1343cf9a08"
+  },
+  "tick_counts": {
+    "easy.stream.jsonl": 78276,
+    "normal.stream.jsonl": 78276,
+    "hard.stream.jsonl": 78276
+  },
+  "row_counts": {
+    "easy.jsonl": 44,
+    "normal.jsonl": 51,
+    "hard.jsonl": 62
+  },
+  "opponent_note_counts": {
+    "easy": 44,
+    "normal": 51,
+    "hard": 62
+  },
+  "provenance": {
+    "generator": "tools/oracle/note_probe.sh (native hxcpp probe, PROBE_ROUND=2; owner-frozen 2026-11-08 from the validated target/ artifacts)",
+    "native_source": "installed Funkin checkout (read-only); copied-source == original sha256 pairs for PlayState/Scoring/GRhythmUtil/Conductor recorded in provenance.txt",
+    "round": 2,
+    "driver_version": "native-note-probe-2",
+    "note_id_convention": "zero-based compacted index over the selected difficulty's OPPONENT notes only (lanes 4..7 in chart array order); player-note ids and opponent-note ids are independent id spaces",
+    "stream_recipe": "round-1 frozen streams copied byte-identically from tests/fixtures/note-native/; sha256 recorded in streams and provenance.txt",
+    "evidence_boundary": "Real retained PlayState processNotes opponent note/hold loops on the synthesized stream; opponent_hit rows only (schema 2 shared header). Player strumlines empty and input events not replayed; opponent hold lifecycle/sing scheduling rows, dropped-hold rows, audio/visuals and full-game parity excluded.",
+    "input_source": "synthesized from chart (no human replay); round-2 opponent rows are auto-hits with input_ms=0.0",
+    "probe_script_sha256": "a53fbfa1a377ae50547bf690fc817b242191a9ca70f4420a5a221594e43ce0e9",
+    "probe_src_sha256": "1230269cd4672b5296ebb3305d5b16ac9d110a14bdae910912898db5e3fecdad",
+    "chart_sha256": "2d1fd06f6668e00bb0fe3a24077620610f998a48fd934d5cec15f355402b6b6d",
+    "metadata_sha256": "f891cd53f9b9088610926270c9e48d46d32990d5abf0696d6efc46c8f70d119e",
+    "stream_sha256": {
+      "easy.stream.jsonl": "9737e8a0e1a0b8dc80c1688d659a938e00c4e58680ea45f128d209f183e1f01e",
+      "normal.stream.jsonl": "b3c02ffae92937ac9bbbcc479ae10544a98f5b7005fd26b2bfa2767a543ec308",
+      "hard.stream.jsonl": "a1cd8b4c42e205d62cf2a6d29774db29d4f0b76ad3425411d8a95aee0a025a8f"
+    },
+    "row_sha256": {
+      "easy.jsonl": "c4756c80734591f085239eafd137ba0f84201ad5a6a50854124183739e5b0f8e",
+      "normal.jsonl": "a3620ee69ba411cc5ed34354371a13615d0109f4ba2243fb9f238f3a6e09096d",
+      "hard.jsonl": "191f757f891b4c517a1a97ce859c77c15680d1f031f93b75697c8d1343cf9a08"
+    },
+    "provenance_sha256": "4dd2d96eb7a0501263f054aadb18b0bca415d2438f88af96bbb6c16e8c2a8741"
+  }
+}

@@ -69,7 +69,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use oxide_game::slice::{GameplaySimState, InputEvent};
+use oxide_game::slice::{GameplaySimState, InputEvent, TraceEvent};
 use serde::Deserialize;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde_json::Value;
@@ -92,7 +92,8 @@ const HEALTH_CLAMP_MAX: f64 = 2.0;
 const EXPORT_DIR: &str = "target/note-native-export";
 const HONESTY: &str = "synthesized stream; not native-game parity; native rows are frozen \
                        reference execution evidence";
-const CLI_USAGE: &str = "usage: note-native --assets <dir> [--fixtures <dir>] [--export-only]";
+const CLI_USAGE: &str =
+    "usage: note-native --assets <dir> [--fixtures <dir>] [--export-only] [--opponent]";
 
 pub fn run(rest: &[String]) -> ExitCode {
     let cli = match Cli::parse(rest) {
@@ -112,6 +113,23 @@ pub fn run(rest: &[String]) -> ExitCode {
     }
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let export_dir = workspace.join(EXPORT_DIR);
+    if cli.opponent {
+        println!(
+            "note-native --opponent: round-2 fixtures {}; chart {CHART_ID}; \
+             schema-2 opponent_hit rows replayed through the Rust sim per difficulty",
+            cli.fixtures.display(),
+        );
+        return match check_opponent(&cli.fixtures, &cli.assets) {
+            Ok(summary) => {
+                println!("{summary}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("note-native --opponent: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if cli.export_only {
         println!(
             "note-native: export-only: frozen fixtures and row comparisons are NOT validated in \
@@ -150,15 +168,15 @@ struct Cli {
     assets: PathBuf,
     fixtures: PathBuf,
     export_only: bool,
+    opponent: bool,
 }
 
 impl Cli {
     fn parse(rest: &[String]) -> Result<Self, String> {
-        let default_fixtures =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/note-native");
         let mut assets = None;
-        let mut fixtures = default_fixtures;
+        let mut fixtures = None;
         let mut export_only = false;
+        let mut opponent = false;
         let mut iter = rest.iter();
         while let Some(flag) = iter.next() {
             match flag.as_str() {
@@ -172,23 +190,37 @@ impl Cli {
                     let Some(value) = iter.next().filter(|value| !value.is_empty()) else {
                         return Err(format!("--fixtures requires a value; {CLI_USAGE}"));
                     };
-                    fixtures = PathBuf::from(value);
+                    fixtures = Some(PathBuf::from(value));
                 }
                 "--export-only" => export_only = true,
+                "--opponent" => opponent = true,
                 other => {
                     return Err(format!("unsupported argument {other:?}; {CLI_USAGE}"));
                 }
             }
+        }
+        if export_only && opponent {
+            return Err(format!(
+                "--export-only and --opponent are mutually exclusive; {CLI_USAGE}"
+            ));
         }
         let assets = assets.ok_or_else(|| {
             format!(
                 "missing --assets <dir>: real chart assets must be provided explicitly; {CLI_USAGE}"
             )
         })?;
+        let fixtures = fixtures.unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(if opponent {
+                "../tests/fixtures/note-native-opponent"
+            } else {
+                "../tests/fixtures/note-native"
+            })
+        });
         Ok(Self {
             assets,
             fixtures,
             export_only,
+            opponent,
         })
     }
 }
@@ -248,14 +280,18 @@ fn count(manifest: &Value, group: &str, file: &str) -> Result<u64, String> {
 
 /// Loads and validates the frozen manifest; a missing directory or file is a
 /// prerequisite failure, not an empty fixture set.
-fn load_manifest(directory: &Path) -> Result<Value, String> {
+fn load_manifest(
+    directory: &Path,
+    manifest_file: &str,
+    manifest_schema: i64,
+) -> Result<Value, String> {
     if !directory.is_dir() {
         return Err(format!(
             "fixtures directory is missing: {}",
             directory.display()
         ));
     }
-    let path = directory.join(MANIFEST_FILE);
+    let path = directory.join(manifest_file);
     let bytes = fs::read(&path)
         .map_err(|error| format!("cannot read fixtures manifest {}: {error}", path.display()))?;
     let manifest: Value = serde_json::from_slice(&bytes).map_err(|error| {
@@ -264,18 +300,26 @@ fn load_manifest(directory: &Path) -> Result<Value, String> {
             path.display()
         )
     })?;
-    validate_manifest(&manifest)?;
+    validate_manifest(
+        &manifest,
+        manifest_schema,
+        manifest_schema == MANIFEST_SCHEMA,
+    )?;
     Ok(manifest)
 }
 
-fn validate_manifest(manifest: &Value) -> Result<(), String> {
+fn validate_manifest(
+    manifest: &Value,
+    manifest_schema: i64,
+    strict_input_source: bool,
+) -> Result<(), String> {
     let schema = manifest
         .get("schema")
         .and_then(Value::as_i64)
         .ok_or_else(|| "fixtures manifest lacks the integer schema".to_string())?;
-    if schema != MANIFEST_SCHEMA {
+    if schema != manifest_schema {
         return Err(format!(
-            "fixtures manifest schema is {schema}, expected {MANIFEST_SCHEMA}"
+            "fixtures manifest schema is {schema}, expected {manifest_schema}"
         ));
     }
     if required_text(manifest, "recipe", "fixtures manifest")? != RECIPE {
@@ -330,11 +374,22 @@ fn validate_manifest(manifest: &Value) -> Result<(), String> {
     ] {
         required_text(&provenance, key, "fixtures manifest provenance")?;
     }
-    if required_text(&provenance, "input_source", "fixtures manifest provenance")? != INPUT_SOURCE {
-        return Err(format!(
-            "fixtures manifest provenance input_source must be {INPUT_SOURCE:?}; the stream is \
-             synthesized, not a human replay"
-        ));
+    if strict_input_source {
+        if required_text(&provenance, "input_source", "fixtures manifest provenance")?
+            != INPUT_SOURCE
+        {
+            return Err(format!(
+                "fixtures manifest provenance input_source must be {INPUT_SOURCE:?}; the stream \
+                 is synthesized, not a human replay"
+            ));
+        }
+    } else if !required_text(&provenance, "input_source", "fixtures manifest provenance")?
+        .starts_with("synthesized from chart")
+    {
+        return Err(
+            "fixtures manifest provenance input_source must start with \"synthesized from chart\""
+                .to_string(),
+        );
     }
     let probe_sha = required_text(
         &provenance,
@@ -602,7 +657,7 @@ fn expected_row_keys(kind: &str) -> Option<&'static [&'static str]> {
     match kind {
         "hit" | "miss" => Some(&ROW_HIT_KEYS),
         "ghost_press" => Some(&ROW_GHOST_KEYS),
-        "hold_start" | "hold_end" => Some(&ROW_HEADER_KEYS),
+        "hold_start" | "hold_end" | "opponent_hit" => Some(&ROW_HEADER_KEYS),
         "hold_tick" => Some(&ROW_HOLD_TICK_KEYS),
         "hold_drop" => Some(&ROW_HOLD_DROP_KEYS),
         "game_over" => Some(&ROW_GAME_OVER_KEYS),
@@ -1118,7 +1173,7 @@ fn replay_and_compare(
 }
 
 fn check(fixtures: &Path, assets_root: &Path, export_dir: &Path) -> Result<(), String> {
-    let manifest = load_manifest(fixtures)?;
+    let manifest = load_manifest(fixtures, MANIFEST_FILE, MANIFEST_SCHEMA)?;
     let fixture_data = read_fixtures(fixtures, &manifest)?;
     println!(
         "note-native: tolerance: f64 absolute <= {F64_ABS_TOLERANCE:e}; integers/bools/strings \
@@ -1134,6 +1189,138 @@ fn check(fixtures: &Path, assets_root: &Path, export_dir: &Path) -> Result<(), S
          (every non-health field strict)"
     );
     Ok(())
+}
+
+/// Round-2 opponent-side check (`note-native --opponent`).
+///
+/// Validates the frozen `tests/fixtures/note-native-opponent/` fixtures by
+/// identity/digests (reusing the round-1 reader), replays the frozen streams
+/// through the schema-2 sim [`GameplaySimState::build_chart`], serializes the
+/// Rust [`TraceEvent::OpponentHit`] rows, and compares them field-wise with
+/// the frozen native `opponent_hit` rows: integers/bools/strings exact, f64
+/// absolute <= tolerance, row order and counts exact, key order normative.
+/// Fail-closed: manifest identity, sha256 drift, unknown kinds, empty files.
+const OPPONENT_MANIFEST_FILE: &str = "_manifest_native_opponent.json";
+const OPPONENT_CHART_ID: &str = "bopeebo";
+const OPPONENT_DRIVER: &str = "native-note-probe-2";
+const OPPONENT_MANIFEST_SCHEMA: i64 = 2;
+
+fn check_opponent(fixtures: &Path, assets_root: &Path) -> Result<String, String> {
+    let manifest = load_manifest(fixtures, OPPONENT_MANIFEST_FILE, OPPONENT_MANIFEST_SCHEMA)?;
+    if manifest.get("schema").and_then(Value::as_i64) != Some(2) {
+        return Err(format!(
+            "opponent fixtures manifest schema is {:?}, expected 2",
+            manifest.get("schema")
+        ));
+    }
+    if manifest.get("round").and_then(Value::as_i64) != Some(2) {
+        return Err(format!(
+            "opponent fixtures manifest round is {:?}, expected 2",
+            manifest.get("round")
+        ));
+    }
+    if manifest.get("trace_schema").and_then(Value::as_i64) != Some(2) {
+        return Err(format!(
+            "opponent fixtures manifest trace_schema is {:?}, expected 2",
+            manifest.get("trace_schema")
+        ));
+    }
+    if required_text(&manifest, "driver", "opponent fixtures manifest")? != OPPONENT_DRIVER {
+        return Err(
+            "opponent fixtures manifest driver is not the round-2 probe driver".to_string(),
+        );
+    }
+    if required_text(&manifest, "chart_id", "opponent fixtures manifest")? != CHART_ID {
+        return Err(format!(
+            "opponent fixtures manifest chart_id is {:?}, expected {CHART_ID:?}",
+            manifest.get("chart_id")
+        ));
+    }
+    if required_text(&manifest, "stream_schema", "opponent fixtures manifest")? != STREAM_SCHEMA {
+        return Err(format!(
+            "opponent fixtures manifest stream_schema is {:?}, expected {STREAM_SCHEMA:?}",
+            manifest.get("stream_schema")
+        ));
+    }
+    let fixture_data = read_fixtures(fixtures, &manifest)?;
+    // Round-2 binds the frozen streams to the explicit assets the same way
+    // round-1 does: re-export the bopeebo streams from the passed root and
+    // require the digests to equal the round-2 manifest (byte-identical to
+    // the round-1 manifest stream digests). A drifted checkout fails closed.
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let export_dir = workspace.join(EXPORT_DIR);
+    let streams = export_all(assets_root, &export_dir)?;
+    verify_exports(&manifest, &streams)?;
+    println!(
+        "note-native --opponent: tolerance: f64 absolute <= {F64_ABS_TOLERANCE:e}; \
+         integers/bools/strings exact; row order exact; counts exact"
+    );
+    let mut lines = Vec::new();
+    for difficulty in DIFFICULTIES {
+        let data = fixture_data
+            .get(difficulty)
+            .ok_or_else(|| format!("opponent fixtures lack the {difficulty:?} fixture data"))?;
+        let native_count = manifest
+            .get("opponent_note_counts")
+            .and_then(Value::as_object)
+            .and_then(|counts| counts.get(difficulty))
+            .and_then(Value::as_u64)
+            .ok_or_else(|| format!("opponent manifest lacks opponent_note_counts[{difficulty}]"))?;
+        if data.rows.len() as u64 != native_count {
+            return Err(format!(
+                "{difficulty}: native rows {} != manifest opponent_note_counts {native_count}",
+                data.rows.len()
+            ));
+        }
+        let mut sim = GameplaySimState::build_chart(assets_root, OPPONENT_CHART_ID, difficulty)
+            .map_err(|error| format!("{difficulty}: Rust sim build failed: {error}"))?;
+        let mut serialized = Vec::new();
+        for tick in &data.stream.ticks {
+            let trace = sim.step(tick.sim, &tick.events);
+            for event in trace {
+                if matches!(event, TraceEvent::OpponentHit { .. }) {
+                    let row = serde_json::to_string(&event)
+                        .map_err(|error| format!("{difficulty}: row serialization: {error}"))?;
+                    serialized.push(row);
+                }
+            }
+        }
+        if serialized.is_empty() {
+            return Err(format!(
+                "{difficulty}: the Rust replay produced zero opponent rows; stream/failure drift"
+            ));
+        }
+        let rust_bytes = serialized.join("\n").into_bytes();
+        let rust_rows = parse_jsonl(
+            &rust_bytes,
+            &format!("Rust schema-2 opponent rows ({difficulty})"),
+        )?;
+        let mut stats = CompareStats::new();
+        if rust_rows.len() != data.rows.len() {
+            return Err(format!(
+                "{difficulty}: Rust replay rows {} != frozen native rows {}",
+                rust_rows.len(),
+                data.rows.len()
+            ));
+        }
+        for (index, (native_row, rust_row)) in data.rows.iter().zip(rust_rows.iter()).enumerate() {
+            let path = format!("{difficulty}: row {}", index + 1);
+            compare_value(native_row, rust_row, &path, &mut stats)?;
+        }
+        lines.push(format!(
+            "{difficulty}: {} opponent_hit rows match the frozen native round-2 rows \
+             (schema-2 field order verified)",
+            rust_rows.len()
+        ));
+    }
+    let summary = format!(
+        "note-native --opponent: PASS: {}\ntolerance note: f64 absolute <= \
+         {F64_ABS_TOLERANCE:e}; not native-game parity: the rows are the real retained \
+         PlayState processNotes opponent loops over the synthesized round-1 stream; opponent \
+         hold lifecycle and sing scheduling rows remain excluded",
+        lines.join("; ")
+    );
+    Ok(summary)
 }
 
 #[derive(Debug)]
@@ -1627,7 +1814,8 @@ mod tests {
         let export_dir = scratch.path("export");
         let (manifest, streams) = build_skeleton(&fixtures, &assets, &export_dir);
 
-        let loaded = load_manifest(&fixtures).expect("synthetic manifest validates");
+        let loaded = load_manifest(&fixtures, MANIFEST_FILE, MANIFEST_SCHEMA)
+            .expect("synthetic manifest validates");
         let fixture_data = read_fixtures(&fixtures, &loaded).expect("synthetic fixtures load");
         verify_exports(&manifest, &streams).expect("synthetic export digests match");
         replay_and_compare(&assets, &manifest, &fixture_data)
@@ -1642,7 +1830,7 @@ mod tests {
         let fixtures = scratch.path("fixtures");
         let export_dir = scratch.path("export");
         let (manifest, _) = build_skeleton(&fixtures, &assets, &export_dir);
-        let loaded = load_manifest(&fixtures).unwrap();
+        let loaded = load_manifest(&fixtures, MANIFEST_FILE, MANIFEST_SCHEMA).unwrap();
         let data = read_fixtures(&fixtures, &loaded).unwrap();
         for difficulty in DIFFICULTIES {
             let fixture = data.get(difficulty).unwrap();
@@ -1698,7 +1886,7 @@ mod tests {
         let fixtures = scratch.path("fixtures");
         let export_dir = scratch.path("export");
         build_skeleton(&fixtures, &assets, &export_dir);
-        let manifest = load_manifest(&fixtures).unwrap();
+        let manifest = load_manifest(&fixtures, MANIFEST_FILE, MANIFEST_SCHEMA).unwrap();
         fs::write(
             fixtures.join(row_name("easy")),
             br#"{"schema":"1","kind":"hit","sim":0}
@@ -1718,7 +1906,7 @@ mod tests {
         let fixtures = scratch.path("fixtures");
         let export_dir = scratch.path("export");
         build_skeleton(&fixtures, &assets, &export_dir);
-        let manifest = load_manifest(&fixtures).unwrap();
+        let manifest = load_manifest(&fixtures, MANIFEST_FILE, MANIFEST_SCHEMA).unwrap();
         fs::remove_file(fixtures.join(row_name("hard"))).unwrap();
         let error = read_fixtures(&fixtures, &manifest)
             .expect_err("a missing frozen row file must fail closed");
@@ -1747,12 +1935,14 @@ mod tests {
                 "evidence_boundary": "synthetic"
             }
         });
-        let error = validate_manifest(&manifest).expect_err("two difficulties must fail");
+        let error = validate_manifest(&manifest, MANIFEST_SCHEMA, true)
+            .expect_err("two difficulties must fail");
         assert!(error.contains("must list exactly"), "{error}");
 
         manifest["difficulties"] = json!(["easy", "normal", "hard"]);
         manifest["streams"] = json!({"easy.stream.jsonl": "0".repeat(64)});
-        let error = validate_manifest(&manifest).expect_err("missing stream entries must fail");
+        let error = validate_manifest(&manifest, MANIFEST_SCHEMA, true)
+            .expect_err("missing stream entries must fail");
         assert!(error.contains("must list exactly"), "{error}");
     }
 

@@ -243,6 +243,9 @@ impl ScoreTracker {
                     self.terminal = true;
                     self.health = 0.0;
                 }
+                // Compile-only arm authorized for the schema-2 variant:
+                // opponent rows never mutate player score/health/combo.
+                TraceEvent::OpponentHit { .. } => {}
             }
         }
     }

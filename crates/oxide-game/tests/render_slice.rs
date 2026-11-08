@@ -246,6 +246,116 @@ fn real_assets_all_difficulties_fixed_positions() {
     }
 }
 
+/// Opponent-lane note count (chart lanes 4..=7) within `horizon_ms` for the
+/// schema-2 coverage assertion of the equivalence test below (review finding
+/// 3): the test simulates to `horizon_ms`, so only notes whose auto-hit fires
+/// inside it can carry rows.
+fn opponent_notes_through(root: &Path, difficulty: &str, horizon_ms: u64) -> usize {
+    let path = root.join("preload/data/songs/bopeebo/bopeebo-chart.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let chart: serde_json::Value =
+        serde_json::from_str(&text).expect("bopeebo chart is valid JSON");
+    chart["notes"][difficulty]
+        .as_array()
+        .unwrap_or_else(|| panic!("chart has no {difficulty:?} note list"))
+        .iter()
+        .filter(|note| {
+            let direction = note["d"].as_i64().unwrap_or(-1);
+            let time = note["t"].as_f64().unwrap_or(f64::INFINITY);
+            direction >= 4 && time <= horizon_ms as f64
+        })
+        .count()
+}
+
+/// A schema-2 trace (with the sim's `OpponentHit` rows) must produce frames
+/// byte-identical to the schema-1 bridge path (`trigger_opponent_notes`) over
+/// the same ticks, difficulty and adapter: docs/M6-CONTRACT.md §10.3/§10.4.
+/// Coverage guard (review finding 3): the schema-2 stream must carry EXACTLY
+/// one `opponent_hit` row per opponent chart note, so the row path (not the
+/// legacy bridge) drives the schema-2 scene.
+#[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for milestone acceptance"]
+fn schema_two_rows_match_the_schema_one_bridge_frames() {
+    let _lock = test_lock();
+    let root = assets_root();
+    for difficulty in ["easy", "normal", "hard"] {
+        let mut legacy = SliceRenderer::build(&root, difficulty)
+            .unwrap_or_else(|error| panic!("schema-1 renderer build {difficulty}: {error}"));
+        let mut schema2 = SliceRenderer::build(&root, difficulty)
+            .unwrap_or_else(|error| panic!("schema-2 renderer build {difficulty}: {error}"));
+        let mut player_sim =
+            GameplaySimState::build(&root, difficulty).expect("schema-1 gameplay sim");
+        let mut pub_sim = GameplaySimState::build_chart(&root, "bopeebo", difficulty)
+            .expect("schema-2 gameplay sim");
+        const HORIZON_MS: u64 = 2000;
+        let edge = opponent_notes_through(&root, difficulty, HORIZON_MS);
+        let mut opponent_rows = 0usize;
+        for tick in 0..=HORIZON_MS {
+            let legacy_events = player_sim.step(tick, &[]);
+            let schema2_events = pub_sim.step(tick, &[]);
+            let kind = |event: &TraceEvent| -> &'static str {
+                match event {
+                    TraceEvent::Hit { .. } => "hit",
+                    TraceEvent::Miss { .. } => "miss",
+                    TraceEvent::GhostPress { .. } => "ghost_press",
+                    TraceEvent::HoldStart { .. } => "hold_start",
+                    TraceEvent::HoldTick { .. } => "hold_tick",
+                    TraceEvent::HoldDrop { .. } => "hold_drop",
+                    TraceEvent::HoldEnd { .. } => "hold_end",
+                    TraceEvent::GameOver { .. } => "game_over",
+                    TraceEvent::OpponentHit { .. } => "opponent_hit",
+                }
+            };
+            let player_kinds: Vec<_> = legacy_events.iter().map(kind).collect();
+            let schema2_kinds: Vec<_> = schema2_events
+                .iter()
+                .filter(|event| kind(event) != "opponent_hit")
+                .map(kind)
+                .collect();
+            assert_eq!(
+                player_kinds, schema2_kinds,
+                "{difficulty} tick {tick}: player-path event kinds must match (schema-2-only opponent rows excluded)"
+            );
+            opponent_rows += schema2_events
+                .iter()
+                .filter(|event| matches!(event, TraceEvent::OpponentHit { .. }))
+                .count();
+            legacy
+                .step(tick, &legacy_events, &[])
+                .unwrap_or_else(|error| panic!("legacy step {difficulty} tick {tick}: {error}"));
+            schema2
+                .step(tick, &schema2_events, &[])
+                .unwrap_or_else(|error| panic!("schema-2 step {difficulty} tick {tick}: {error}"));
+            if tick % 500 == 0 {
+                let legacy_frame = legacy.frame().expect("schema-1 frame");
+                let schema2_frame = schema2.frame().expect("schema-2 frame");
+                assert_frames_equal(
+                    &legacy_frame,
+                    &schema2_frame,
+                    &format!("{difficulty} schema-1/schema-2 frame at tick {tick}"),
+                );
+            }
+        }
+        let legacy_final = legacy.frame().expect("final schema-1 frame");
+        let schema2_final = schema2.frame().expect("final schema-2 frame");
+        assert_frames_equal(
+            &legacy_final,
+            &schema2_final,
+            &format!("{difficulty} final frame"),
+        );
+        assert_eq!(
+            opponent_rows, edge,
+            "{difficulty}: schema-2 trace must carry exactly one opponent_hit row per opponent \
+             chart note (the row path, not the bridge, drives the scene)"
+        );
+        println!(
+            "{difficulty}: schema-2 rows match the schema-1 bridge through tick 2000; final sha256={}",
+            sha256_hex(&schema2_final)
+        );
+    }
+}
+
 /// ADR-0020 addendum explicit-adapter path: exercise `AnyHardware` when a
 /// hardware GPU is available. On machines with only a software adapter the
 /// harness returns the typed `NoHardwareAdapter` error and the test prints the

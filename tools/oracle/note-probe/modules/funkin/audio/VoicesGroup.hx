@@ -1,9 +1,13 @@
 package funkin.audio;
 
 /**
- * Probe shadow of funkin.audio.VoicesGroup: only the mute/legacy fields the
- * retained hit/miss bodies read. The probe has no audio output; vocals stays
- * null so these paths are not evaluated (NOTE-BEHAVIOR.md section 3).
+ * Probe shadow of funkin.audio.VoicesGroup [S]: only the mute/legacy fields the
+ * retained hit/miss bodies read; the probe has no audio output.
+ *
+ * Round 1 keeps `vocals` null, so those paths are not evaluated. Round 2 sets a
+ * configured shell (`legacyVoiceSystem=true`, `legacyVoiceUsesPlayer=false`) so
+ * the retained opponent hit branch exercises the real `opponentVolume`
+ * assignment (NOTE-BEHAVIOR.md section 10).
  */
 @:nullSafety
 class VoicesGroup

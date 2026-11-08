@@ -130,8 +130,9 @@ Notes and hold trails are constructed by the probe driver from the real bopeebo 
 JSON (probe reads the asset file directly; read-only) using the real retained
 properties. Note list order = chart array order for the difficulty, matching the Rust
 sim's documented order; any divergence is a comparison failure, not a silently sorted
-match. Opponent notes are not constructed. Note `alive`/`n` bookkeeping outside the
-retained bodies is the driver's (engine decision).
+match. Opponent notes are not constructed in round 1 (round 2 extends this: §10).
+Note `alive`/`n` bookkeeping outside the retained bodies is the driver's (engine
+decision).
 
 ## 6. Row emission fail-closed rule
 
@@ -147,7 +148,8 @@ fields (`health_after`, `combo_after`, tallies) come from REAL state
 Row schema = `docs/M5-CONTRACT.md` §2 normative wire fields, byte-order identical to
 the Rust serializer (`input_time_us` = 0.0 in the canonical trace). Honesty labels
 (synthesized stream; not native-game parity; excluded event kinds) print with every run
-and live in the gate report.
+and live in the gate report. Round 2 amends the multi-event rule only for
+`opponent_hit` rows (§10.2/§10 below); the player-path rule here is unchanged.
 
 ### 6.1 REVISED shared hold-row regime (2026-11-07 round-3 freeze)
 
@@ -495,3 +497,103 @@ decisions and observed divergences, not silent changes to the retained bodies.
     `hold_drop`/`hold_end` rows per §6.1, which is the governing rule. The
     compiler/mirror code itself is the reviewed implementation; only the
     stale comment text remains.
+
+## 10. Round 2 — opponent-side probe (`native-note-probe-2`, M6 §10.2)
+
+Frozen 2026-11-08. New evidence directory `tests/fixtures/note-native-opponent/`.
+Round-1 sources, rows, streams and provenance stay byte-frozen; round 2 reads the
+same round-1 stream files and re-freezes their sha256 in its own manifest. This is
+still a synthesized-stream reference, **not** native-game parity and not a human
+replay.
+
+### 10.1 What is retained and driven
+
+- **[V] Real opponent loops.** `funkin/play/PlayState.hx` is still the byte-exact
+  game-copy file and `processNotes` is still the real body (L2801-2921, copied hash
+  recorded in `provenance.txt`). Round 2 populates the opponent strumlines so the
+  real opponent note loop (L2806-2837) and opponent hold loop (L2840-2866) execute
+  unchanged. The player loops remain present in the same body but iterate empty
+  lists. `GRhythmUtil.processWindow(note, false)` is the real retained function and
+  supplies the `botplayHit` branch.
+- **[S] Strumline surface.** The existing shadow `hitNote` preserves the observable
+  state (`hasBeenHit`, `alive=false`, hold `hitNote`/`missedNote`/sustain capture);
+  `playNoteHoldCover` is a no-op animation surface. Neither invents a trace row.
+- **[S] Stage/character shells.** Round 2 constructs `currentStage = new Stage()`
+  with non-null `dad`/`opponent` `BaseCharacter` shells. The shells expose
+  `isSinging()`/`holdTimer`/`playSingAnimation()`; `singing` is a probe switch, not
+  animation state. The driver sets the dad shell singing and presets `holdTimer=1.0`
+  before every `processNotes`, so the real L2848-2851 assignment to `0` is observable
+  and a missing reset fails the run. The opponent shell is non-null for the L2863
+  miss-animation branch; that branch is not reached on the bopeebo corpus.
+- **[S] Legacy-voice surface.** Round 2 gives `vocals` a `VoicesGroup` shell with
+  `legacyVoiceSystem=true`, `legacyVoiceUsesPlayer=false`, and a distinct
+  `opponentVocalsVolume=0.75`; after the run the probe asserts the real L2824
+  `opponentVolume` assignment ran. No audio exists.
+- **[D] Driver construction (pinned).** Opponent notes/holds are constructed from the
+  same `bopeebo-chart.json`, only lanes `4..7`, in chart array order, with
+  `note.direction = data % 4` and `hold.noteDirection = data % 4`. `note_id` is the
+  zero-based **compacted index over the difficulty's opponent notes only** (chart
+  array order). Player-note ids and opponent-note ids are independent id spaces; an
+  opponent id does not count intervening player notes and vice versa.
+- **[D] Player path kept inert.** Player strumlines are empty and the round-1
+  stream's input events are validated but not replayed; `processInputQueue` is not
+  called. The retained opponent loops read no input queue or player state, so this
+  cannot change their observables and keeps the round-2 rows opponent-only. The
+  conductor still replays the same per-tick `music_ms`; `processNotes(1/1000)` runs
+  once per tick at the exported song position.
+
+### 10.2 Rows emitted
+
+Only one kind exists in round 2, emitted from the real L2812
+`HitNoteScriptEvent(note, 0.0, 0, 'perfect', false, 0)` dispatch. Every row is the
+schema-2 shared header **and nothing else** (serde field order):
+
+```json
+{"schema":"2","kind":"opponent_hit","sim":0,"input_ms":0.0,"input_time_us":0.0,"note_id":0,"note_direction":2,"judgement":"perfect","raw_note_diff":0.0,"note_diff_int":0}
+```
+
+- `sim` is the tick whose `processNotes` dispatch fired; `input_ms` and
+  `input_time_us` are `0.0`; `judgement` is the observed literal `perfect`;
+  `raw_note_diff`/`note_diff_int` are `0.0`/`0` from the retained constructor.
+- There are no score/health/combo/tallies fields. Multiple opponent hits on one tick
+  are allowed because these rows carry no post-event state; the probe emits them in
+  dispatch (chart array) order. The round-1 one-stateful-event rule is unchanged for
+  player-path rows.
+- The probe fails closed if a tick dispatches anything other than an opponent
+  `HitNoteScriptEvent` (diagnostic names the tick and event), if an opponent note is
+  hit twice/at a tick other than `ceil(strumTime)`, if any opponent note is never hit,
+  if the row count differs from the constructed opponent-note count, if an active
+  opponent hold does not reset `holdTimer`, if the round-2 legacy-voice shell is
+  null/unconfigured or the retained `opponentVolume` assignment did not run, or if
+  health/score/combo/tallies change. Player-path fail-closed behavior is untouched.
+- Frozen counts: easy 44, normal 51, hard 62 rows; 78,276 ticks each. Row sha256:
+  easy `c4756c80734591f085239eafd137ba0f84201ad5a6a50854124183739e5b0f8e`,
+  normal `a3620ee69ba411cc5ed34354371a13615d0109f4ba2243fb9f238f3a6e09096d`,
+  hard `191f757f891b4c517a1a97ce859c77c15680d1f031f93b75697c8d1343cf9a08`.
+  A second run produced identical hashes (two-run determinism).
+- Round-1 integrity after this freeze (unchanged, re-checked):
+  rows easy `923ce1cb…`, normal `ae138208…`, hard `3c1acd54…`; streams
+  `9737e8a0…`/`b3c02ffa…`/`a1cd8b4c…`. The round-1 row counts remain
+  18,880/17,224/14,216 and re-running the extended probe with `PROBE_ROUND=1`
+  reproduced those hashes byte-identically.
+
+### 10.3 Exclusions (round 2)
+
+- **Opponent hold lifecycle is not mirrored.** `Strumline.updateNotes` is still not
+  retained, so opponent `sustainLength` is never recomputed/clipped/completed. The
+  retained hold loop therefore evaluates its `hitNote && !missedNote &&
+  sustainLength > 0` branch with the hit-tick capture; the `holdTimer` reset is
+  exercised, but completion timing and the drop-miss `playSingAnimation` branch are
+  not. Neither produces a trace row by contract (§10.2 [D]).
+- **No opponent miss rows.** The real opponent note loop has no miss-event dispatch
+  (only the hold loop reacts to `missedNote`). On this contiguous-grid corpus every
+  opponent note is auto-hit at `ceil(strumTime)`; the probe turns that expectation
+  into a fail-closed all-hit check rather than silently dropping a note.
+- **No hold_start/hold_tick/hold_drop/hold_end/game_over rows** from the opponent
+  side; those are not dispatched by the retained opponent bodies. No score, health,
+  combo, tally, accuracy, sing-schedule or render observation is made. Botplay/practice
+  branches, real input devices, audio, scripts, stage/character rendering, update()
+  clamp/death ordering and full-game parity remain outside this probe.
+- The fixture is a round-2 **observation** of the retained opponent loops; it is not
+  an independent oracle, not a full-chart trace, and not a substitute for native-game
+  integration evidence.
