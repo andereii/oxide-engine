@@ -707,3 +707,146 @@ fail-closed (no auto-repair).
   frames). The `render_diff` top-doc now also states which geometry values
   are independent-recomputed and which are pinned engine-decision
   constants.
+
+## ADR-0021 — M5 phase-2c interactive bopeebo play mode (human-approved)
+
+- **Context / date:** 2026-11-07. Human approval: wire an interactive window
+  mode in the oxide CLI binary (`oxide play --assets DIR [--difficulty
+  easy|normal|hard]`) opening a real 1280x720 Bevy window for the bopeebo
+  vertical slice with live audio (Inst + Voices-bf + Voices-dad), live
+  keyboard input (WASD/arrows), and HUD/camera/character/strumline
+  rendering, for direct playtesting (not a milestone-acceptance claim).
+- **Decisions (engine decisions unless observed):**
+  1. `crates/oxide-audio` gains the REAL playback API on the approved kira
+     0.12 stack: `kira` feature `cpal` (device output; the realtime-
+     priority/dbus extras were REMOVED by review — see decision 6b) and
+     `ogg`/`vorbis` (symphonia decode, no runtime transcoding — rule kept).
+     New typed `AudioError` variants; bytes read through the M1/VFS crates
+     (no path duplication). Feature enablement is a lockfile/manifest
+     change owned by the orchestrator; Linux ALSA/PulseAudio is the observed
+     cpal backend; Windows audio remains a pending platform obligation.
+  2. Playback semantics: `SongPlayback::start` schedules Inst + the
+     metadata's playerVocals/opponentVocals voice tracks on the SAME kira
+     clock that `AudioClock` measures (songPosition via clock handle, 1 ms
+     grid semantics preserved). Voice character VOLUME muting/restoring is
+     surfaced (the phase-2 mute-ticks obligation); every mute/restore tick is
+     recorded by the play session for the deferred waveform verification.
+  3. Play session (in `crates/oxide-game`, e.g. `play.rs` + `play/` dir):
+     consumes conductor-driven song position per frame, drives the EXISTING
+     `GameplaySimState::step` on the 1 ms grid (the same frozen §M5-CONTRACT
+     semantics; out-of-order events are typed errors), routes Bevy keyboard
+     events mapped WASD/ARROWS {A/←:0, S/↓:1, W/↑:2, D/→:3} into
+     `InputEvent` on the tick containing them, and drives the same scene/
+     renderer stack as the headless gates — with a WINDOWED harness variant
+     (winit window, primary 1280x720) instead the readback path.
+  4. HUD: health bar background/fill + bf/dad icons on camHUD (statics per
+     observed defaults); noteSplash/judgePopups stay EXCLUDED (recorded
+     decision); the score text display is NOT part of this slice (vcr-bmp
+     text is a later deliverable).
+  5. Session controls: ESC toggles pause/resume (audio pause via kira handle
+     + conductor pause; simulation stops with the same clock); no pause menu
+     (observed PlayState pauses music later; esc/quit are the only controls);
+     the game-over boundary (M5 sim terminal) stops audio and freezes the
+     scene; restarting is NOT provided in this slice.
+  6. No automatic writes: the play session records nothing to disk; only
+     the CLI prints real-time diagnostics on exit; toolbar teardown is at
+     least documented.
+  6b. Feature plumbing: the root `oxide` binary does NOT enable
+      `oxide-audio/real-audio` by default (feature unification would break the
+      locked workspace quick verify, which builds all members: cpal needs
+      system ALSA headers that are missing on this box without an approved
+      package install). The root bin exposes a `audio` feature
+      (`oxide-audio/real-audio`); `oxide play` builds/runs with
+      `cargo run --release -p oxide --features audio -- play …` and fails
+      closed with a typed AudioUnavailable error otherwise. cpal/ALSA
+      (`alsa-lib-devel` on Fedora) is a native system dependency pending
+      explicit human approval per policy; without it the runtime backend
+      cannot initialize; the optional `cpal-realtime-dbus` variant was
+      REMOVED by review (it would pull the dbus native library, a second
+      system dependency beyond the approved cpal/ALSA scope).
+  7. Honesty: the play mode is a playtest, NOT timing/latency evidence and
+     NOT native parity; input source is the live keyboard (jitter labels
+     remain M4); ET audio latency depends on the cpal driver envelope.
+- **Spawn plan:** one worker per file set: oxide-audio playback; then
+  oxide-game play module once the playback API compiles; CLI wiring by the
+  orchestrator. At most 3 workers, disjoint sets.
+
+### ADR-0020 addendum 4 (2026-11-07, human playtest findings — renderer corrections)
+
+- **Provenance:** OBSERVED human playtest comparison against the original
+  game (user report 2026-11-07) + orchestrator verification of each citation
+  in the reference checkout. The earlier phase-2b engine decisions that are
+  now corrected are labeled; the fixture freeze is (re-)established AFTER
+  these fixes via the reviewed path (manifest guarded by ADR-0020's rules;
+  human explicitly re-approved the re-freeze).
+- **Corrections (observed):**
+  1. Strumline background underlay default opacity is 0 —
+     `Preferences.strumlineBackgroundOpacity ?? 0` (Preferences.hx:464) and
+     `background.alpha = opacity/100` (Strumline.hx:249/300): alpha 0.0 at
+     first launch (no save file). The phase-2b renderer's 1.0 was an engine
+     invention; geometry now emits alpha 0.0 (background quads omitted).
+  2. BF flip follows `flipX = !character.getDataFlipX()` (Stage.hx:425;
+     BaseCharacter.hx:221-226): bf.json flipX=true ⇒ final flipX=false (no
+     mirror); dad/gf get `flipX = getDataFlipX()` (absent ⇒ false). The
+     phase-2b `role == Player ⇒ mirrored` hardcode was wrong (BF faced the
+     wrong way).
+  3. Rotated spritemap tiles use flixel's ANGLE_NEG_90 chain:
+     `rotateByNegative90()` = `setTo(b,-a,d,-c,ty,-tx)` from identity →
+     `(0,-1,1,0)` then `translate(0, frame.width)` (FlxFrame.hx:196-199,
+     FlxMatrix.hx:60-65) — the atlas module's `[0,1,-1,0,w,0]` was the
+     ANGLE_90 chain and rendered dad's head upside down (human-observed).
+     NOTE: the dad real-asset bounds tests that "confirmed" the signs pass
+     under both quarter-turns (the union footprint is similar); the visual
+     playtest is the discriminating evidence.
+  4. Sprite frame quads double-scaled: the scene passed pre-scaled
+     width/height into a matrix that applies scale again (0.49 vs 0.70).
+     Fix: quad locals use the unscaled frame rect; the matrix carries
+     scale/translate once (receptors + note sprites).
+  5. Receptor press/confirm frames are centered on the static arrow
+     (`fixOffsets()`/`centerOffsets()`, StrumlineNote.hx:183-198; the
+     confirm glow gets `offset -= 13`, DEFAULT_OFFSET:178) so the glow does
+     not shift the receptor origin.
+  6. HUD positioning follows PlayState.hx:1993-2030 +
+     HealthIcon.hx (`POSITION_OFFSET 26`, `HEALTH_ICON_SIZE 150`, bar y =
+     height*0.9 = 648, bg screen-centered x = 339.5, icon split along
+     `healthBar.value` remap (health 0..2 → 100..0%), icon y = bar.y −
+     height/2). The bf icon sheet is 2×1 150×150: draw ONE frame (engine
+     decision: the steady frame only; the native loss/win frame switching
+     is an unsliced observable for now, recorded as scope line).
+  7. F6 debug overlay (playtest tool, engine decision): FPS averaged over
+     the last 60 frames, frame delta ms, sim tick duration, song position
+     vs total, health/score; Bevy default-font text on the top layer;
+     toggling does not touch the sim.
+- **Re-establishment chain for addendum 4 (2026-11-07):** the first
+  post-correction freeze (log5) was superseded the same day when the
+  review round BLOCKED the receptor centering (the implementation used a
+  trimmed-rect approximation with an inverted −13 glow direction). The
+  operative native content-placement formula (RENDER-BEHAVIOR §3, frozen):
+  `content = spritePos + s·(frameX,frameY) − sourceSize·(1−s)²/2 + (confirm? 13 : 0)`
+  (raw sparrow frameX/Y; flixel matrix-chain derivation: origin
+  centerOrigin on the scaled hitbox, offset = fixOffsets = source·(1−s)/2,
+  confirm offset −13 moves the content RIGHT/DOWN because the draw
+  subtracts the offset; FlxSprite.drawFrameComplex + FlxFrame.copyFrom for
+  tile semantics). Notes use the same formula without the +13
+  (NoteStyle.buildNoteSprite offset (0,0) then updateHitbox). The renderer's
+  `sprite_frame_quad` no longer folds `dest_offset` (callers pass the native
+  content top-left; scale applies exactly once). The dependency-visible
+  effects: camera_initial_scroll recomputed (dad content height shifted
+  under ANGLE_NEG_90), fixture re-frozen from
+  /tmp/opencode/render-diff-establishment.log6; render-diff PASS twice;
+  perf-budget PASS (mean 2.494 / max 4.499 ms). The camera scroll / HUD
+  pixel visuals still need the human re-playtest (headless-only coverage).
+
+- **Reachability falsification of the +13 confirm glow (2026-11-08 local):** the
+  requested "minus 13 px for confirm" lives ONLY inside
+  `StrumlineNote.fixOffsets()` (StrumlineNote.hx:178-198), which has NO call
+  site in this reference revision (grep: definition only; the
+  `playAnimation`/`setup`/`update` paths run `centerOffsets(); centerOrigin()`).
+  The frozen content formula is therefore `spritePos + s·dest_offset` for every
+  receptor state and notes (RENDER-BEHAVIOR §3 updated). Superpositions: log5
+  (wrong centering admin), log6 (the (1−s)²/2 + +13 formula), log7 (the +13
+  term) — all superseded; the operative establishment is log8 (fixture
+  re-frozen; render-diff PASS twice; perf-budget PASS mean 2.501/max 4.622 ms
+  on NVIDIA AnyHardware). The provider of the finding was the reviewer;
+  verified by the orchestrator's own grep + reading StrumlineNote.hx:60-130
+  (update()/playAnimation/setup) and 183-198 (dead definition).

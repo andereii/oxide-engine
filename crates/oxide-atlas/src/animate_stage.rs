@@ -17,12 +17,16 @@
 //! character's whole-sprite position/scale matrix, which the caller applies.
 //!
 //! A rotated spritemap entry is stored rotated by -90°. Its tile matrix is
-//! `[0, 1, -1, 0, width, 0]`, i.e. `(x, y) -> (width - y, x)`: a clockwise
-//! quarter turn in engine screen space that restores the upright bitmap. The
-//! matrix is composed inside the instance matrix (`MX_asi ∘ tile`). This
-//! reproduces the observed dad bounds (see the real-asset regression test),
+//! `[0, -1, 1, 0, 0, width]`, i.e. `(x, y) -> (y, width - x)`: flixel's
+//! ANGLE_NEG_90 blit chain `rotateByNegative90()` followed by
+//! `translate(0, frame.width)` (FlxFrame.hx:196-199, FlxMatrix.hx:60-65).
+//! The local `(width, height)` quad still spans `(height, width)` after the
+//! turn. The matrix is composed inside the instance matrix (`MX_asi ∘ tile`)
 //! and keeps the sprite's rotation in the returned matrix rather than in the
-//! atlas rect.
+//! atlas rect. The previous `[0, 1, -1, 0, width, 0]` value was the ANGLE_90
+//! chain and rendered rotated dad sprites upside down in the human playtest
+//! (ADR-0020 addendum 4). Both quarter-turns produce similar union bounds, so
+//! the bounds tests are not the discriminating evidence; the playtest is.
 //!
 //! # Playback semantics
 //!
@@ -525,9 +529,14 @@ fn concat(parent: [f64; 6], local: [f64; 6]) -> [f64; 6] {
 }
 
 /// Matrix restoring an upright sprite from a spritemap entry stored rotated
-/// by -90°. `w` is the stored entry width.
+/// by -90° using flixel's ANGLE_NEG_90 blit chain: `rotateByNegative90()`
+/// then `translate(0, frame.width)` (`FlxFrame.hx:196-199`,
+/// `FlxMatrix.hx:60-65`). `width` is the stored entry width; the local
+/// `(width, height)` quad maps to `(y, width - x)` and spans `(height, width)`.
+/// The previous `[0, 1, -1, 0, width, 0]` value was the ANGLE_90 chain
+/// (rendered dad's head upside down in the human playtest).
 fn rotated_tile_matrix(width: i32) -> [f64; 6] {
-    [0.0, 1.0, -1.0, 0.0, width as f64, 0.0]
+    [0.0, -1.0, 1.0, 0.0, 0.0, width as f64]
 }
 
 fn quad_corners(quad: &SpriteQuad) -> [f64; 4] {

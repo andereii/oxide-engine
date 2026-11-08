@@ -704,7 +704,9 @@ fn store_readback_failure(state: &ReadbackState, generation: u64, failure: Readb
 
 /// Degenerate but non-empty placeholder so hidden layers never create an
 /// empty mesh asset (the allocator warns on those).
-fn placeholder_mesh() -> Mesh {
+///
+/// Shared with the interactive windowed harness.
+pub(crate) fn placeholder_mesh() -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
@@ -715,7 +717,9 @@ fn placeholder_mesh() -> Mesh {
     mesh
 }
 
-fn build_mesh(quads: &[Quad]) -> Mesh {
+/// Builds the Bevy mesh for one draw layer. Shared with the interactive
+/// windowed harness (same vertex/UV conversion as the headless path).
+pub(crate) fn build_mesh(quads: &[Quad]) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(quads.len() * 4);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(quads.len() * 4);
     let mut indices: Vec<u32> = Vec::with_capacity(quads.len() * 6);

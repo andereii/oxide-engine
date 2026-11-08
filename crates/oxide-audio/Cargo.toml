@@ -6,11 +6,13 @@ license.workspace = true
 publish = false
 
 [dependencies]
-kira = { version = "0.12", default-features = false }
+kira = { version = "0.12", default-features = false, features = ["ogg", "vorbis"] }
 thiserror = { workspace = true }
 
 [features]
 default = []
 # Opt-in real audio output (Kira's cpal backend). Off by default so the M4
-# simulation clock builds without any native audio dependency.
+# simulation clock builds without any native audio dependency. ADR-0021:
+# the playable slice enables it alongside the symphonia ogg/vorbis decoders
+# (kira features "ogg"/"vorbis"), never transcoding at runtime.
 real-audio = ["kira/cpal"]

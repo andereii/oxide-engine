@@ -127,11 +127,18 @@ pub(crate) struct LoadedNoteStyle {
     pub(crate) note_scale: f64,
     pub(crate) note_frames: [SpriteFrame; 4],
     pub(crate) note_page_size: [f64; 2],
+    /// The flixel hitbox source size of the frame current at the single
+    /// setup-time `updateHitbox()` call: the sheet's first frame in document
+    /// order (notes.xml `noteDown0001` -> 157x154). Doubles in game pixels.
+    pub(crate) note_hitbox_dest: [f64; 2],
     pub(crate) receptor_scale: f64,
     pub(crate) receptor_offsets: (f64, f64),
     pub(crate) receptors: [ReceptorFrames; 4],
     pub(crate) receptor_page: usize,
     pub(crate) receptor_page_size: [f64; 2],
+    /// Same setup-time hitbox rule for the strumline page (first frame in
+    /// document order, noteStrumline.xml `confirmDown0001` -> 235x230).
+    pub(crate) receptor_hitbox_dest: [f64; 2],
     pub(crate) hold_page: usize,
     /// `(hold page width / 8) * hold style zoom` (416/8*0.7 = 36.4 for funkin).
     pub(crate) hold_width: f64,
@@ -157,6 +164,10 @@ pub(crate) struct LoadedSlice {
     pub(crate) notes: Vec<LoadedNote>,
     pub(crate) scroll_speed: f64,
     pub(crate) conductor_changes: Vec<oxide_audio::conductor::TimeChange>,
+    /// Metadata `playData.characters.playerVocals` (voice track ids).
+    pub(crate) player_vocals: Vec<String>,
+    /// Metadata `playData.characters.opponentVocals` (voice track ids).
+    pub(crate) opponent_vocals: Vec<String>,
 }
 
 /// Loads and parses every slice asset for `difficulty`.
@@ -288,6 +299,8 @@ pub(crate) fn load_slice(assets_root: &Path, difficulty: &str) -> Result<LoadedS
                 path: METADATA_PATH.to_string(),
                 field: "playData.characters.girlfriend",
             })?;
+    let player_vocals = characters.player_vocals.clone().unwrap_or_default();
+    let opponent_vocals = characters.opponent_vocals.clone().unwrap_or_default();
     let stage_name = play_data
         .stage
         .clone()
@@ -430,6 +443,8 @@ pub(crate) fn load_slice(assets_root: &Path, difficulty: &str) -> Result<LoadedS
         notes,
         scroll_speed,
         conductor_changes,
+        player_vocals,
+        opponent_vocals,
     })
 }
 
@@ -587,31 +602,55 @@ impl PageStore {
             let size = self.pages[index].image.size();
             return Ok((index, [size.x as f64, size.y as f64]));
         }
-        let mut image = Image::from_buffer(
-            &bytes,
-            ImageType::Extension("png"),
-            CompressedImageFormats::NONE,
-            true,
-            ImageSampler::Default,
-            RenderAssetUsages::default(),
-        )
-        .map_err(|error| RenderError::Image {
-            path: path.clone(),
-            detail: error.to_string(),
-        })?;
-        image.sampler = sampler;
-        let size = image.size();
-        if size.x == 0 || size.y == 0 {
-            return Err(RenderError::Image {
-                path: path.clone(),
-                detail: "decoded PNG has a zero dimension".to_string(),
-            });
-        }
+        let page = decode_png_page(path.clone(), bytes, sampler)?;
+        let size = page.image.size();
         let index = self.pages.len();
-        self.pages.push(PageImage { image });
+        self.pages.push(page);
         self.indices.insert(path, index);
         Ok((index, [size.x as f64, size.y as f64]))
     }
+}
+
+/// Decodes one PNG page through Bevy's image decoder.
+///
+/// Shared with the interactive HUD loader so both render paths use the same
+/// format/sampler handling. `path` is display-only.
+pub(crate) fn decode_png_page(
+    path: String,
+    bytes: Vec<u8>,
+    sampler: ImageSampler,
+) -> Result<PageImage, RenderError> {
+    let mut image = Image::from_buffer(
+        &bytes,
+        ImageType::Extension("png"),
+        CompressedImageFormats::NONE,
+        true,
+        ImageSampler::Default,
+        RenderAssetUsages::default(),
+    )
+    .map_err(|error| RenderError::Image {
+        path: path.clone(),
+        detail: error.to_string(),
+    })?;
+    image.sampler = sampler;
+    let size = image.size();
+    if size.x == 0 || size.y == 0 {
+        return Err(RenderError::Image {
+            path,
+            detail: "decoded PNG has a zero dimension".to_string(),
+        });
+    }
+    Ok(PageImage { image })
+}
+
+/// Reads and decodes one PNG asset from the VFS. Used by the interactive HUD.
+pub(crate) fn load_png_page(
+    vfs: &Vfs,
+    path: &str,
+    sampler: ImageSampler,
+) -> Result<PageImage, RenderError> {
+    let bytes = read_asset(vfs, path)?;
+    decode_png_page(path.to_string(), bytes, sampler)
 }
 
 /// Extracts a two-number JSON array without naming `serde_json::Value`
@@ -658,6 +697,19 @@ fn parse_stage_slot(
         camera_offsets: json_pair!(value.get("cameraOffsets")).unwrap_or((0.0, 0.0)),
         scroll: json_pair!(value.get("scroll")).unwrap_or((1.0, 1.0)),
     })
+}
+
+/// Observed flip rule (`Stage.hx:425`, `BaseCharacter.hx:221-226`,
+/// ADR-0020 addendum 4): the player gets `flipX = !getDataFlipX()`; dad/gf
+/// keep the data value (absent ⇒ false). `bf.json` has `flipX: true`, so the
+/// player is unmirrored in this checkout.
+fn resolved_flip_x(role: Role, data_flip_x: Option<bool>) -> bool {
+    let data_flip_x = data_flip_x.unwrap_or(false);
+    if role == Role::Player {
+        !data_flip_x
+    } else {
+        data_flip_x
+    }
 }
 
 fn load_character(
@@ -759,8 +811,7 @@ fn load_character(
 
     let data_offsets = character.offsets.unwrap_or((0.0, 0.0));
     let camera_offsets = character.camera_offsets.unwrap_or((0.0, 0.0));
-    // RENDER-BEHAVIOR §5: the player (bf) renders mirrored; dad/gf do not.
-    let flip_x = role == Role::Player;
+    let flip_x = resolved_flip_x(role, character.flip_x);
 
     Ok(LoadedCharacter {
         role,
@@ -937,6 +988,20 @@ fn load_sparrow_page(
     })
 }
 
+/// First frame of the sheet in DOCUMENT order (the frame current at the
+/// spriting setup call that runs `updateHitbox()`; FlxSprite `set_frame` ->
+/// `resetFrameSize()` tracks the CURRENT frame while the hitbox `width`
+/// stays frozen at this call's value).
+fn first_frame_dest(page: &SparrowPage, style_path: &str) -> Result<[f64; 2], RenderError> {
+    let (_, frame) = page
+        .frames
+        .first()
+        .ok_or_else(|| RenderError::MissingAsset {
+            path: format!("{}.xml", style_path),
+        })?;
+    Ok([frame.dest_size[0] as f64, frame.dest_size[1] as f64])
+}
+
 fn require_frames(
     page: &SparrowPage,
     prefix: &str,
@@ -979,10 +1044,11 @@ fn load_note_style(
             path: style_path.to_string(),
             field: "assets.note.assetPath",
         })?;
-    // Engine decision (not an observed data rule): non-stage sprites keep the
-    // renderer's nearest-neighbour sampling; only stage props follow the
-    // observed `antialiasing = !isPixel` rule.
-    let note_page = load_sparrow_page(vfs, pages, &note_asset, ImageSampler::nearest())?;
+    // Observed: `target.antialiasing = !(isPixel ?? false)` (NoteStyle.hx:87/
+    // 225/253); the funkin style has no `isPixel`, so note content smooths
+    // (LINEAR sampling). The earlier nearest engine decision is superseded
+    // (human playtest: jagged pixels).
+    let note_page = load_sparrow_page(vfs, pages, &note_asset, ImageSampler::linear())?;
     let note_data = &assets.note.prefixes;
     let direction_keys = ["left", "down", "up", "right"];
     let mut note_frames = Vec::with_capacity(4);
@@ -998,6 +1064,7 @@ fn load_note_style(
             })?;
         note_frames.push(frame);
     }
+    let note_hitbox_dest = first_frame_dest(&note_page, style_path)?;
 
     let strumline_asset =
         assets
@@ -1008,10 +1075,11 @@ fn load_note_style(
                 path: style_path.to_string(),
                 field: "assets.noteStrumline.assetPath",
             })?;
-    // Engine decision: receptors are non-stage sprites; nearest sampling is
-    // the renderer's choice, not a rule read from the stage data.
-    let strumline_page = load_sparrow_page(vfs, pages, &strumline_asset, ImageSampler::nearest())?;
+    // Observed: same `antialiasing = !(isPixel ?? false)` rule for the
+    // strumline page (NoteStyle.hx:225/253).
+    let strumline_page = load_sparrow_page(vfs, pages, &strumline_asset, ImageSampler::linear())?;
     let strumline_data = &assets.strumline.prefixes;
+    let receptor_hitbox_dest = first_frame_dest(&strumline_page, style_path)?;
     let mut receptors = Vec::with_capacity(4);
     for direction in direction_keys {
         let state_key = |suffix: &str| format!("{direction}{suffix}");
@@ -1036,9 +1104,8 @@ fn load_note_style(
             path: style_path.to_string(),
             field: "assets.holdNote.assetPath",
         })?;
-    // Engine decision: the hold sheet is a non-stage sprite and keeps the
-    // renderer's nearest-neighbour sampling.
-    let (hold_page, hold_size) = pages.load_image_key(vfs, &hold_asset, ImageSampler::nearest())?;
+    // Observed: the hold sheet follows the same style rule (NoteStyle.hx:225).
+    let (hold_page, hold_size) = pages.load_image_key(vfs, &hold_asset, ImageSampler::linear())?;
     if hold_size
         != [
             super::geometry::HOLD_TEXTURE_WIDTH,
@@ -1077,12 +1144,32 @@ fn load_note_style(
         note_scale: assets.note.scale.unwrap_or(1.0),
         note_frames,
         note_page_size: note_page.page_size,
+        note_hitbox_dest,
         receptor_scale: assets.strumline.scale.unwrap_or(1.0),
         receptor_offsets: assets.strumline.offsets.unwrap_or((0.0, 0.0)),
         receptors,
         receptor_page: strumline_page.page,
         receptor_page_size: strumline_page.page_size,
+        receptor_hitbox_dest,
         hold_page,
         hold_width,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn character_flip_follows_the_observed_data_rule() {
+        // bf.json flipX=true => the player does NOT mirror.
+        assert!(!resolved_flip_x(Role::Player, Some(true)));
+        // A player checkout without flipX would mirror (native negation).
+        assert!(resolved_flip_x(Role::Player, None));
+        // dad/gf keep the data value; both files omit flipX.
+        assert!(!resolved_flip_x(Role::Opponent, None));
+        assert!(!resolved_flip_x(Role::Girlfriend, None));
+        assert!(resolved_flip_x(Role::Opponent, Some(true)));
+        assert!(resolved_flip_x(Role::Girlfriend, Some(true)));
+    }
 }

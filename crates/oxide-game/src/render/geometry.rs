@@ -34,20 +34,36 @@ pub(crate) const PLAYER_STRUMLINE_X: f64 = 688.0;
 pub(crate) const BACKGROUND_PAD: f64 = 16.0;
 /// `4 * NOTE_SPACING + 2 * BACKGROUND_PAD` (RENDER-BEHAVIOR §3).
 pub(crate) const BACKGROUND_WIDTH: f64 = 4.0 * NOTE_SPACING + 2.0 * BACKGROUND_PAD;
-/// Engine decision: the frozen behavior note says `alpha = fullscreenOpacity/100`
-/// but the default preference value is not in the frozen data. We render the
-/// documented black rectangle fully opaque (`fullscreenOpacity = 100`).
-pub(crate) const BACKGROUND_ALPHA: f64 = 1.0;
+/// Observed default underlay opacity: `Preferences.strumlineBackgroundOpacity
+/// ?? 0` (Preferences.hx:462-464) and `background.alpha = opacity / 100`
+/// (Strumline.hx:249/300) — 0.0 at first launch with no save file. The
+/// phase-2b renderer's 1.0 was an engine invention (ADR-0020 addendum 4).
+pub(crate) const BACKGROUND_ALPHA: f64 = 0.0;
 /// `NOTE_hold_assets` is a 416x87 sheet with 8 columns (RENDER-BEHAVIOR §3).
 pub(crate) const HOLD_TEXTURE_COLUMNS: usize = 8;
 /// `NOTE_hold_assets` width (RENDER-BEHAVIOR §3).
 pub(crate) const HOLD_TEXTURE_WIDTH: f64 = 416.0;
 /// `NOTE_hold_assets` height (RENDER-BEHAVIOR §3).
 pub(crate) const HOLD_TEXTURE_HEIGHT: f64 = 87.0;
-/// End-cap height `87 * 0.7 * 0.5` (RENDER-BEHAVIOR §3).
-pub(crate) const SUSTAIN_CAP_HEIGHT: f64 = HOLD_TEXTURE_HEIGHT * 0.7 * 0.5;
-/// End-cap texture bottom clip bound (RENDER-BEHAVIOR §3).
+/// SustainTrail `bottomHeight` (`graphic.height * zoom * endOffset` =
+/// `87 * 0.7 * 0.5 = 30.45`): the distance from `graphicHeight` down to the
+/// cap-vertex top — NOT the full rendered cap height (SustainTrail.hx:324).
+/// The pre-fix name `SUSTAIN_CAP_HEIGHT` blamed the lower value; renamed
+/// 2026-11-08 with the user surgical fix round.
+pub(crate) const SUSTAIN_BOTTOM_HEIGHT: f64 = HOLD_TEXTURE_HEIGHT * 0.7 * 0.5;
+/// SustainTrail `extraCapTail` (`graphic.height * zoom * (bottomClip -
+/// endOffset)` = `87 * 0.7 * 0.4 = 24.36`); the cap bottom sits this far
+/// BELOW `graphicHeight` (SustainTrail.hx:391-392).
+pub(crate) const SUSTAIN_EXTRA_CAP_TAIL: f64 =
+    HOLD_TEXTURE_HEIGHT * 0.7 * (SUSTAIN_CAP_BOTTOM_CLIP - 0.5);
+/// End-cap/un-hit texture bottom clip bound (RENDER-BEHAVIOR §3).
 pub(crate) const SUSTAIN_CAP_BOTTOM_CLIP: f64 = 0.9;
+/// Un-hit hold visibility threshold (`clipHeight <= 0.1` hides,
+/// SustainTrail.hx:310-318).
+pub(crate) const SUSTAIN_HIDE_CLIP: f64 = 0.1;
+/// Held hold visibility threshold in remaining ms (`sustainLength <= 10`
+/// hides, Strumline.hx:729-733).
+pub(crate) const SUSTAIN_HELD_HIDE_REMAINING: f64 = 10.0;
 
 /// `Constants.DEFAULT_CAMERA_ZOOM` (RENDER-BEHAVIOR §2); the stage default is
 /// `defaultZoom * 1.05`.
@@ -266,8 +282,12 @@ mod tests {
         close(render_distance_ms(1.2), 1600.0);
         close(render_distance_ms(0.8), 2000.0);
         close(BACKGROUND_WIDTH, 480.0);
+        close(BACKGROUND_ALPHA, 0.0);
         close(sustain_width(HOLD_TEXTURE_WIDTH, 0.7), 36.4);
-        close(SUSTAIN_CAP_HEIGHT, 30.45);
+        close(SUSTAIN_BOTTOM_HEIGHT, 30.45);
+        close(SUSTAIN_EXTRA_CAP_TAIL, 24.36);
+        close(SUSTAIN_HIDE_CLIP, 0.1);
+        close(SUSTAIN_HELD_HIDE_REMAINING, 10.0);
         close(SUSTAIN_CAP_BOTTOM_CLIP, 0.9);
     }
 

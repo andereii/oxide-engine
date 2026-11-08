@@ -115,6 +115,34 @@ Structure (OBSERVED):
   with `getXPos = dir * NOTE_SPACING` (L1333-1352); `y` = noteStrumline y-offset [0,0];
   scale 0.7; `updateHitbox`; `centerOrigin/centerOffsets`; animations from prefixes
   `staticX0/pressX0/confirmX0` (funkin.json).
+  CONTENT placement (the flx matrix path; corrected 2026-11-08 — the wrong
+  first derivation and the later +13 term were both caught by review and
+  re-verified against the exact source): the RENDERED content top-left (game
+  pixels) =
+  `spriteTopLeft + s·dest_offset`
+  — i.e. the frame's `dest_offset` (= −(frameX, frameY) from the Sparrow XML,
+  our atlas-crate contract) scaled ONCE, for EVERY receptor state and notes;
+  there is NO glow/confirm compensation term (see the superseded-history
+  discussion below this paragraph). Derivation with
+  exact citations: origin = UNSCALED frame center (`centerOrigin` =
+  `origin.set(frameWidth·0.5, frameHeight·0.5)`, FlxSprite.hx:995-998);
+  the draw chain is `tile → translate(−origin) → scale(s) → translate(pc − offset +
+  origin)` (`drawFrameComplex`, FlxSprite.hx:876-905), and OpenFL's
+  `Matrix.scale` SCALES the accumulated `tx/ty` as well
+  (`openfl/geom/Matrix.hx`: function scale — `tx *= sx; ty *= sy`), and the
+  frame tile matrix carries `translate(frame.offset(gpu path))` with
+  `offset = −(our dest_offset)` for Sparrow (FlxFrame.copyFrom forBlit=false;
+  FlxAtlasFrames.fromSparrow). The `origin` and `offset` terms cancel
+  exactly, leaving `spriteTopLeft + s·dest_offset` for EVERY receptor state
+  AND notes. The −13 confirm compensation lives ONLY inside
+  `StrumlineNote.fixOffsets()` (StrumlineNote.hx:178-198) which is DEAD CODE
+  in this revision: it has no call site (grep over source/ shows only the
+  definition; the actual `playAnimation`/`setup`/`update` paths call
+  `centerOffsets(); centerOrigin()`). The requested "minus 13 px for
+  confirm" from the playtest round was therefore an assumption, falsified
+  by reachability — no glow term exists (an earlier formula with
+  `−sourceSize·(1−s)²/2` and a wrong −13 direction are superseded; an
+  untrimmed note frame/frameX=0 draws exactly at its sprite position).
 - Assets from `preload/data/notestyles/funkin.json`: `shared:notes` (noteLeft…noteRight,
   scale 0.7), `shared:noteStrumline` (scale 0.7, offsets [0,0]),
   `NOTE_hold_assets` (scale 0.7); sparrows resolve to
@@ -249,10 +277,12 @@ All OBSERVED in BaseCharacter/Bopper unless noted:
   3. Not singing: holdTimer = 0.
 - Flip: bf data `flipX: true`; Stage.addCharacter sets
   `character.flipX = !character.getDataFlipX()` for the PLAYER (bf) only (L425/431/436)
-  — i.e. bf renders mirrored, dad/gf unmirrored. **Derived** implementation note: the
+  — with bf.json `flipX: true` the FINAL flipX is FALSE: bf renders UNMIRRORED
+  (falsified by the human playtest that saw bf facing the wrong way; 2026-11-07); dad/gf
+  get `flipX = getDataFlipX()` (absent ⇒ false). **Derived** implementation note: the
   flixel path applies the flip as a whole-sprite matrix (scale(−1,1)+translate(bounds.w,0)
-  inserted into the character matrix before sprite scale/rotation); mirror only the
-  bf sprite content.
+  inserted into the character matrix before sprite scale/rotation); the mirror applies
+  only when the RESOLVED flip_x is true (bf: not, in this checkout).
 - EOF note: `singTimeSteps * stepLengthMs/1000` uses the CONDUCTOR step length at the
   current ms — the same conductor model as M4 (1 ms grid semantics frozen there).
 

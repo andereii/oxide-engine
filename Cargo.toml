@@ -37,7 +37,14 @@ name = "oxide"
 path = "src/main.rs"
 
 [dependencies]
+oxide-audio = { path = "crates/oxide-audio" }
+oxide-game = { path = "crates/oxide-game" }
 oxide-media = { path = "crates/oxide-media" }
+
+[features]
+# Opt-in real audio backend for `oxide play` (ADR-0021 decision 6b: feature
+# unification would otherwise force cpal/ALSA onto every workspace build).
+audio = ["oxide-audio/real-audio"]
 
 [profile.release]
 opt-level = 3

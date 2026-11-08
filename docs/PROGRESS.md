@@ -794,3 +794,258 @@ the ledger commit that follows this block.
   real 1280x720 Bevy window, live audio (Inst + Voices-bf + Voices-dad),
   WASD/arrow input, HUD/camera/character/strumline rendering for the bopeebo
   vertical slice.
+
+## 2026-11-07 — M5 phase-2c: interactive bopeebo play mode implemented (local; pending live playtest)
+
+- Human-approved objective: `oxide play --assets <dir> [--difficulty easy|normal|hard]`
+  — real 1280x720 Bevy window, live audio `Inst.ogg` + `Voices-bf.ogg` +
+  `Voices-dad.ogg` on the kira clock, WASD/arrows input, HUD/camera/character/
+  strumline rendering (ADR-0021 in docs/DECISIONS.md; M5-CONTRACT §9 pointer).
+- Deliverables (three disjoint write sets):
+  - `crates/oxide-audio/playback.rs`: `SongPlayback{start,position_ms,
+    set_voice_volume,voice_volume_ticks,pause,resume,stop}` — kira StaticSound
+    decode via symphonia ogg/vorbis (no runtime transcoding), one shared clock,
+    same-buffer starts, clamped linear volume with typed errors, ordered voice
+    mute/restore tick log (the deferred waveform-evidence record), fail-closed
+    without `real-audio`; kira features ogg/vorbis + realtime cpal under the
+    optional `real-audio` feature (manifest unlocked by the orchestrator).
+  - `crates/oxide-game/play.rs` + `play/{audio,hud,input,session,window,tests}`:
+    `PlaySession::run(PlayConfig{assets_root,difficulty,WindowConfig}) ->
+    Result<PlayReport,PlayError>` reusing the frozen §2/§3 sim (`step` on the
+    1 ms grid with typed out-of-order errors), the same scene/renderer stack
+    (no fork), windowed harness (winit, scale 1, AutoVsync, gamepad disabled),
+    keyboard WASD/arrows→lanes stamped at conductor ms (press-before-release; aliases
+    released only when NO bound key for that lane remains held — per-key
+    state),
+    ESC pause/resume via playback, Q/window-close quit, song-end at last
+    full-chart tick + 160 ms + 2 ms, terminal game-over boundary (audio stop +
+    frozen frame; no retry), HUD = health bar bg/fills + bf/dad icon pages
+    (engine-decided placement; whole HUD skipped with one printed deviation on
+    asset failure). 10 new unit tests + env-gated developer-only headed smoke
+    (`OXIDE_PLAY_HEADED`); lib test count 54 pass + 1 ignored.
+  - Root `oxide` CLI (orchestrator-owned): `play` subcommand with `--assets`
+    REQUIRED (fail-closed), `--difficulty` parsing, typed report printing;
+    root `audio` feature (`oxide-audio/real-audio`) OFF by default per
+    ADR-0021 decision 6b so the locked workspace quick verify never inherits
+    cpal/ALSA; decision 6b documented.
+- Evidence (local): `cargo test -p oxide-audio` exit 0 (10 lib + 15 clock/
+  conductor); `cargo test -p oxide-game` exit 0 (54 lib + 1 ignored + suite);
+  `cargo test -p oxide` exit 0 (2 CLI tests; workspace 45 suites ok);
+  `cargo xtask verify` exit 0 (quick; milestone_acceptance false). The
+  real-audio backend compile blocks on missing ALSA dev headers
+  (alsa-sys: `pkg-config alsa` failed) — the system package
+  (`alsa-lib-devel` or equivalent) is an explicit human approval item per
+  repository policy and remains unresolved; a defensive
+  `xlsx/pkg injection` was NOT done — no fake audio fallback exists. The
+  interactive playtest is therefore pending on (a) that approval, then (b)
+  the human-run play session (CI does not run headed windows/audio).
+- Honesty: play mode is a playtest tool, NOT timing/latency/parity evidence;
+  input is live keyboard (frame-sampled, quantized to the 1 ms grid); audio
+  latency is the cpal/driver envelope; HUD placement is engine-decided;
+  opponent vocals never muted; Windows/winit/cpal behavior unverified.
+
+## 2026-11-07 — phase-2c review round + fixes (reviewed; live playtest still pending the human)
+
+- Review round 1 on the play-mode batch returned BLOCK with one dependency
+  finding: `real-audio` pulled kira's `cpal-realtime-dbus` → the dbus native
+  library, beyond the approved cpal/ALSA scope. Manifest fixed by the
+  orchestrator: `real-audio = ["kira/cpal"]` (realtime/dbus extras removed);
+  ADR-0021 decision 6b records the removal. HUD asset names/sizes verified by
+  the validator probe against the real assets (healthBar 601x19; icon-bf
+  300x150; icon-dad 150x150 — exactly as play/hud.rs expects).
+- Review round 2: APPROVE with four low comments, all applied: decision-1/
+  feature records made consistent (`kira/cpal` only), no-window claim scoped
+  honestly in src/main.rs, pause survives an already-queued release (new
+  unit test), and alias-key physical tracking replaced the per-lane bool
+  (WASD + arrows alternate bindings: a lane releases only when NO bound key
+  remains held; pause synthesis + normal path share the predicate; two new
+  tests). Post-fix: oxide-game 57 lib tests + suites pass; `cargo xtask
+  verify` exit 0 (quick).
+- An interrupted verify invocation (outer shell timeout) left a stale
+  verify-validation.lock; owner PID was confirmed dead (ps) and the lock was
+  manually removed per the documented recovery path (never automatic).
+- STILL PENDING: (a) the human acceptance for the `alsa-lib-devel` system
+  package (cpal/ALSA native dependency; `real-audio` cannot compile without
+  it); (b) the human-run interactive playtest of the window/audio/HUD/pause/
+  game-over boundaries after that approval; (c) Windows/winit/cpal platform
+  observations. No milestone acceptance claim exists for phase 2c.
+
+## 2026-11-07/08 — human-playtest visual corrections: reviewed and re-frozen (log7)
+
+- Human playtest reported 6 visual bugs + requested an F6 debug overlay. Each
+  citation was verified in the reference checkout before changing code
+  (ADR-0020 addendum 4): transparent strumline underlay (Preferences default
+  0), bf flip rule (`!getDataFlipX` ⇒ bf unmirrored with bf.json flipX=true),
+  flixel ANGLE_NEG_90 rotated-tile chain (`[0,−1,1,0]+translate(0,w)` — the
+  atlas module had the ANGLE_90 chain; dad's head rendered upside down), the
+  `sprite_frame_quad` double-scale bug (scale²=0.49 vs 0; the true 0.7),
+  receptor press/confirm glow alignment, observed HUD geometry
+  (BAR_TOP 648, x 339.5, fills +4/593, icon split POSITION_OFFSET 26, bf icon
+  = first 150×150 frame of the 2×1 sheet), and the F6 overlay (Text2d +
+  `default_font` feature; FPS/frame-interval ring, sim ms, song/health/score).
+- Fix round 1 (W2 + W1): all six fixed; fixtures re-frozen (log5→ superseded
+  log6 after the review BLOCKED the receptor centering). Review round 2 then
+  algebraically falsified the orchestrator's OWN derived placement formula:
+  with `centerOrigin` using the UNSCALED frame centre (FlxSprite.hx:995-998)
+  and OpenFL `Matrix.scale` scaling accumulated tx/ty, the origin/fixOffsets
+  terms cancel exactly — the native content top-left is
+  `spritePos + s·dest_offset + (confirm? 13 : 0)` (invert the −13 direction).
+  The formula was re-frozen (RENDER-BEHAVIOR §3 with exact citations), the
+  renderer/tests re-pinned (static 685.3/50.6; press 662.2/26.1; confirm
+  673.8/38.4; untrimmed notes drawn exactly at their sprite base), and
+  fixtures re-frozen third time (log7). Review-finding leftovers applied:
+  §5 bf-mirror text corrected, the F6 "Latency" label renamed to "Frame"
+  (rolling rendered-frame interval; explicitly not an input/audio latency
+  measurement).
+- Gates after the final correction: `cargo xtask render-diff` PASS twice on
+  the log7 fixture; release `perf-budget` PASS (mean 2.479 / max 5.046 ms);
+  quick `cargo xtask verify` exit 0. Manifest honesty note names the
+  correction chain (log5→log6→log7 supersessions recorded; no digest was
+  edited outside the establishment path).
+- Honesty: these are renderer/engine-fixture corrections driven by human
+  playtest + verified flixel/openfl source algebra; NOT native pixel parity.
+  The interactive visuals (HUD/F6/bf facing/dad head orientation) still need
+  the human re-playtest after the pending `alsa-lib-devel` approval — the
+  headless gates prove self-consistency, not looked-at pixels.
+
+## 2026-11-08 — playtest-fix batch closed: glow-reachability falsification + final fixture (log8)
+
+- Review round 3 (BLOCK) caught the last divergence without new shell: the
+  −13 confirm compensation called `fixOffsets()` which the reviewer could not
+  find any call site for. The orchestrator verified: it is dead code in this
+  revision (definition only; `playAnimation`/`setup`/`update` use
+  centerOffsets/centerOrigin). The +13 term was removed (global formula
+  `spritePos + s·dest_offset`; confirm content = sprite + s·dest_offset;
+  tests re-pinned — confirm 660.8/25.4 at the realistic base), the renderer
+  digests re-measured (only confirm/confirm-hold frames shifted), and the
+  fixture re-frozen (log8). Post-freeze: render-diff PASS twice; perf-budget
+  PASS (mean 2.501 ms / max 4.622 ms, NVIDIA AnyHardware). ADR-0020 addendum
+  (docs/DECISIONS.md) and RENDER-BEHAVIOR §3 updated with the reachability
+  citations; the manifest honesty note names the full supersession chain
+  (log5→log6→log7→log8) and corrects the date/grammar.
+- Review round 2's remaining comments are all addressed (bf-mirror spec
+  sentence, F6 label "Frame:", test assertion for the corrected dad bounds,
+  no drift-line leakage in the manifest; the mechanical comparison was run
+  during the freeze).
+- Pending human items unchanged: `alsa-lib-devel` approval + the human
+  re-playtest of the window visuals (HUD placement/F6 text/bf facing/dad
+  head orientation are only human-verifiable in the windowed mode).
+
+## 2026-11-08 — review close-out of the playtest-fix batch (APPROVE with comments, comments applied)
+
+- Review round 4: APPROVE with three doc/provenance comments, all applied:
+  (1) RENDER-BEHAVIOR §3 header formula text now states the final
+  `spriteTopLeft + s·dest_offset` for every receptor state/notes with NO
+  compensation term (the +13 remains only in the superseded-history text
+  with the reachability citations); (2) manifest honesty note corrected to
+  name the full supersession chain (log5/log6/log7 superseded, log8
+  operative) with the 2026-11-08 local establishment date; (3) the scene.rs
+  stale date corrected. Post-fix: `cargo xtask render-diff` PASS (re-run on
+  the current tree), fmt --check clean, quick verify re-run in the
+  background (exit recorded in target/verify.json).
+- Evidence provenance for the previous round's requested quotes: the
+  log8-freeze PASS runs and perf-budget numbers are in the transcript of
+  this session (render-diff gate process exit 0 after the log8 freeze;
+  perf-budget mean 2.501 ms / max 4.622 ms on "NVIDIA GeForce GTX 1050 Ti"
+  per the harness stderr line); the log8 build-provenance concern is
+  resolved by the post-freeze re-run PASS above (current tree renders
+  digests matching the frozen manifest).
+- Full state: uncommitted working tree (phase-2c + playtest-fix batches are
+  NOT committed; awaiting the human's commit approval + the alsa system
+  package approval + the human re-playtest of the window visuals).
+
+## 2026-11-08 — platform note: bounded-RAM validation policy (human feedback executed)
+
+- The human observed OOM-level RAM spikes during repeated quick verifies (Bevy
+  debug-linking across the workspace tests/clippy fills the ~15.5 GiB box;
+  repeated killed/relaunch cycles made it worse).
+- Adopted for ALL future heavy runs on this machine (barring explicit approval
+  of a bigger job cap): `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`, the
+  cooperative queue exclusively, ONE heavy job at a time, never
+  foreground-blocked where a restart can kill it, and no overlapping
+  build/test invocations. Rationale recorded here so the workaround is
+  discoverable; the ~2.9/15 GiB baseline with ~12 Gi available was the
+  starting point of the run.
+
+## 2026-11-08 — human surgical fixes (log9 freeze; resource rule followed)
+
+- Three fixes applied DIRECTLY (no subagents, per the human's resource rule):
+  (1) note/receptor/hold pages to the observed LINEAR sampling
+  (NoteStyle.hx:87/225/253 `antialiasing = !(isPixel ?? false)`; funkin has
+  no isPixel) — the jagged pixels finding; the "nearest engine decision for
+  non-stage sprites" is superseded. (2) The receptor/note content placement
+  now includes the exact setup-hitbox term
+  `s·((hitbox_dest − frame.dest_size)·0.5 + dest_offset)`: the orchestrator
+  verified the flixel chain that the earlier "cancellation" premise missed
+  — `set_frame` → `resetFrameSize()` tracks the CURRENT frame source while
+  the hitbox `width/height` is frozen at the single setup `updateHitbox`
+  (StrumlineNote.hx:113-115; else press frames shift ~30 px up/left).
+  The per-sheet setup hitboxes (document-order first frames:
+  noteStrumline `confirmDown0001` = 235×230, notes `noteDown0001` =
+  157×154) are carried on `LoadedNoteStyle` values. (3) The bf health icon
+  mirrors the player u-axis (HealthIcon.hx:200 + initHealthIcon(false));
+  IconSourceRect UV helper + a mirror test.
+- One `cargo xtask render-diff` establishment (fresh release build; the
+  release binary relinking consumed the first attempt — noted) → freeze
+  `log9` with the manifest honesty note naming the fix chain; then ONE
+  verification `render-diff` PASS (two-run equality) and ONE
+  `cargo xtask verify` (RAM-capped `CARGO_BUILD_JOBS=2 - 0` per the session's
+  bounded-RAM policy). The stale release-binary PASS (pre-fix) recorded as
+  superseded evidence.
+- Honesty: window-visual HR values (press alignment/smoothing/bf icon) still
+  need the human re-playtest in the windowed mode.
+
+## 2026-11-08 — hold-trail squish/jump fixes (log10; human resources rule followed)
+
+- Verified the native citations (`SustainTrail.hx:302-410`, `Strumline.hx:
+  690-770`) under the user's three-item surgical fix, then applied directly
+  (no subagents, per the resource rule):
+  (1) Approaching (un-hit) hold trails now anchor at
+  `held_top + note_y_offset(sim, T, speed)` (Strumline.hx:764-769) instead of
+  the note sprite's bottom (`top + height`): the ~58 px pre-hit sag and the
+  hit-instant jump are fixed; pre-hit clip is the full sustain (updateClipping
+  clamps `sustainLength − (songTime − strumTime)` to graphicHeight at
+  SustainTrail.hx:309).
+  (2) `push_hold` was rewritten to the native updateClipping geometry:
+  rename `SUSTAIN_CAP_HEIGHT` -> `SUSTAIN_BOTTOM_HEIGHT` (it IS
+  `bottomHeight` = `87*0.7*0.5` = 30.45, the cap's TOP offset, not the cap
+  size), add `SUSTAIN_EXTRA_CAP_TAIL` (87·0.7·0.4 = 24.36; the cap bottom is
+  a constant `anchor + full + 24.36`), body spans
+  `[anchor + (full−clip), anchor + (full−clip) + max(part,0)]` with the
+  sanctioned interior-row UV sampling (the native v uses a negative top
+  bound; labeled the engine decision), cap height = `87·0.7·0.9 = 54.81`
+  when part > 0 (NOT 30.45 squished) and `clip + 24.36` with the top cropped
+  (`cap_v0 = (bottomClip − clip)/60.9`, `cap_v1 = 0.9`) when part <= 0;
+  hide thresholds: `clip <= SUSTAIN_HIDE_CLIP (0.1)` and held
+  `remaining <= SUSTAIN_HELD_HIDE_REMAINING (10.0)` (Strumline.hx:729).
+  `PlayerHold`/`OpponentHold` gained `full_ms` (the native graphicHeight
+  source). A splice duplication (two draw_prop/draw_holds impls) was
+  introduced and removed while patching; workspace fmt/clippy/test green
+  (71+1 lib tests).
+- Evidence: one `render-diff` establishment (fresh release build, RAM-capped
+  CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0) → freeze `log10` with the honesty
+  chain (log5..log9 superseded), then ONE verification `render-diff`, then
+  ONE `cargo xtask verify`. The human re-playtest in the windowed mode
+  arbitrates the gradient look (the interior-row body UV sampling is the
+  sanctioned approximation of the negative-v native path).
+- `alsa-lib-devel` is human-approved but the orchestrator environment denies
+  sudo: the actual `sudo dnf install -y alsa-lib-devel` needs the user's
+  password.
+- (final) log10 freeze verified: the post-freeze verification `render-diff`
+  PASS ×1 (byte-identical two-run digests against the manifest), followed by
+  the ONE `cargo xtask verify` PASS (first attempt failed only on two
+  rustfmt-style diffs from the direct edits; fixed with `cargo fmt
+  -p oxide-game` and re-run). fmt/clippy/tests green; M5 acceptance still
+  blocked on the recorded pending obligations (native rendered-output
+  trace, Windows/hardware, the pending (now-approved) alsa install + human
+  window playtest, and the commit approval for this batch).
+- (final) log11 freeze: the window test found that SustainTrail's
+  graphicHeight is recomputed from the REMAINING length every frame
+  (set_sustainLength -> triggerRedraw at SustainTrail.hx:273-289 + the
+  Strumline.hx:727 assignment), so `graphicHeight - clipHeight` is
+  identically 0 and the trail body stays pinned at the receptor while the
+  tip rises (`anchor + clip + 24.36`). push_hold was rewritten without
+  full_height/bottom_start (and full_ms dropped as unused); one
+  establishment (log11; a splice dup was introduced and removed again),
+  one verification render-diff PASS, and the single `cargo xtask verify`
+  (RAM-capped) queued as the last step.

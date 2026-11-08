@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use kira::clock::ClockHandle as KiraClockHandle;
 use kira::clock::{ClockId, ClockSpeed, ClockTime};
+use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::{AudioManager, AudioManagerSettings, Tween};
 use thiserror::Error;
 
@@ -40,7 +41,7 @@ const SIMULATION_SAMPLE_RATE: u32 = 1000;
 #[cfg(not(feature = "real-audio"))]
 const SIMULATION_BUFFER_FRAMES: usize = 1;
 
-/// Errors surfaced by the clock wrapper.
+/// Errors surfaced by the clock wrapper and by real song playback.
 #[derive(Debug, Error)]
 pub enum AudioError {
     #[error("audio backend error: {0}")]
@@ -49,6 +50,18 @@ pub enum AudioError {
     Clock(String),
     #[error("audio decode error: {0}")]
     Decode(String),
+    #[error("audio bytes must not be empty")]
+    EmptyAudio,
+    #[error("song playback requires at least one voice track")]
+    NoVoices,
+    #[error("unknown voice character: {0}")]
+    UnknownVoice(String),
+    #[error("voice volume must be a real number, got {0}")]
+    InvalidVolume(f32),
+    #[error("audio playback error: {0}")]
+    Playback(String),
+    #[error("real audio output is unavailable: {0}")]
+    AudioUnavailable(String),
 }
 
 /// A cloneable handle to the shared Kira clock.
@@ -74,6 +87,25 @@ impl ClockHandle {
     #[must_use]
     pub fn id(&self) -> ClockId {
         lock(&self.clock).id()
+    }
+
+    /// Starts or resumes the shared Kira clock. Crate-internal: the public
+    /// [`AudioClock`] owns the clock lifecycle.
+    pub(crate) fn start(&self) {
+        let mut clock = lock(&self.clock);
+        clock.start();
+    }
+
+    /// Pauses the shared Kira clock without resetting its position.
+    pub(crate) fn pause(&self) {
+        let mut clock = lock(&self.clock);
+        clock.pause();
+    }
+
+    /// Stops and resets the shared Kira clock to tick 0.
+    pub(crate) fn stop(&self) {
+        let mut clock = lock(&self.clock);
+        clock.stop();
     }
 }
 
@@ -179,6 +211,19 @@ impl AudioClock {
         }
     }
 
+    /// Plays a decoded sound on this manager's main mixer track.
+    ///
+    /// Crate-internal: [`crate::playback::SongPlayback`] uses it to attach the
+    /// instrumental and voice tracks to the manager that owns this clock.
+    pub(crate) fn play_static(
+        &self,
+        sound: StaticSoundData,
+    ) -> Result<StaticSoundHandle, AudioError> {
+        lock(&self.manager)
+            .play(sound)
+            .map_err(|error| AudioError::Playback(format!("{error:?}")))
+    }
+
     /// Advances the simulation backend by `ms` milliseconds.
     ///
     /// Only available without the `real-audio` feature: the mock backend has no
@@ -216,8 +261,8 @@ fn clock_speed(rate: f64) -> ClockSpeed {
 }
 
 /// Lock helper: a poisoned mutex is recoverable here because the protected data
-/// is plain clock state, not an invariant that a panic could have broken.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+/// is plain clock/playback state, not an invariant that a panic could have broken.
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 

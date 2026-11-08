@@ -12,9 +12,11 @@ use super::RenderError;
 use super::anim::CharacterScheduler;
 use super::geometry::{
     self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, Camera, GAME_HEIGHT, HALF_HEIGHT, HALF_WIDTH,
-    OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y, SUSTAIN_CAP_BOTTOM_CLIP,
-    SUSTAIN_CAP_HEIGHT, TICK_SECONDS, Vec2, hold_column_uv, hold_columns, note_top_left,
-    receptor_top_left, render_distance_ms, sustain_height, sustain_held_top, sustain_top_left_x,
+    HOLD_TEXTURE_HEIGHT, OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y,
+    SUSTAIN_BOTTOM_HEIGHT, SUSTAIN_CAP_BOTTOM_CLIP, SUSTAIN_EXTRA_CAP_TAIL,
+    SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP, TICK_SECONDS, Vec2, hold_column_uv,
+    hold_columns, note_top_left, note_y_offset, receptor_top_left, render_distance_ms,
+    sustain_height, sustain_held_top, sustain_top_left_x,
 };
 use super::load::{
     LoadedCharacter, LoadedNote, LoadedNoteStyle, LoadedSlice, LoadedStageProp, PageImage, Role,
@@ -172,7 +174,6 @@ struct PlayerHold {
 }
 
 struct OpponentHold {
-    direction: usize,
     end_ms: f64,
 }
 
@@ -257,6 +258,9 @@ impl Scene {
             notes,
             scroll_speed,
             conductor_changes,
+            // Play-session-only metadata; the visual scene does not consume it.
+            player_vocals: _,
+            opponent_vocals: _,
         } = loaded;
         let mut characters = Vec::with_capacity(3);
         for character in loaded_characters {
@@ -605,7 +609,6 @@ impl Scene {
             self.opponent_line.confirm_opponent(direction, now);
             if note.sustain_ms > 0.0 {
                 self.opponent_holds[direction] = Some(OpponentHold {
-                    direction,
                     end_ms: note.time + note.sustain_ms,
                 });
             }
@@ -664,18 +667,7 @@ impl Scene {
     }
 
     fn draw_backgrounds(&self) -> Vec<Quad> {
-        let mut quads = Vec::with_capacity(2);
-        for line_x in [OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X] {
-            let top_left = geometry::background_top_left(line_x);
-            let matrix = [1.0, 0.0, 0.0, 1.0, top_left[0], top_left[1]];
-            quads.push(quad_from_matrix(
-                matrix,
-                BACKGROUND_WIDTH,
-                GAME_HEIGHT,
-                [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
-            ));
-        }
-        quads
+        background_quads(BACKGROUND_ALPHA)
     }
 
     fn draw_receptors(&self) -> Vec<Quad> {
@@ -727,9 +719,16 @@ impl Scene {
                 };
                 let frame = receptor_frame(selected, self.sim_ms - started_ms, looped);
                 let base = receptor_top_left(line_x, direction, self.note_style.receptor_offsets.1);
+                let base = [base[0] + self.note_style.receptor_offsets.0, base[1]];
+                let content_top_left = native_content_top_left(
+                    base,
+                    frame,
+                    scale,
+                    self.note_style.receptor_hitbox_dest,
+                );
                 quads.push(sprite_frame_quad(
                     frame,
-                    [base[0] + self.note_style.receptor_offsets.0, base[1]],
+                    content_top_left,
                     scale,
                     self.note_style.receptor_page_size,
                 ));
@@ -742,8 +741,12 @@ impl Scene {
         let mut quads = Vec::new();
         let speed = self.scroll_speed;
         let held_top = sustain_held_top(STRUMLINE_Y);
+        // Player: held trails anchor at the fixed line and are consumed from
+        // the top; remaining <= 10 ms hides the trail (Strumline.hx:729-733).
         for direction in 0..4 {
-            if let Some(hold) = &self.player_holds[direction] {
+            if let Some(hold) = &self.player_holds[direction]
+                && hold.remaining_ms > SUSTAIN_HELD_HIDE_REMAINING
+            {
                 self.push_hold(
                     &mut quads,
                     PLAYER_STRUMLINE_X,
@@ -754,19 +757,23 @@ impl Scene {
             }
             if let Some(hold) = &self.opponent_holds[direction] {
                 let remaining = (hold.end_ms - self.sim_ms).max(0.0);
+                if remaining <= SUSTAIN_HELD_HIDE_REMAINING {
+                    continue;
+                }
                 self.push_hold(
                     &mut quads,
                     OPPONENT_STRUMLINE_X,
-                    hold.direction,
+                    direction,
                     held_top,
                     sustain_height(remaining, speed),
                 );
             }
         }
-        // Dropped player holds are completely hidden (Strumline.hx:634-640);
-        // no dropped-trail quads are emitted.
-        // Approaching hold tails follow their scrolling note heads. Notes
-        // beyond the native spawn window are not built.
+        // Approaching (un-hit) trails: the native unhit y is the crossing
+        // anchor moved by the note scroll (`Strumline.hx:764-769`: `this.y -
+        // INITIAL_OFFSET + getNoteY(...) + STRUMLINE_SIZE / 2`); using the
+        // note sprite's bottom instead made the trail ~58 px low and jump
+        // into place at the hit.
         let render_distance = render_distance_ms(speed);
         for note in &self.notes {
             if note.hit
@@ -780,30 +787,38 @@ impl Scene {
             } else {
                 PLAYER_STRUMLINE_X
             };
-            let frame = self.note_style.note_frames[note.note.direction];
-            let width = frame.dest_size[0] as f64 * self.note_style.note_scale;
-            let height = frame.dest_size[1] as f64 * self.note_style.note_scale;
-            let top = note_top_left(
-                line_x,
-                note.note.direction,
-                width,
-                self.sim_ms,
-                note.note.time,
-                speed,
-            );
+            let anchor = held_top + note_y_offset(self.sim_ms, note.note.time, speed);
+            // Pre-hit remaining = full + elapsed; updateClipping clamps it to
+            // graphicHeight (SustainTrail.hx:309), so clip == full.
             self.push_hold(
                 &mut quads,
                 line_x,
                 note.note.direction,
-                top[1] + height,
+                anchor,
                 sustain_height(note.note.sustain_ms, speed),
             );
         }
         quads
     }
 
-    fn push_hold(&self, out: &mut Vec<Quad>, line_x: f64, direction: usize, top: f64, height: f64) {
-        if !visible(top, height) || height <= 0.0 {
+    fn push_hold(
+        &self,
+        out: &mut Vec<Quad>,
+        line_x: f64,
+        direction: usize,
+        anchor_y: f64,
+        clip_height: f64,
+    ) {
+        // Native `updateClipping` clamp + `<= 0.1` hide rule
+        // (SustainTrail.hx:309-318). NOTE: graphicHeight is RECOMPUTED from
+        // the REMAINING length on every frame (`set_sustainLength` ->
+        // triggerRedraw, SustainTrail.hx:273-289; Strumline.hx:727 assigns
+        // the remaining sustain each frame), so `graphicHeight == clipHeight`
+        // and `graphicHeight - clipHeight == 0`: the trail is consumed FROM
+        // THE TIP while its body stays pinned at the receptor-anchored top
+        // (the human window playtest falsified the fixed `full` reading).
+        let clip_height = clip_height.clamp(0.0, f64::INFINITY);
+        if clip_height <= SUSTAIN_HIDE_CLIP {
             return;
         }
         let (body_column, cap_column) = hold_columns(direction);
@@ -811,38 +826,53 @@ impl Scene {
         // (416/8) * 0.7 = 36.4` Dx (the pre-zoom 52 was a transcription error).
         let width = self.note_style.hold_width;
         let x = sustain_top_left_x(line_x, direction, width);
-        let cap_height = SUSTAIN_CAP_HEIGHT.min(height);
-        let body_height = (height - cap_height).max(0.0);
-        if body_height > 0.0 {
+        let part = clip_height - SUSTAIN_BOTTOM_HEIGHT;
+        if part > 0.0 {
+            // Body spans [anchor, anchor + part]; sampled with the strip's
+            // own 87*0.7 proportion (the sanctioned interior-row choice of
+            // the native negative-v range).
             let (uv_min, uv_max) = hold_column_uv(body_column);
+            let v_span = uv_max[1] - uv_min[1];
+            let strip = HOLD_TEXTURE_HEIGHT * 0.7;
+            let v_top = uv_max[1] - v_span * (part / strip);
             let uv = [
-                [uv_min[0], uv_min[1]],
-                [uv_max[0], uv_min[1]],
+                [uv_min[0], v_top],
+                [uv_max[0], v_top],
                 [uv_max[0], uv_max[1]],
                 [uv_min[0], uv_max[1]],
             ];
             out.push(quad_from_matrix(
-                [1.0, 0.0, 0.0, 1.0, x, top],
+                [1.0, 0.0, 0.0, 1.0, x, anchor_y],
                 width,
-                body_height,
+                part,
                 uv,
             ));
         }
+        // End cap: top = anchor + max(part, 0); bottom = anchor + clip +
+        // extraCapTail — the tip RISES toward the anchor as `clip` shrinks.
+        let cap_top = anchor_y + part.max(0.0);
+        let cap_bottom = anchor_y + clip_height + SUSTAIN_EXTRA_CAP_TAIL;
+        let cap_height = cap_bottom - cap_top;
+        if cap_height <= 0.0 {
+            return;
+        }
         let (uv_min, uv_max) = hold_column_uv(cap_column);
-        let clip_fraction = if height >= SUSTAIN_CAP_HEIGHT {
-            SUSTAIN_CAP_BOTTOM_CLIP
+        let v_span = uv_max[1] - uv_min[1];
+        let strip = HOLD_TEXTURE_HEIGHT * 0.7;
+        let cap_v0 = if part > 0.0 {
+            uv_min[1]
         } else {
-            SUSTAIN_CAP_BOTTOM_CLIP * (cap_height / SUSTAIN_CAP_HEIGHT)
+            uv_min[1] + v_span * ((SUSTAIN_BOTTOM_HEIGHT - clip_height) / strip)
         };
-        let cap_v1 = uv_min[1] + (uv_max[1] - uv_min[1]) * clip_fraction;
+        let cap_v1 = uv_min[1] + v_span * SUSTAIN_CAP_BOTTOM_CLIP;
         let uv = [
-            [uv_min[0], uv_min[1]],
-            [uv_max[0], uv_min[1]],
+            [uv_min[0], cap_v0],
+            [uv_max[0], cap_v0],
             [uv_max[0], cap_v1],
             [uv_min[0], cap_v1],
         ];
         out.push(quad_from_matrix(
-            [1.0, 0.0, 0.0, 1.0, x, top + body_height],
+            [1.0, 0.0, 0.0, 1.0, x, cap_top],
             width,
             cap_height,
             uv,
@@ -876,9 +906,12 @@ impl Scene {
             if !visible(top[1], height) {
                 continue;
             }
+            // Notes follow the same content formula.
+            let content_top_left =
+                native_content_top_left(top, &frame, scale, self.note_style.note_hitbox_dest);
             quads.push(sprite_frame_quad(
                 &frame,
-                top,
+                content_top_left,
                 scale,
                 self.note_style.note_page_size,
             ));
@@ -887,14 +920,37 @@ impl Scene {
     }
 }
 
+/// Strumline underlay quads. The observed default opacity is 0
+/// (`Preferences.strumlineBackgroundOpacity ?? 0`, Preferences.hx:462-464;
+/// `background.alpha = opacity / 100`, Strumline.hx:249/300), so no quads are
+/// emitted at alpha 0 and the layer disappears from the output. The geometry
+/// functions stay available for the documented placement.
+fn background_quads(alpha: f64) -> Vec<Quad> {
+    if alpha <= 0.0 {
+        return Vec::new();
+    }
+    let mut quads = Vec::with_capacity(2);
+    for line_x in [OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X] {
+        let top_left = geometry::background_top_left(line_x);
+        let matrix = [1.0, 0.0, 0.0, 1.0, top_left[0], top_left[1]];
+        quads.push(quad_from_matrix(
+            matrix,
+            BACKGROUND_WIDTH,
+            GAME_HEIGHT,
+            [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+        ));
+    }
+    quads
+}
+
 /// World transform for one character frame.
 ///
 /// Frozen composition (RENDER-BEHAVIOR §4):
 /// `gameQuad(p) = spriteTopLeft + (p - boundsTopLeft)` at scale 1, with the
-/// sprite scale applied to the whole bounds-relative vector and the bf
-/// whole-sprite mirror applied inside the bounds. The Bopper animation-offset
-/// shift is already folded into `sprite_top_left` by the caller:
-/// `-(animOffsets - globalOffsets) * scale`.
+/// sprite scale applied to the whole bounds-relative vector and the
+/// data-driven whole-sprite mirror (`Stage.hx:425`) applied inside the
+/// bounds. The Bopper animation-offset shift is already folded into
+/// `sprite_top_left` by the caller: `-(animOffsets - globalOffsets) * scale`.
 fn character_world_matrix(
     bounds: [f64; 4],
     scale: f64,
@@ -984,6 +1040,56 @@ fn receptor_state(
     }
 }
 
+/// Native frame-content top-left from the frozen matrix chain
+/// (RENDER-BEHAVIOR §3 CONTENT placement, corrected 2026-11-08 after the
+/// reachability verification of `StrumlineNote.fixOffsets`):
+///
+/// ```text
+/// content_top_left = sprite_top_left + s*dest_offset
+/// ```
+///
+/// `dest_offset` is the Sparrow `(-frameX, -frameY)` exactly as stored by the
+/// oxide-atlas contract (positive 37 for the static Left frame). The algebra
+/// remains: `centerOrigin` uses the UNSCALED frame centre
+/// (`FlxSprite.hx:995-998`), OpenFL's `Matrix.scale` scales the accumulated
+/// translation (`tx *= sx; ty *= sy`, `openfl/geom/Matrix.hx`), and the
+/// FlxSprite draw subtracts the sprite offset (`drawFrameComplex`,
+/// FlxSprite.hx:876-905) — the origin and `centerOffsets` terms cancel.
+/// `StrumlineNote.fixOffsets()` (the −13 confirm compensation) is DEAD CODE
+/// in this revision: it has no call site (grep over the source shows only the
+/// definition), while `playAnimation`/`setup`/`update` call
+/// `centerOffsets(); centerOrigin()` for every receptor state
+/// (`StrumlineNote.hx:121-127`). No glow term exists for receptors or notes.
+/// EXACT native receptor content top-left per the human-playtest finding
+/// (RENDER-BEHAVIOR §3; the "origin and offset cancel" drift is WRONG because
+/// flixel `set_frame` -> `resetFrameSize()` tracks the CURRENT frame's
+/// sourceSize while the hitbox `width/height` is frozen at the single
+/// setup-time `updateHitbox()` (StrumlineNote.hx:113-115); `centerOrigin`
+/// therefore uses the current frame and `centerOffsets` the hitbox baseline):
+///
+/// `content[i] = sprite[i] + scale * ((hitbox_dest[i] - frame.dest_size[i]) *
+/// 0.5 + frame.dest_offset[i])`
+///
+/// The `hitbox_dest` term shifts every frame whose `dest_size` differs from
+/// the setup frame (press frames move ~30 px down/right; delta = native).
+fn native_content_top_left(
+    sprite_top_left: Vec2,
+    frame: &SpriteFrame,
+    scale: f64,
+    hitbox_dest: [f64; 2],
+) -> Vec2 {
+    [
+        sprite_top_left[0]
+            + scale
+                * (0.5 * (hitbox_dest[0] - frame.dest_size[0] as f64)
+                    + frame.dest_offset[0] as f64),
+        sprite_top_left[1]
+            + scale
+                * (0.5 * (hitbox_dest[1] - frame.dest_size[1] as f64)
+                    + frame.dest_offset[1] as f64),
+    ]
+}
+
 fn receptor_frame(frames: &[SpriteFrame], elapsed_ms: f64, looped: bool) -> &SpriteFrame {
     let raw = (elapsed_ms.max(0.0) / 1000.0 * NOTE_STYLE_FRAME_RATE).floor() as usize;
     if looped {
@@ -995,18 +1101,25 @@ fn receptor_frame(frames: &[SpriteFrame], elapsed_ms: f64, looped: bool) -> &Spr
 
 fn sprite_frame_quad(
     frame: &SpriteFrame,
-    frame_top_left: Vec2,
+    content_top_left: Vec2,
     scale: f64,
     page_size: [f64; 2],
 ) -> Quad {
-    let left = frame_top_left[0] + frame.dest_offset[0] as f64 * scale;
-    let top = frame_top_left[1] + frame.dest_offset[1] as f64 * scale;
-    let width = frame.rect[2] as f64 * scale;
-    let height = frame.rect[3] as f64 * scale;
+    // The caller passes the native content top-left from
+    // [`native_content_top_left`]; the matrix translate is that point and the
+    // locals are the raw source rect, so the scale is applied exactly once
+    // (ADR-0020 addendum 4 item 4).
     quad_from_matrix(
-        [scale, 0.0, 0.0, scale, left, top],
-        width,
-        height,
+        [
+            scale,
+            0.0,
+            0.0,
+            scale,
+            content_top_left[0],
+            content_top_left[1],
+        ],
+        frame.rect[2] as f64,
+        frame.rect[3] as f64,
         quad_uv(frame.rect, page_size),
     )
 }
@@ -1054,7 +1167,15 @@ fn camera_projection_matrix(camera: &Camera, scroll_factor: Vec2) -> [f64; 6] {
 /// Builds a quad from a local `(0..width, 0..height)` rectangle transformed by
 /// `matrix` into game-screen coordinates (Flixel y-down). The final Bevy
 /// world position mirrors the y axis around the viewport center.
-fn quad_from_matrix(matrix: [f64; 6], width: f64, height: f64, uv: [[f64; 2]; 4]) -> Quad {
+///
+/// Shared with the interactive HUD so both use the exact same screen-to-Bevy
+/// conversion as the scene layers.
+pub(crate) fn quad_from_matrix(
+    matrix: [f64; 6],
+    width: f64,
+    height: f64,
+    uv: [[f64; 2]; 4],
+) -> Quad {
     let local = [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]];
     let mut pos = [[0.0; 2]; 4];
     for (index, point) in local.iter().enumerate() {
@@ -1080,6 +1201,187 @@ fn trace_sim(event: &TraceEvent) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn sprite_frame(rect: [i32; 4], dest_offset: [i32; 2], dest_size: [i32; 2]) -> SpriteFrame {
+        SpriteFrame {
+            page: 0,
+            rect,
+            dest_offset,
+            dest_size,
+        }
+    }
+
+    #[test]
+    fn background_underlay_is_omitted_at_the_default_zero_opacity() {
+        assert_eq!(BACKGROUND_ALPHA, 0.0);
+        assert!(
+            background_quads(BACKGROUND_ALPHA).is_empty(),
+            "alpha 0 emits no background quads"
+        );
+        // The documented geometry helper and widths remain available.
+        assert_eq!(
+            geometry::background_top_left(OPPONENT_STRUMLINE_X),
+            [32.0, 24.0]
+        );
+        assert_eq!(
+            geometry::background_top_left(PLAYER_STRUMLINE_X),
+            [672.0, 24.0]
+        );
+        assert_eq!(background_quads(1.0).len(), 2);
+    }
+
+    /// Real Sparrow data transcribed from
+    /// `assets/preload/images/noteStrumline.xml` (static/press/confirm Left
+    /// frames):
+    ///
+    /// ```text
+    /// staticLeft0001:  x=1474 y=0   width=154 height=157
+    ///                  frameX=-37  frameY=-38  frameWidth=232 frameHeight=236
+    /// pressLeft0001:   x=142  y=0   width=139 height=141
+    ///                  frameX=-4   frameY=-3   frameWidth=146 frameHeight=148
+    /// confirmLeft0001: x=1564 y=424 width=226 height=228
+    ///                  frameX=-2   frameY=-2   frameWidth=232 frameHeight=236
+    /// ```
+    ///
+    /// The atlas contract exposes `dest_offset = (-frameX, -frameY)` and
+    /// `dest_size = (frameWidth, frameHeight)`.
+    fn real_left_receptor_frames() -> [SpriteFrame; 3] {
+        [
+            sprite_frame([1474, 0, 154, 157], [37, 38], [232, 236]),
+            sprite_frame([142, 0, 139, 141], [4, 3], [146, 148]),
+            sprite_frame([1564, 424, 226, 228], [2, 2], [232, 236]),
+        ]
+    }
+
+    /// `Quad::pos` is Bevy world space (origin at the viewport centre, y-up).
+    /// The frozen game-screen coordinate is recovered with the documented
+    /// inverse conversion `[x + HALF_WIDTH, HALF_HEIGHT - y]`.
+    fn quad_content_corner(quad: &Quad) -> Vec2 {
+        [quad.pos[0][0] + HALF_WIDTH, HALF_HEIGHT - quad.pos[0][1]]
+    }
+
+    #[test]
+    fn native_content_placement_matches_the_frozen_matrix_chain() {
+        let [static_frame, press_frame, confirm_frame] = real_left_receptor_frames();
+        let scale = 0.7;
+        let relative =
+            |frame: &SpriteFrame| native_content_top_left([0.0, 0.0], frame, scale, [235.0, 230.0]);
+
+        // static: 0.7*((235-232)/2 + 37, (230-236)/2 + 38) = (26.95, 24.5).
+        let static_rel = relative(&static_frame);
+        close(static_rel[0], 26.95);
+        close(static_rel[1], 24.5);
+
+        // press: 0.7*((235-146)/2 + 4, (230-148)/2 + 3) = (33.95, 30.8) —
+        // the hitbox term swings press back into lane alignment (~30 px
+        // versus the raw-offset reading).
+        let press_rel = relative(&press_frame);
+        close(press_rel[0], 33.95);
+        close(press_rel[1], 30.8);
+
+        // confirm: 0.7*((235-232)/2 + 2, (230-236)/2 + 2) = (2.45, -0.7).
+        // Confirm-hold shares the confirm dest/offset frame pair.
+        let confirm_rel = relative(&confirm_frame);
+        close(confirm_rel[0], 2.45);
+        close(confirm_rel[1], -0.7);
+    }
+
+    #[test]
+    fn sprite_frame_quad_pins_the_real_sparrow_content_corners() {
+        let [static_frame, press_frame, confirm_frame] = real_left_receptor_frames();
+        let scale = 0.7;
+        // Player line dir 0: receptor_top_left(688, 0, 0) = (659.4, 24.0).
+        let base = [659.4, 24.0];
+        let page = [1920.0, 1080.0];
+
+        // static: 659.4 + 26.95 = 686.35; 24 + 24.5 = 48.5.
+        let static_quad = sprite_frame_quad(
+            &static_frame,
+            native_content_top_left(base, &static_frame, scale, [235.0, 230.0]),
+            scale,
+            page,
+        );
+        let static_corner = quad_content_corner(&static_quad);
+        close(static_corner[0], 686.35);
+        close(static_corner[1], 48.5);
+        // The same corner as stored in `pos[0]` (Bevy world space).
+        close(static_quad.pos[0][0], 686.35 - HALF_WIDTH);
+        close(static_quad.pos[0][1], HALF_HEIGHT - 48.5);
+        // The 0.7 scale is applied exactly once to the raw source rect.
+        close(static_quad.pos[1][0] - static_quad.pos[0][0], 154.0 * 0.7);
+        close(static_quad.pos[0][1] - static_quad.pos[3][1], 157.0 * 0.7);
+        assert_eq!(static_quad.uv, quad_uv(static_frame.rect, page));
+
+        // press: 659.4 + 33.95 = 693.35; 24 + 30.8 = 54.8.
+        let press_quad = sprite_frame_quad(
+            &press_frame,
+            native_content_top_left(base, &press_frame, scale, [235.0, 230.0]),
+            scale,
+            page,
+        );
+        let press_corner = quad_content_corner(&press_quad);
+        close(press_corner[0], 693.35);
+        close(press_corner[1], 54.8);
+        close(press_quad.pos[0][0], 693.35 - HALF_WIDTH);
+        close(press_quad.pos[0][1], HALF_HEIGHT - 54.8);
+        close(press_quad.pos[1][0] - press_quad.pos[0][0], 139.0 * 0.7);
+        close(press_quad.pos[0][1] - press_quad.pos[3][1], 141.0 * 0.7);
+
+        // confirm: 659.4 + 2.45 = 661.85; 24 - 0.7 = 23.3. Confirm-hold
+        // shares the confirm frame/prefix, so it has the same content corner.
+        let confirm_quad = sprite_frame_quad(
+            &confirm_frame,
+            native_content_top_left(base, &confirm_frame, scale, [235.0, 230.0]),
+            scale,
+            page,
+        );
+        let confirm_corner = quad_content_corner(&confirm_quad);
+        close(confirm_corner[0], 661.85);
+        close(confirm_corner[1], 23.3);
+        close(confirm_quad.pos[0][0], 661.85 - HALF_WIDTH);
+        close(confirm_quad.pos[0][1], HALF_HEIGHT - 23.3);
+        close(confirm_quad.pos[1][0] - confirm_quad.pos[0][0], 226.0 * 0.7);
+        close(confirm_quad.pos[0][1] - confirm_quad.pos[3][1], 228.0 * 0.7);
+    }
+
+    #[test]
+    fn note_content_placement_uses_the_same_formula() {
+        // notes.xml noteLeft0001: x=157 y=0, 154x157, frameX/Y=-0,
+        // frameWidth/Height=154x157 (no trim offset).
+        let frame = sprite_frame([157, 0, 154, 157], [0, 0], [154, 157]);
+        // §3 note x uses the SCALED native sprite width (154*0.7 = 107.8):
+        // x = 688 - (107.8 - 104)/2 - 2 = 684.1; y = 24 + 28.6 = 52.6.
+        let base = note_top_left(
+            PLAYER_STRUMLINE_X,
+            0,
+            frame.dest_size[0] as f64 * 0.7,
+            800.0,
+            800.0,
+            1.2,
+        );
+        close(base[0], 684.1);
+        close(base[1], 52.6);
+
+        // untrimmed per-direction, but the setup hitbox is the SHEET's first
+        // frame noteDown0001 = (157,154): rel = 0.7*((157-154)/2, (154-157)/2)
+        // = (1.05, -1.05).
+        let content = native_content_top_left(base, &frame, 0.7, [157.0, 154.0]);
+        close(content[0], 685.15);
+        close(content[1], 51.55);
+
+        let quad = sprite_frame_quad(&frame, content, 0.7, [1920.0, 1080.0]);
+        close(quad.pos[0][0], content[0] - HALF_WIDTH);
+        close(quad.pos[0][1], HALF_HEIGHT - content[1]);
+        close(quad.pos[1][0] - quad.pos[0][0], 154.0 * 0.7);
+        close(quad.pos[0][1] - quad.pos[3][1], 157.0 * 0.7);
+    }
 
     #[test]
     fn character_world_matrix_matches_frozen_composition() {
@@ -1133,10 +1435,7 @@ mod tests {
         // Strumline.hx:653-669/721-727 with the previous-frame snapshot:
         // confirm-hold at end_ms, static at end_ms + 1.
         let mut holds = [None, None, None, None];
-        holds[0] = Some(OpponentHold {
-            direction: 0,
-            end_ms: 1_000.0,
-        });
+        holds[0] = Some(OpponentHold { end_ms: 1_000.0 });
         let mut line = LineState::default();
         line.confirm_opponent(0, 100.0);
         let confirm_frames = 4;

@@ -19,10 +19,12 @@
 //!   straight alpha), rendered into an sRGB target.
 
 mod anim;
-mod geometry;
-mod harness;
-mod load;
-mod scene;
+// The interactive play module reuses the exact same scene/layer pipeline as the
+// headless renderer. These stay crate-private; only `play` consumes them.
+pub(crate) mod geometry;
+pub(crate) mod harness;
+pub(crate) mod load;
+pub(crate) mod scene;
 
 use std::path::Path;
 

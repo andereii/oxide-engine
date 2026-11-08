@@ -6,7 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-bevy = { version = "=0.20.1", default-features = false, features = ["2d", "multi_threaded"] }
+bevy = { version = "=0.20.1", default-features = false, features = ["2d", "multi_threaded", "default_font"] }
 oxide-atlas = { path = "../oxide-atlas" }
 oxide-audio = { path = "../oxide-audio" }
 oxide-data = { path = "../oxide-data" }

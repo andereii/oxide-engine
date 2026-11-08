@@ -181,8 +181,9 @@ fn synthetic_rotated_tile_matrix_and_parent_chain() {
     assert!(quads[0].rotated);
     assert_eq!(quads[0].bitmap_name, "rot");
     assert_eq!(quads[0].atlas_rect, [10, 0, 8, 6]);
-    // Rotated tile: local (0,0,8,6) becomes the upright (2,0,8,8) footprint.
-    assert_eq!(quads[0].matrix, [0.0, 1.0, -1.0, 0.0, 8.0, 0.0]);
+    // ANGLE_NEG_90 tile: local (0,0,8,6) maps to the upright (0,0,6,8)
+    // footprint.
+    assert_eq!(quads[0].matrix, [0.0, -1.0, 1.0, 0.0, 0.0, 8.0]);
 
     let animation = r#"{
         "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": [
@@ -203,7 +204,7 @@ fn synthetic_rotated_tile_matrix_and_parent_chain() {
     let quads = chained.resolve_main_frame(0).expect("frame resolves");
 
     // parent∘(SI MX) = [2,0,0,2,7,11]; then ∘(ASI MX) then ∘tile.
-    assert_eq!(quads[0].matrix, [0.0, 2.0, -2.0, 0.0, 23.0, 11.0]);
+    assert_eq!(quads[0].matrix, [0.0, -2.0, 2.0, 0.0, 7.0, 27.0]);
 }
 
 #[test]
@@ -585,25 +586,25 @@ fn real_dad_stage_labels_rotated_tiles_and_bounds() {
             "dad mic idle hand",
             "2",
             [202, 598, 113, 148],
-            [0.0, 1.0, -1.0, 0.0, 113.0, 0.0],
+            [0.0, -1.0, 1.0, 0.0, 0.0, 113.0],
         ),
         (
             "Dad default head",
             "3",
             [202, 756, 257, 197],
-            [0.0, 1.0, -1.0, 0.0, 257.0, -0.05],
+            [0.0, -1.0, 1.0, 0.0, 0.0, 256.95],
         ),
         (
             "Dad head UP + LEFT NOTE",
             "6",
             [719, 2, 270, 197],
-            [0.0, 1.001, -1.001, 0.0, 270.22, -0.05],
+            [0.0, -1.001, 1.001, 0.0, -0.05, 270.21999999999997],
         ),
         (
             "Dad Head RIGHT NOTE",
             "11",
             [719, 729, 255, 200],
-            [0.0, 1.0, -1.0, 0.0, 254.75, -0.05],
+            [0.0, -1.0, 1.0, 0.0, -0.25, 254.95],
         ),
     ];
     for (symbol, name, expected_rect, expected) in rotated_symbols {
@@ -654,7 +655,7 @@ fn real_dad_stage_labels_rotated_tiles_and_bounds() {
     let bounds = stage.bounds();
     println!("dad bounds: {bounds:?}");
     assert_close(bounds[0], -270.15, "dad bounds x");
-    assert_close(bounds[1], -582.4044, "dad bounds y");
+    assert_close(bounds[1], -563.7707849999999, "dad bounds y");
     assert_close(bounds[2], 566.785472, "dad bounds w");
-    assert_close(bounds[3], 859.9684, "dad bounds h");
+    assert_close(bounds[3], 841.334785, "dad bounds h");
 }

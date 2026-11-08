@@ -622,3 +622,16 @@ HIT-path judgement-miss keeps its bump.
   (`FocusCamera`/`PlayAnimation`) and hold covers/note splashes; dropped player
   hold trails are hidden per the observed alpha-0 path; bf/gf `singTime` default is
   the observed 8.0 steps. Visual-gate honesty text carries each exclusion.
+
+## 9. Play mode (phase 2c; human-approved 2026-11-07)
+
+- `oxide play --assets DIR [--difficulty easy|normal|hard]` (ADR-0021): a real
+  1280x720 Bevy window for the bopeebo slice, live audio (Inst + metadata
+  playerVocals/opponentVocals via the oxide-audio playback API on the SAME kira
+  clock), WASD/arrows input, HUD = health bar bg/fill + bf/dad icons (score text
+  out), pause via ESC, terminal game-over boundary.
+- The interactive session REUSES the frozen §2/§3 semantics
+  (`GameplaySimState::step` on the 1 ms grid with the same event schema and
+  ordering; out-of-order events are typed errors). Not a milestone-acceptance
+  claim: play mode is a playtest tool; timing/latency/mute-tick waveforms are
+  their own pending evidence (M4/M5 obligations per §1.7 and the coverage text).
