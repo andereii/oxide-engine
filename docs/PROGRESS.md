@@ -1049,3 +1049,21 @@ the ledger commit that follows this block.
   establishment (log11; a splice dup was introduced and removed again),
   one verification render-diff PASS, and the single `cargo xtask verify`
   (RAM-capped) queued as the last step.
+
+## 2026-11-08 — M5 batch committed (human-approved; no push)
+
+- The full phase-2c + playtest-fix working tree was committed locally after the
+  human's live windowed playtest PASS (144 FPS / 6.9 ms frame, sustain trails
+  pinned + clean erase, linear filtering, press alignment, bf icon facing, F6
+  overlay) and `alsa-lib-devel` being present on the host (`cargo check -p
+  oxide --features audio` remains available through the bounded-RAM queue if
+  re-confirmation is needed).
+- Commit: `32295ac` (m5(phase-2c+playtest-fix): interactive play mode, real-audio
+  playback, ADR-0021; renderer playtest fixes log9-log11). Working tree clean;
+  no push. Bounded-RAM queue policy (CARGO_BUILD_JOBS=2, CARGO_INCREMENTAL=0,
+  one heavy job) stays in force for all future runs.
+- Honest scope of this closure: M5 local engineering batch + human windowed
+  playtest PASS. M5 *milestone acceptance* is still NOT claimed: the recorded
+  pending obligations remain (native rendered-output trace, Windows/hardware
+  evidence, authentic CI artifacts, native-game parity disclaimers). Next
+  milestone objective M6 planning begins; M5 gates keep their current states.
