@@ -1200,3 +1200,21 @@ the ledger commit that follows this block.
   169 props), bopeebo render-diff digest equality, corpus prototype green,
   quick verify; ONE representative render-diff establishment (school pixel)
   prepared as an approval item (ADR-0020 path), not auto-frozen.
+
+## 2026-11-08 — 6B worker attempt 1: checkpoint (step budget exhausted mid-edit)
+
+- The 6B render-pipeline worker reached its step budget with groundwork only:
+  oxide-atlas additions landed and green-in-range (parse_packer_text for the
+  shipped .txt packer format with a documented test; symbol_frame_count for
+  the newer SYMBOL_DICTIONARY animType 'symbol' rule), but
+  crates/oxide-game/src/render/anim.rs is mid-edit and does NOT compile yet
+  (AnimationDef gained sheet/symbol/flip fields; remaining: on_step_forced,
+  starting-animation helper, updated test literals).
+- Design analysis left a complete plan in the worker report (mixed-sheet
+  characters, multi-page layers with bopeebo pixel-identity argument,
+  bfFakeOut SYMBOL_DICTIONARY caveat, packer characters vs props split).
+- The same worker session is being resumed with an explicit follow-up to
+  reach compile-green first, then the loader/scene/tests scope. Attempt
+  counter: this is attempt 1 of the 6B implementation phase (checkpoint,
+  non-green); a second non-evidential failure will trigger a discriminating
+  experiment per the workflow's budget rule.
