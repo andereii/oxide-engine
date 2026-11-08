@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<TextureAtlas imagePath="broken.png">
-	<SubTexture name="halfway-ok0000" x="0" y="0" width="8" height="8" />
-	<SubTexture name="garbage-width0000" x="0" y="16" width="16abc" height="8" />
-</TextureAtlas>

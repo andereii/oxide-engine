@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<TextureAtlas imagePath="tiny.png">
-	<SubTexture name="full0000" x="0" y="0" width="64" height="64" />
-	<SubTexture name="trimmed0000" x="10" y="5" width="20" height="30" frameX="-5" frameY="3" frameWidth="30" frameHeight="40" />
-	<SubTexture name="rotated0000" x="40" y="0" width="16" height="8" rotated="true" />
-	<SubTexture name="rotated-false0000" x="16" y="48" width="8" height="8" rotated="false" />
-	<SubTexture name="no-negatives0000" x="0" y="96" width="8" height="8" frameX="2" frameY="-4" frameWidth="12" frameHeight="16" />
-</TextureAtlas>

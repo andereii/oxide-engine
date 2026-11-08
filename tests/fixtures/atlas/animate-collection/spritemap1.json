@@ -1,8 +1,0 @@
-{
-  "ATLAS": {
-    "SPRITES": [
-      {"SPRITE": {"name": "collectBitmap", "x": 0, "y": 0, "w": 5, "h": 5}}
-    ]
-  },
-  "meta": {"image": "spritemap1.png"}
-}

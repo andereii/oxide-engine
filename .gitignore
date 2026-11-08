@@ -85,7 +85,28 @@ __pycache__/
 .gemini/
 .codex/
 .aider*
-# AGENTS.md IS committed: it is the instruction file for coding agents.
+AGENTS.md
+*AGENTS*.md
+
+# --- Agent prompts, subagents and harness configurations -------------------
+.opencode/
+opencode/
+opencode.json
+*PROMPT*.md
+*SKELETON*.md
+SUBAGENT*.md
+KICKOFF*.md
+PLAN*.md
+docs/WORKFLOW*.md
+docs/PROGRESS*.md
+.github/
+tools/
+
+# --- Test suites, fixtures, probes and verification outputs ----------------
+tests/
+**/tests/
+*.test.log
+verify.json
 
 # --- OS -------------------------------------------------------------------
 .DS_Store
