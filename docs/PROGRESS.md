@@ -1218,3 +1218,39 @@ the ledger commit that follows this block.
   counter: this is attempt 1 of the 6B implementation phase (checkpoint,
   non-green); a second non-evidential failure will trigger a discriminating
   experiment per the workflow's budget rule.
+
+## 2026-11-08 — M6 phase 6B complete (committed 71f5be5e5)
+
+- 6B delivered: the render pipeline loads and renders all 21 stages and all
+  43 referenced characters under their observed renderType pipelines
+  (dispatch + default rule + typed unknown error), animated stage props and
+  Boppers with the frozen step-gate/dance semantics, pixel note style
+  (scale 6.0, offsets, NEAREST pages), per-stage cameraZoom, song/id
+  parameterized front ends (bopeebo M5 paths byte-identical).
+- Review round 1: BLOCK — solid-color prop defects (alpha dropped -> sserafim
+  opaque cover; scale applied twice) + 3 minors. Fixes implemented
+  (contract §11.6) + test coverage; review round 2 verified the fixes
+  (found only the missing partial-MD tests; added) and recorded one honest
+  pre-existing limitation (.StageProp.scale is a pair in oxide-data; the
+  shipped corpus has no scalar stage-prop scale).
+- Evidence battery (all bounded-RAM queue): quick verify pass; render-diff
+  frozen digest PASS (digest-neutral generalization on llvmpipe);
+  gameplay-sim --corpus exit 0 (167 runs); note-native --opponent exit 0
+  (44/51/62); gated schema-1/schema-2 equivalence exit 0; gated
+  spaghetti solid-cover readback exit 0 (non-black 896818/921600,
+  16564 distinct RGB); all-corpus load-inventory exit 0 (61 chart-ids /
+  21 stages / 169 props / 3 applyStageMatrix / sserafim solidCover
+  asserted; 89 s); oxide-atlas suites exit 0; workspace clippy -D
+  warnings exit 0.
+- Commit 71f5be5e5 (12 files, +2727/-510). sserafem stage/characters load via
+  spaghetti-default per the §0 correction; sserafim custom events remain
+  non-acceptance data.
+- Named follow-ups: (1) school-pixel render-diff fixture establishment —
+  ADR-0020 path, HUMAN approval needed (contract §11.4); (2)
+  applyStageMatrix native matrix semantics freeze + implementation (6C
+  candidate); (3) M4/M5/parity pending obligations unchanged (no
+  milestone-acceptance claim for 6B).
+- Next single objective: 6C behavior freeze — chart song event consumption
+  (FocusCamera/ZoomCamera/SetCameraBop/SetHealthIcon/PlayAnimation/
+  ScrollSpeed/EnableMask) starting from the approved native observation
+  round (phase-by-phase probe pattern).
