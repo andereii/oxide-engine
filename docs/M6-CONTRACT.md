@@ -580,3 +580,332 @@ sserafim custom events stay non-acceptance data.
   solids). Bopper classification vs the loader's ANIMATED branch are separate
   decisions (native: Bopper iff `danceEvery != 0 || animations non-empty`;
   loader uses a static texture when `animations` is empty).
+
+## 12. Phase 6C behavior freeze — chart song event consumption
+
+Observed facts read the installed checkout `$HOME/Descargas/fnf/Funkin` (source +
+`.haxelib` flixel git + assets, read-only, 2026-11-08) under WORKFLOW §2 labels.
+Event-kind counts over ALL `preload/data/songs/*/*-chart*.json` `events` arrays
+(3638 events, 0 unsorted time pairs, 471 same-time-pair events): FocusCamera
+1534, ZoomCamera 1509, SetCameraBop 407, PlayAnimation 69, ScrollSpeed 16,
+SetHealthIcon 16, EnableMask 1 (ONLY `stress-chart-pico`, empty `v`), and 106
+`sserafim*` custom kinds (excluded from the acceptance inventory; recorded).
+Chart event `t` is in milliseconds (contract §0; M1 parsing unchanged).
+
+### 12.1 Observed dispatch pipeline (PlayState.hx + SongEventRegistry.hx)
+
+- Per-tick order in `PlayState.update` (L1035-1332, extends the M5 §10 frame
+  chain): `super.update` FIRST (camera follow scroll, camera-zoom tween,
+  scrollSpeed tweens, animations use the PREVIOUS tick's state) → mirror holds
+  → `Conductor.instance.update` (L1147/1186) → camera bop decay block
+  (L1217-1228) → `processSongEvents()` (L1324) → `processInputQueue` (L1327) →
+  `processNotes` (L1332). New 6C insertion point: events are consumed AFTER the
+  decay block; their state changes take effect in the camera motion of the
+  NEXT tick's `super.update`.
+- `processSongEvents` (L1472-1509): `SongEventRegistry.queryEvents(events,
+  Conductor.instance.songPosition)` walks the events array from the persistent
+  `nextEventIndex` (SongEventRegistry.hx L141-172), returns every event with
+  `time <= songPosition` before the first future event (skipping `activated`
+  ones), and stops. For each returned event: `eventAge = songPosition -
+  time`; if `eventAge > 1000` and the handler's `processOldEvents` is false,
+  the event is silently SKIPPED (`activated = true; continue`, L1485-1495).
+  Otherwise `dispatchEvent(SongEventScriptEvent)` runs (script cancellation;
+  no scripts on the shipped path [D: no cancel surface]) then
+  `SongEventRegistry.handleEvent(data)` (L113-127), which always sets
+  `activated = true` — even when the kind has NO handler (trace warning only).
+- Handlers `processOldEvents = true` (constructor params): FocusCamera
+  (FocusCameraSongEvent.hx L54-56), ZoomCamera (ZoomCameraSongEvent.hx
+  L27-29), SetCameraBop (SetCameraBopSongEvent.hx L35-37), ScrollSpeed
+  (ScrollSpeedEvent.hx L31-34), SetHealthIcon (SetHealthIconSongEvent.hx
+  L30-34). PlayAnimation has NO params (PlayAnimationSongEvent.hx L19-21) →
+  `processOldEvents = false` → PlayAnimation events older than 1000 ms are
+  skipped. On the 1 ms sim grid with normal (non-skipping) playback the age
+  rule never fires (events arrive the tick they are due) — the rule is
+  implemented honestly anyway, exercised by synthetic tests.
+- Ordering and ties: `resetEvents` sorts by time ascending
+  (SongEventRegistry.hx L200-207, `SortUtil.eventDataByTime` =
+  `FlxSort.byValues(a.time, b.time)`); the shipped chart arrays are already
+  time-ascending (0 unsorted pairs observed), so the sort is a no-op on the
+  corpus. Native `Array.sort` stability is NOT guaranteed; for same-time
+  events Oxide keeps PARSE order ([D] engine decision; native tie order not
+  frozen). Events appear in `PlayState.songEvents` via
+  `currentChart.getEvents()` (Song.hx L825-827) directly from parsing.
+- Field coercion (SongData.hx L795-895, OBSERVED): `getDynamic` = raw field;
+  `getBool` = unchecked cast; `getInt` = field; String → `Std.parseInt`;
+  other → unchecked cast; `getFloat` = field; String → `Std.parseFloat`;
+  other → unchecked cast; `getString` = unchecked cast to String; all return
+  null for missing fields/null value. Corpus uses STRING fields on observed
+  events (`"char": "0"`, `"x": "0"`, `"y": "0"` on 46 FocusCamera events), so
+  string coercion is REQUIRED. `data.getFloat('rate')` carries `?? default`
+  always.
+- Event time skip/back-jump handling (`handleSkippedEvents`, L179-194) only
+  runs on song restart/skip paths; normal corpus playback never calls it.
+  Oxide does NOT implement it in 6C (named limitation; replay/skip is a
+  standing M4 obligation).
+
+### 12.2 Observed per-event semantics
+
+- **FocusCamera** (FocusCameraSongEvent.hx L65-158):
+  - Fields: `x`/`y` floats default 0.0 (L59-60); `char` via `getInt('char')`,
+    falling back to `cast data.value` when null (scalar-int values 0/1 exist
+    on 136 events) then `DEFAULT_TARGET = 0` (L63, L78-81); `duration` default
+    `4.0` steps (L61, L83-84); `ease` default `'CLASSIC'` (L62, L85-86);
+    `easeDir` default `SongEvent.DEFAULT_EASE_DIR = 'In'` (L88), CLEARED to ''
+    when `EASE_TYPE_DIR_REGEX / (In|Out|InOut)$/i /` matches ease or ease ==
+    'linear' (L88-89). EFFECTIVE ease function = `FlxEase[ease + easeDir]`.
+  - Target: `char -1` = literal (posX,posY); `0` = bf `cameraFocusPoint`;
+    `1` = dad; `2` = gf (L97-137). `cameraFocusPoint` = `originalPosition +
+    (width/2, height/2) + _data.cameraOffsets[0..1]` (BaseCharacter.hx
+    `resetCameraFocusPoint` L350-358) plus the stage character slot
+    `cameraOffsets` (Stage.hx L113-117; the M5 frozen placement already adds
+    char+stage offsets). A null character (`getBoyfriend/getDad/
+    getGirlfriend() == null`) traces and RETURNS WITHOUT any state change
+    (L103-107 etc.). Any OTHER char value (e.g. 3+) hits the `default`
+    branch which only traces (L135-137) and then STILL falls through to the
+    ease switch with the literal (posX, posY) target — OBSERVED quirk: an
+    unknown char id tweens the camera to (x, y) unshifted.
+  - `duration` → seconds: `Conductor.instance.stepLengthMs * duration /
+    Constants.MS_PER_SEC` with the conductor step length AT FIRE TIME
+    (L149, L68 zoom). `duration` is IGNORED by CLASSIC and INSTANT.
+  - `ease == 'CLASSIC'` (L142-145): `resetCamera(false, false, false)`
+    (re-follow the follow point with LOCKON `DEFAULT_CAMERA_FOLLOW_RATE =
+    0.04`, `targetOffset` reset, NO zoom reset, NO snap) →
+    `cancelCameraFollowTween()` → `cameraFollowPoint.setPosition(target)`.
+    The camera scroll then converges by the follow lerp on following ticks
+    (frozen M5 algebra). NO zoom change.
+  - `ease == 'INSTANT'` (L146-147): `tweenCameraToPosition(target, 0)` →
+    `tweenCameraToFollowPoint(0)`: cancel follow tween; duration 0 →
+    `resetCamera(false, false)` — re-follow + `focusOn(followPoint)` SNAP:
+    camera.scroll jumps EXACTLY to `target - (640, 360)`.
+  - Other (FlxEase lookup, L148-157): an unknown ease name makes
+    `easeFunction == null` → trace + EARLY RETURN, no state change. Valid
+    name: `tweenCameraToPosition`: set follow point, cancel follow tween,
+    `camera.target = null` (follow DISABLED during the tween — no follow
+    lerp), tween `camera.scroll` to `followPoint - (640, 360)` over
+    `duration / playbackRate` seconds ([A] playbackRate = 1.0 on the shipped
+    path), with onComplete → `resetCamera(false, false)` = re-follow + SNAP
+    to the follow point (same INSTANT snap at tween end).
+- **ZoomCamera** (ZoomCameraSongEvent.hx L37-79):
+  - Fields: `zoom` default 1.0 (L32, L45); `widescreenScaleX/Y` default 0.0
+    (L33, L47-48) — corpus NEVER sets them; at 16:9 desktop
+    `FullScreenScaleMode.wideScale = (1, 1)` (FullScreenScaleMode.hx L76/425;
+    overflow scaling branches L463/501), so `scaledZoom = zoom + zoom *
+    ((1-1)*sx + (1-1)*sy) = zoom` ([D] widescreenScale accepted and ignored
+    at 16:9; corpus always 1:1-equivalent). `duration` default 4.0 steps;
+    `mode` default `'direct'` (L35) — 17 corpus events OMIT mode → direct;
+    observed modes: stage 1429, direct 63. `ease`/`easeDir` defaults
+    'linear'/'In' with the same regex suppression (L57-60).
+  - `ease == 'INSTANT'` → `tweenCameraZoom(scaledZoom, 0, isDirect)` →
+    `currentCameraZoom = scaledZoom * (direct ? FlxCamera.defaultZoom :
+    stageZoom)` INSTANTLY (PlayState.hx L3999-4014; `FlxCamera.defaultZoom =
+    1.0` flixel 6.1.2). Other ease unknown → early return, no state change;
+    valid: tween `currentCameraZoom` to `scaledZoom * (direct ? 1.0 :
+    stageZoom)` over the converted duration; per-frame rendered zoom stays
+    `currentCameraZoom * bopMultiplier` (M5 frozen decay algebra).
+  - `stageZoom` = `currentStage.camZoom` (PlayState.hx L323-330; the 6B
+    per-stage `cameraZoom` values, mainStage 1.1; null stage → 1.05).
+- **SetCameraBop** (SetCameraBopSongEvent.hx L40-53):
+  - `rate = getFloat('rate') ?? Constants.DEFAULT_ZOOM_RATE = 4` (Int cast
+    to Float); `offset = getFloat('offset') ?? Constants.DEFAULT_ZOOM_OFFSET
+    = 0` (L251); `intensity = getFloat('intensity') ?? 1.0`; then
+    `cameraBopIntensity = (1.015 - 1.0) * intensity + 1.0`;
+    `hudCameraZoomIntensity = 0.015 * 2.0 * intensity`; `cameraZoomRate =
+    rate`; `cameraZoomRateOffset = offset`. OBSERVED values: rates 4/1/2,
+    offsets 1 or absent, intensities 0..1.8.
+  - The bop gate (PlayState.hx L1846-1859, M5-frozen algebra): on stepHit,
+    `Preferences.zoomCamera && camHUD.zoom < 1.35 * defaultHUDCameraZoom &&
+    cameraZoomRate > 0 && (currentStep + cameraZoomRateOffset * 4) %
+    (cameraZoomRate * 4) == 0` → `cameraBopMultiplier = cameraBopIntensity`,
+    `camHUD.zoom += hudCameraZoomIntensity * defaultHUDCameraZoom`.
+    `currentStep` is a FLOAT; the modulo compares float remainder == 0.
+    `Preferences.zoomCamera` defaults TRUE (Preferences.hx L137-141) ([A]
+    default save options). camHUD state is NOT rendered in 6C; the scene
+    keeps a virtual HUD zoom value feeding ONLY this gate ([D]; the real HUD
+    camera is 6D).
+  - **DEFAULT-ZOOM-OFFSET CONTRADICTION (resolved this phase, do not edit
+    RENDER-BEHAVIOR silently):** RENDER-BEHAVIOR §2 froze
+    `cameraZoomRateOffset = 1 (PlayState.hx L364 default)`;
+    `geometry.rs CAMERA_ZOOM_RATE_OFFSET = 1`. The on-disk source (Constants
+    L251 `DEFAULT_ZOOM_OFFSET:Int = 0`, PlayState.hx L364 = that constant
+    with the comment "Zero beats (on-beat)", SetCameraBopSongEvent.hx L46)
+    says **0**. No native camera-row probe exists to discriminate. Resolution:
+    the 6C event-driven bop state uses the OBSERVED default (0) for the
+    mutable field; `geometry.rs` keeps the frozen constant 1 until the
+    render-diff re-establishment (12.4/12.5) is approved — the delta is part
+    of the same human-approved fixture path, never a silent edit.
+- **PlayAnimation** (PlayAnimationSongEvent.hx L25-76):
+  - Fields: `target` default 'boyfriend' (L21); `anim` default 'idle' (L22);
+    `force` default false (L23). Target resolution (L41-57): 'boyfriend'/'bf'
+    /'player' → bf; 'dad'/'opponent' → dad; 'girlfriend'/'gf' → gf; else
+    `getNamedProp(target)` (stage prop names; 6B named props). Observed
+    corpus targets: boyfriend 34, bf 18, dad 15, girlfriend 1, gf 1 (no
+    named props; no unknown). Null target → trace only, no state change.
+  - Character application (L59-66): `tempVocals = force`;
+    `playAnimation(anim, force, force)` = restart=force, ignoreOther=force
+    through the 6B animation surface (suffix stripping, dance semantics
+    frozen in §11). Properties (`else` branch): plain `animation.play(anim,
+    force)`. Unknown animation names keep the character's current animation
+    (FlxSprite behavior) with a warning ([D]).
+  - Post-animation behavior (observed BaseCharacter.hx L323-341): when the
+    played animation finishes (name ends `'-end'` = Constants
+    ANIMATION_END_SUFFIX L346, or starts 'combo'/'drop' and is not
+    idle/dance-prefixed), the character forcibly `dance(true)` (returns to
+    idle/dance). `tempVocals` silences/brings back the per-role vocal —
+    AUDIO interplay NOT modeled in 6C rows ([D] named limitation).
+  - The 1000 ms age rule lets stale PlayAnimation events get SKIPPED
+    (processOldEvents = false) — implemented, exercised synthetically only.
+- **ScrollSpeed** (ScrollSpeedEvent.hx L42-92):
+  - Fields: `scroll` default 1.0 (L37); `duration` default 4.0 steps;
+    `ease` default 'linear'; `easeDir` 'In' with regex suppression;
+    `strumline` default 'both' → target NAMES `['playerStrumline',
+    'opponentStrumline']` (L60-74; other values map to `<v>Strumline`;
+    corpus always 'both'); `absolute` default false (L39).
+  - `!absolute` → `scroll = scroll * (currentChart.scrollSpeed ?? 1.0)` —
+    the per-difficulty chart scrollSpeed (observed per-chart metadata:
+    easy/normal/hard ~1.5..3.2; erect 2.5..2.7). OBSERVED: absolute true on
+    15/16 events (direct target), absolute false once (1.2x base,
+    expoIn).
+  - INSTANT → `tweenScrollSpeed(scroll, 0, ...)` → per target strumline:
+    cancel ALL scrollSpeed tweens (PlayState.hx L4092-4104), snap every
+    previously listed strumline to its PREVIOUS event target (prevScrollTargets
+    L4059-4066/4078), then set each listed strumline.scrollSpeed = value.
+    Non-instant: same cancel+snap, then FlxTween each listed strumline's
+    `scrollSpeed` to `value` over `duration / playbackRate` seconds with the
+    ease ([A] playbackRate 1.0). `prevScrollTargets` PUSHES the new `value`
+    for every listed strumline after applying (L4078).
+  - Strumline.scrollSpeed semantics unchanged from M5: `resetScrollSpeed`
+    at strumline init = `chart.scrollSpeed ?? 1.0` (Strumline.hx L92/L99/
+    L262); note geometry multiplies via `getNoteY` (frozen M5 algebra).
+  - Evaluated scrollSpeed per tick = the in-flight tween's eased current
+    value; note Y positions are re-derived from it per frame (already the
+    M5 chain's per-frame geometry).
+- **SetHealthIcon** (SetHealthIconSongEvent.hx L45-83):
+  - Fields: `offsets = [offsetX ?? 0.0, offsetY ?? 0.0]` (L53-56);
+    `id ?? Constants.DEFAULT_HEALTH_ICON = 'face'`; `shouldBop ?? true`;
+    `scale ?? 1.0`; `flipX ?? false`; `isPixel ?? false`; `char ?? 0`
+    (L37-43, L58-65). `char 0` → `iconP1.configure(data)`; `char 1` →
+    `iconP2`; other → trace warning, no state change (L67-82). The HUD icon
+    RENDERING and `HealthIcon.configure` sprite semantics are 6D deliverables
+    (the HUD does not exist in the 6C scene): 6C records the normalized row;
+    [D] no scene state beyond the row.
+- **EnableMask / unknown kinds / sserafim custom kinds**: no handler exists
+  in the shipped source (grep over `source/` for 'EnableMask': zero matches;
+  the sserafim kinds likewise) → native `handleEvent` traces
+  `'WARNING: No event handler for event with kind: X'` and sets
+  `activated = true` (SongEventRegistry.hx L113-127). OBSERVED: NO engine
+  state change. Oxide records a row and applies nothing (record-only),
+  matching native trace-surface behavior ([D] row shape below).
+
+### 12.2b Built-in handlers OUTSIDE the shipped inventory (scope note)
+
+`SetTargetBopSpeed` (SetTargetBopSpeedEvent.hx), `SetStage` (SetStageSongEvent.hx)
+and `SetCharacter` (SetCharacterSongEvent.hx) are built-in SongEvent subclasses
+on the shipped source, with handlers, but appear ZERO times in the corpus
+inventory. Engine decision: 6C treats them as the unknown-kind path
+(record-only `unknown_event` rows) — their native handlers are NOT translated
+in 6C; mod charts using them are outside the acceptance inventory (recorded
+limitation, reversible if later phase evidence requires).
+
+### 12.3 Observed ease functions (flixel 6.1.2, FlxEase.hx L36-244)
+
+- The effective function is ALWAYS a concrete `FlxEase.<base><dir>` name
+  (built as `ease + easeDir`; the regex-suppressed `easeDir = ''` yields the
+  bare name). Corpus-used resolved names: FocusCamera — CLASSIC, INSTANT,
+  linear, quadIn ('quad'), quadInOut, sineOut ('sineOut'), expoIn ('expo'),
+  expoOut, smoothStepIn ('smoothStep'), smoothStepInOut;
+  ZoomCamera — linear, INSTANT, quadIn/quadOut, quartIn ('quartIn'),
+  circIn ('circ'), expoIn/expoOut, elasticIn ('elastic'), elasticOut,
+  elasticInOut; ScrollSpeed — linear, 'cubeInOut' and 'quartInOut' (both end
+  in a direction suffix, so the regex clears easeDir and the name is used
+  directly), expoIn. Mods may use any name → Oxide implements the
+  FULL family with fallback semantics: linear, quad/cube/quart/quint
+  (In/Out/InOut), sine, expo, circ, back, bounce, smoothStep, smootherStep,
+  elastic — formulas transcribed with citations from FlxEase.hx (Haxe
+  `Float` semantics; Oxide keeps f64, matching the M5 policy). Unknown names
+  fail the lookup → event no-op (observed at FocusCameraSongEvent.hx L151-156,
+  ZoomCameraSongEvent.hx L70-74, ScrollSpeedEvent.hx L83-88).
+
+### 12.4 Engine decisions (Oxide integration)
+
+1. **Trace schema "3" (add-only, M5 §3 rule):** new row kinds applied at the
+   dispatch tick, sharing the M5 §2 header exactly
+   (`schema:"3"`, `sim`, `input_ms:0.0`, `input_time_us:0.0`, then kind
+   fields):
+   - `camera_focus` — fields: `target_char` (int), `target_kind`
+     ('bf'|'dad'|'gf'|'position'|'unknown' — 'unknown' covers the
+     fall-through quirk), `x`, `y` (floats), `world_focus` ([x, y]: the
+     character focus point when it exists, otherwise the literal (x, y)),
+     `duration` steps, `ease_kind` ('classic'|'instant'|'named'), `ease`
+     (resolved function name for 'named', else null), `ease_dir`
+     ('In'/'Out'/'InOut'/'' for 'named', null otherwise).
+   - `camera_zoom` — `zoom` (float target BEFORE stage/direct multiply),
+     `mode` ('stage'|'direct'), `resolved_target_zoom` (float),
+     `duration` steps, `ease` (resolved name incl. composite), `ease_dir`.
+   - `camera_bop` — `intensity`: resolved `camera_bop_intensity`,
+     `hud_intensity` (0.03*intensity), `rate` (float), `offset` (float).
+   - `play_animation` — `target` (string), `anim`, `force` (bool),
+     `resolved_kind` ('bf'|'dad'|'gf'|'prop:<name>'|'none').
+   - `scroll_speed` — per-row ONE strumline either `player`/`opponent`
+     ('both' produces TWO rows in player/opponent order), fields
+     `target` (resolved absolute value), `absolute` (bool), `base_scroll`
+     (current strumline value BEFORE), `duration` steps, `ease`
+     (resolved), `ease_dir`.
+   - `health_icon` — `char` (0|1), `id`, `should_bop`, `scale`, `flip_x`,
+     `is_pixel`, `offsets` [x, y].
+   - `unknown_event` — `kind` (string), `value` (raw preserved JSON).
+   All rows are emitted in array order (after processing), each exactly
+   once per dispatched event (multiple events per tick allowed; fields
+   carry no post-event lock-in state, mirroring the 10.2 round-2 rule);
+   `schema` stays "3" for ALL these rows. The M5/M6 frozen fixture stream
+   formats "1"/"2" stay byte-frozen; new-camera-schema fixtures follow the
+   approved establishment path only.
+2. **Scene consumption:** the renderer consumes these rows like OpponentHit
+   (6A pattern): camera follow point retarget, follow-scroll tween state
+   (native camera.target = null during eased follow tweens), camera zoom
+   tween, mutable bop state (intensity/rate/offset), per-strumline
+   scrollSpeed tween state, PlayAnimation handoff into the 6B animation
+   surface, health-icon rows recorded for 6D consumption. Rows absent from
+   a stream (all existing fixtures) ⇒ digest-neutral; as with the 6A
+   precedent, a digest change pauses for analysis, never silent re-freeze.
+3. **Sim event walker:** the sim follows native queryEvents semantics
+   (persistent cursor scan, age rule, activate-once), emits rows in the
+   same per-tick order as the native dispatch (§12.1), and records ALL
+   possible outcomes as rows (no silent skips): a PlayAnimation age-skip
+   emits a row with `skipped_old: true` (schema-3 added field) — visible
+   accounting beats silence.
+4. **Bop-state symmetry:** when a `camera_bop` row applies, rate/offset/
+   intensity state replace the frozen constants in the scene gate; the
+   frozen `geometry.rs` constants stay for the fixture paths (rowless),
+   keeping the M5 digests valid (the §12.2 DEFAULT-ZOOM-OFFSET
+    contradiction resolution stays bound to the approval path).
+5. **Health icon / EnableMask / sserafim rows are record-only** for 6C.
+
+### 12.5 Validation obligations for 6C
+
+- In-crate tests: per-kind parse+application regressions (defaults, string
+  coercion, null-target early return, unknown char quirk, unknown-ease
+  early returns, INSTANT paths, stage/direct zoom multiply, bop
+  state/intensity algebra, scrollSpeed absolute × chart base and target
+  resolution, prevScrollTargets snap-on-next-event semantics via
+  two-event sequences), PlayAnimation age-rule skip (synthetic chart with a
+  >1000 ms-late event only in a synthetic frame schedule), EnableMask
+  no-op, `unknown_event` raw preservation, two-run sha256 equality.
+- Corpus prototype: run the 61-id sim with event consumption over the
+  explicit assets root: 1. verify row TOTALS equal the parsed corpus event
+  counts per kind (FocusCamera 1534, ZoomCamera 1509, SetCameraBop 407,
+  PlayAnimation 69, ScrollSpeed 16, SetHealthIcon 16, EnableMask 1,
+  sserafim* 106; the per-id tabulation recorded in the session temp file is
+  the reference, no further freezing); 2. two-run sha256 equality over ALL
+  61 ids / 167 runs; 3. zero row-parse errors, zero unknown record failures.
+- Existing invariants: M5/M6 fixture digests byte-identical (the sim +
+  scene are additive over rowless streams); quick verify green.
+- Native parity: the camera eases/state rows are DERIVED-only (labeled) —
+  a native camera-probe round (focused FocusCamera/ZoomCamera/SetCameraBop
+  rows via the M5-probe pattern) REMAINS a pending acceptance obligation;
+  matching the derived rows does NOT claim native parity.
+- Human approval item: the render-side establishment FOR a chart with
+  observable camera events (bopeebo has FocusCamera events on the M5
+  render-slice path — the phase-2b contract excluded them; replaying with
+  rows would change digests) needs the ADR-0020 establishment approval
+  together with the school-pixel/school-test fixtures from 11.4; neither is
+  pre-authorized.
