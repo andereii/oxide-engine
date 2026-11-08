@@ -1067,3 +1067,39 @@ the ledger commit that follows this block.
   pending obligations remain (native rendered-output trace, Windows/hardware
   evidence, authentic CI artifacts, native-game parity disclaimers). Next
   milestone objective M6 planning begins; M5 gates keep their current states.
+
+## 2026-11-08 — M6 kickoff: corpus observations + phased contract draft
+
+- Observed corpus facts (checkout `/home/alex/Descargas/fnf/Funkin/assets`,
+  read-only scan): 61 chart files matching `tools/oracle/corpus.txt` chart-ids;
+  27 base songs (+erect/pico variations, plus `darnell-bf`/`lit-up-bf`);
+  21 stages observed as `playData.stage` AND on disk (1:1); 43 distinct
+  referenced characters (46 character JSONs on disk, 7 lacking `renderType`);
+  renderTypes animateatlas 24 / multianimateatlas 10 / multisparrow 3 /
+  sparrow 1 / packer 1 / null 7; chart events FocusCamera 1534,
+  ZoomCamera 1509, SetCameraBop 407, PlayAnimation 69, ScrollSpeed 16,
+  SetHealthIcon 16, one EnableMask, plus 11 `sserafim*` custom event names
+  and their content — NOT in corpus.txt; note kinds null on all 91,567 keyed
+  notes in this checkout (no positivePath kind observable in the corpus);
+  noteStyles funkin 53 / pixel 8 (metadata counts).
+- Wrote `docs/M6-CONTRACT.md` (DRAFT phase 0: scope/method freeze only; six
+  phases 6A-6F with per-phase behavior-freeze obligations before
+  implementation; trace schema-2 add-only strategy; song-agnostic sim;
+  full-chart gate wiring in 6F). The draft is UNCOMMITTED pending the human
+  decisions listed in the contract §2/§3 and the kickoff decision round.
+- Evidence gate: quick `cargo xtask verify` status pass on the committed tree
+  (report `target/verify.json`); no new heavy jobs run in this entry. No
+  subagents spawned yet for M6 implementation (per approval flow).
+- Next single objective: on decision round-pass, start 6A (song-agnostic
+  sim + opponent side + schema 2) with a behavior-freeze amendment, then
+  implementation via oxide-impl-rust with an explicit write set.
+
+- Decision round completed (human, 2026-11-08): sserafim OUT of acceptance;
+  week-6 in-game dialogue gate IN M6 (meta/UI/save stays M7); native parity
+  evidence = phase-by-phase scoped probes (one approved observation round per
+  behavior-freeze phase before implementation). `docs/M6-CONTRACT.md` updated
+  to phase-0 APPROVED (still uncommitted: no separate Git authorization was
+  given for the M6 doc commits). M6 implementation NOT started; next single
+  objective: phase 6A behavior freeze (song-agnostic sim + opponent rows +
+  trace schema 2), beginning with the approved scoped gameplay/opponent
+  probe round.
