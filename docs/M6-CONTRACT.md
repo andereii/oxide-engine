@@ -494,10 +494,10 @@ inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
    joins the camera matrix (camera scroll 0/1 handling unchanged; camera zoom
    application per-stage value replaces mainStage's constant).
 5. **Wiring**: the interactive play mode and the render front end become
-   stage/song-parameterized along the 6A `build_cart`-style idsing (engine
-   decision; the M5 bopeebo fixture inputs stay byte-frozen; fixture GROWTH
-   for other stages follows the ADR-0020 establishment path — listed in
-   11.4, not pre-approved).
+   stage/song-parameterized along the 6A `build_chart`-style id selection
+   (engine decision; the M5 bopeebo fixture inputs stay byte-frozen; fixture
+   GROWTH for other stages follows the ADR-0020 establishment path — listed
+   in 11.4, not pre-approved).
 
 ### 11.3 Validation obligations for 6B
 
@@ -507,16 +507,20 @@ inventory exclusion (the sserafim stage is NOT in corpus.txt and stays data).
   excluded from acceptance inventory) and every REFERENCED character
   (43) — fail closed on any missing asset/animation resolution error; print
   the per-stage prop counts (169 total) and per-renderType character counts.
-- **Registmental ports**: froM5 bopeebo `render-diff` digests stay byte-
-  identical; the corpus gameplay prototype (61 chart-ids) stays green —
+- **Regression invariants**: the M5 bopeebo `render-diff` digests stay byte-
+  identical; the M6 corpus gameplay prototype (61 chart-ids) stays green —
   the sim is out of the render path, but the play-session loader path runs
   under the same load surface.
-- **Rendered evidence**: ONE representative render-diff establishment draft
+- **Fixture growth**: ONE representative render-diff establishment draft
   (proposal: the `school` pixel stage, exercising the pixel note style +
   school props with default-Sparrow pixel characters; loader called via the
   senpai chart-id) run in establishment mode and FROZEN ONLY after the
   human approves the fixture-growth step (ADR-0020 path). Additional
-  representative stages (mallXmasErect boppers; weekend1) can follow in a
-  later round with the same approval path.
+### 11.4 Approval items (human)
+
+- The representative render-diff fixture growth (school pixel stage or
+  equivalent) is a reference-fixture change: ADR-0020 establishment path,
+  review and human approval before anything is frozen. Nothing in 6B
+  pre-freezes new digests.
 - Windowed human playtest of the generalized stages/characters remains the
   HR visual arbiter for anything not covered by digest equality.
