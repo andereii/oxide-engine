@@ -208,3 +208,129 @@ amendments and their gates. Full-chart *acceptance* additionally requires:
 measured corpus inventory evidence, native reference traces (already a
 standing M4/M5 obligation pattern), CI artifacts for the aggregate profiles,
 Windows/platform evidence — all pending, never inferred locally.
+
+## 10. Phase 6A behavior freeze — song-agnostic sim, opponent rows, schema 2
+
+Labels follow `docs/WORKFLOW.md` §2. Observed citations read the installed
+checkout `$HOME/Descargas/fnf/Funkin/source` (read-only, 2026-11-08); no
+modification of the original. The M5 frozen trace schema "1" and the round-1
+`note-native` fixtures stay byte-frozen; opponent semantics add a NEW probe
+file set and a schema "2" addition path (M5 §3 add-only rule).
+
+### 10.1 Observed opponent pipeline (processNotes, PlayState.hx L2799-2871)
+
+- `processNotes(elapsed)` runs four loops in order: opponent notes → opponent
+  holds → player notes → player holds (L2805-2919). The M5 round-3 frame
+  ordering (super.update FIRST → mirror holds → conductor update →
+  `processInputQueue` L1327 → `processNotes` L1332) therefore covers the
+  opponent loops ENTIRELY: they run inside the same `processNotes` call,
+  after the conductor is at the current tick's songPosition.
+- Opponent note loop (L2806-2833): `if (note == null || !note.alive) continue;`
+  then `GRhythmUtil.processWindow(note, false)` (GRhythmUtil.hx L69-112):
+  - window miss → `hasMissed = true; mayHit = false`, and the opponent loop
+    has NO `note.hasMissed` handling (only the hold loop reacts; no opponent
+    miss event exists on this path).
+  - botplay hit: `songPosition >= windowCenter` → dispatched
+    `HitNoteScriptEvent(note, 0.0, 0, 'perfect', false, 0)` (L2812). If NOT
+    canceled: the legacy-voice branch (L2819-2827,
+    `vocals.opponentVolume = opponentVocalsVolume` when
+    `vocals.legacyVoiceSystem && !vocals.legacyVoiceUsesPlayer`),
+    `opponentStrumline.hitNote(note)` (receptor confirm + cleanup) and
+    `playNoteHoldCover(note.holdNoteSprite)` when the note has a hold.
+  - The opponent loops NEVER touch score, health, combo or tallies (comment
+    at L2923: scoring happens in the player hold loop only).
+- Opponent hold loop (L2840-2869): `hitNote && !missedNote && sustainLength >
+  0` → IF `currentStage.getDad().isSinging()` THEN `holdTimer = 0` (keeps the
+  opponent singing while the hold runs). Separately
+  `holdNote.missedNote && !holdNote.handledMiss` → `handledMiss = true` and,
+  IF `holdNote.scoreable`,
+  `currentStage.getOpponent().playSingAnimation(direction, true)` (miss
+  form). NO score/health penalty exists for dropped opponent holds.
+- Strumline split (PlayState.hx L2521-2562): `builtNoteData` notes in chart
+  array order (the shipped path has no mods, so the SongLoad dispatch
+  returns the chart as parsed); notes before `startTime` are skipped;
+  `getStrumlineIndex() = floor(data / 4)` (SongData.hx L1155-1158) → 0 =
+  player / 1 = opponent; `Highscore.tallies.totalNotes++` counts SCOREABLE
+  PLAYER notes only; `mirrorSongData` is false in the shipped pipeline
+  (PlayState.hx L733; only the DEBUG freeplay SHIFT/CONTROL path sets it,
+  FreeplayState.hx L2818), so `GRhythmUtil.mirrorNoteDirection` is NOT
+  applied to gameplay chart notes.
+- Direction on each strumline: `getDirection() = data % 4` (SongData.hx
+  L1129-1131): opponent notes with data 4..7 map to strumline directions
+  0..3 WITHOUT mirroring.
+- Note kinds (PlayState.hx L2537-2541): `NoteKindManager.getNoteKind(kind)`
+  non-null → `scoreable = noteKind.scoreable`; on this checkout every corpus
+  note has `kind = null` (contract §0), so `scoreable` stays true for all
+  recorded notes (limitation carried in the gate labels).
+- Player side is unchanged from M5 §1/§2; not re-derived here.
+
+### 10.2 Probe extension (NOTE-BEHAVIOR amendment; native evidence for 10.1)
+
+- New probe round (driver `native-note-probe-2`, NEW fixture directory
+  `tests/fixtures/note-native-opponent/`): round-1 fixtures, hashes and rows
+  remain byte-frozen (fail-closed); round-2 files live beside them, hashed in
+  their own `_manifest_native_opponent.json`.
+- Retained-code additions: the opponent note/hold loops (PlayState.hx
+  L2806-2869) become REAL retained bodies for round 2; they read the same
+  whitelisted fields plus the `currentStage.getDad()/getOpponent()` shells
+  and the legacy-voice branch surface. Driver: opponent notes/holds ARE
+  constructed from the same chart JSON (lanes 4..7), chart array order,
+  1:1 with the player construction; NOTE-BEHAVIOR §5 otherwise unchanged.
+- Row schema: NEW row kind `opponent_hit` (schema `2`) = the M5 §2 shared
+  header exactly — `schema:"2"`, `kind:"opponent_hit"`, `sim`,
+  `input_ms:0.0`, `input_time_us:0.0`, `note_id`, `note_direction`
+  (strumline direction 0..3 after `data % 4`), `judgement:"perfect"`
+  (observed literal), `raw_note_diff:0.0`, `note_diff_int:0` — with NO
+  score/health/combo/tallies fields. Dropped opponent holds and `holdTimer`
+  resets produce NO trace rows ([D] exclusion; scene-level semantics belong
+  to 6B/6C).
+- Fail-closed rule amendment (round 2 ONLY): multiple dispatched events per
+  tick are allowed when all of them are `opponent_hit` rows (their fields
+  carry no post-event state); the round-1 one-stateful-dispatch rule stays
+  for player-path rows ([D], recorded).
+- The probe consumes the SAME exported stream format (§4 `note-stream-1`);
+  opponent enablement is a round tag in the manifest; stream sha256s are
+  re-frozen for the round-2 run.
+
+### 10.3 Engine decisions (Oxide sim integration)
+
+1. Trace schema "2" adds variant `OpponentHit` (serde field order per 10.2);
+   `record()` order follows the native frame order: opponent rows BEFORE the
+   player-path rows processed in the same `step()` tick (the opponent loops
+   run first inside `processNotes`), shared-header field order unchanged.
+2. `GameplaySimState::build` gains chart-id/selection parameters over
+   `(song, variation)` with corpus.txt-style ids (`bopeebo-erect` → song
+   `bopeebo`, `-erect` file suffixes); unknown/missing ids fail closed with
+   a typed error. The bopeebo M5 fixture paths move from module constants
+   to explicit parameters; the M5 gate output MUST stay byte-identical
+   (two-run sha256 repr).
+3. The opponent rows drive the renderer: `render/scene.rs` consumes
+   `OpponentHit` rows instead of its internal `trigger_opponent_notes`
+   approximation (`note.time <= now`); on the 1 ms grid both fire the
+   receptor/character decisions at the same tick. The render-slice fixture
+   digest equality is the acceptance check; a digest change pauses for
+   analysis instead of a silent re-freeze.
+4. Chart song events (`songEvents`) are NOT consumed in 6A beyond preserved
+   parsing (M1); event CONSUMPTION (FocusCamera etc.) stays phase 6C; the
+   M5 §8 phase-2b exclusion stays recorded for the current fixtures.
+5. `holdTimer`/drop-miss-animation semantics need no trace rows ([D]): the
+   sim has no character objects; the scene continues to derive sing
+   schedules from the opponent hit rows (sing-time behavior unchanged
+   until 6C/6B amends it).
+
+### 10.4 Validation obligations for 6A
+
+- Portable tests: synthetic multi-strumline fixtures (lanes 0..7, temp-dir
+  based like the existing slice tests) covering: opponent auto-hit at
+  `songPosition >= strumTime` on the 1 ms grid; opponent lanes never mutate
+  score/health/combo/tallies; schema-2 round-trip serialization + two-run
+  sha256 equality; chart-id lookup and error paths; bopeebo easy/normal/hard
+  trace digests byte-identical after the constants→parameters move.
+- Native probe round-2 run: frozen `opponent_hit` rows for bopeebo
+  easy/normal/hard, compared field-wise by the comparator.
+- Corpus prototype run (61/61 chart-ids over the explicit assets root):
+  every id parses and the sim produces a canonical 1 ms-grid trace through
+  the last note without error paths (prototype script; the `full_chart_
+  gameplay` gate wiring itself remains 6F).
+- Quick `cargo xtask verify` green; render-diff digest equality on the
+  bopeebo fixtures after the scene change (10.3.3).
