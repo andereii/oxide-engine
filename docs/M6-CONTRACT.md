@@ -555,3 +555,28 @@ sserafim custom events stay non-acceptance data.
   the fallback. The equivalence check is: existing frozen parse fixtures
   (with MD.W/H) emit identical parse results, plus a ship-shaped
   `MD={"FRT":24}` regression test.
+
+### 11.6 Amendment (2026-11-08, 6B integration review round): partial MD, applyStageMatrix, solid props
+
+- ENGINE DECISION (MD pair consistency): a `MD` object carrying EXACTLY ONE of
+  `W`/`H` is treated as pair-absent for size selection (the spritemap
+  `meta.size` fallback applies; fail closed when that is missing too). The
+  shipped corpus has only full or absent MD pairs (observed); partial pairs
+  appear only in synthetic/mod data. Regression tests pin both partial
+  cases.
+- ENGINE DECISION (`atlasSettings.applyStageMatrix`): 3 corpus props carry
+  `{"applyStageMatrix": true}` (mallXmasErect `bottomBoppers`,
+  tankmanBattlefieldErect `sniper`/`guy`; observed). The native placement
+  matrix semantics (FlxAnimate symbol-instance matrix) are NOT frozen yet —
+  implementing them derives geometry from an unpinned native algebra. Until
+  the behavior freeze lands, props with `applyStageMatrix == true` are
+  LOADED (inventory green) but NOT DRAWN, and the scene records a structured
+  deviation line naming the prop (same honesty pattern as the `bfFakeOut`
+  exclusion). This is a named 6C follow-up, not a silent skip.
+- Review-found defects to fix (observed data cited): solid-color props must
+  apply `dataProp.alpha` unconditionally (sserafim solidCover: alpha 0.0,
+  zIndex 9999 — currently drawn opaque) and `scale` must be consumed ONCE
+  (integer makeSolidColor dimensions; native Stage.hx skips scale.set for
+  solids). Bopper classification vs the loader's ANIMATED branch are separate
+  decisions (native: Bopper iff `danceEvery != 0 || animations non-empty`;
+  loader uses a static texture when `animations` is empty).
