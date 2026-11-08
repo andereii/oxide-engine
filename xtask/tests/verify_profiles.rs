@@ -212,8 +212,6 @@ fn invalid_release_options_still_list_all_pending_obligations() {
     let gates = report["gates"].as_array().expect("gates");
     assert!(gates.iter().all(|gate| gate["required"] == true));
     let mut not_implemented = [
-        "render_diff",
-        "perf_budget",
         "full_chart_gameplay",
         "ui_save_e2e",
         "ruby_mods",
@@ -239,6 +237,8 @@ fn invalid_release_options_still_list_all_pending_obligations() {
         "input_jitter",
         "gameplay_sim_bopeebo",
         "native_note_reference",
+        "render_diff",
+        "perf_budget",
     ] {
         let gate = gates
             .iter()

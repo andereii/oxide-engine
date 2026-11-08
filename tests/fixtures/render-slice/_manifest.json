@@ -1,0 +1,306 @@
+{
+  "schema": "render-slice-1",
+  "adapter": "llvmpipe",
+  "difficulties": [
+    "easy",
+    "normal",
+    "hard"
+  ],
+  "samples": {
+    "easy": [
+      1200,
+      1800,
+      2400,
+      2445,
+      2695,
+      3000,
+      3002,
+      3250,
+      3252,
+      3600,
+      4200,
+      4800,
+      5400,
+      12946,
+      13196,
+      35791,
+      36041,
+      45736,
+      45986,
+      47560,
+      47810,
+      65861,
+      66111,
+      76075,
+      76275,
+      76276,
+      77275
+    ],
+    "normal": [
+      1200,
+      1800,
+      2400,
+      2445,
+      2695,
+      3000,
+      3002,
+      3250,
+      3252,
+      3600,
+      4200,
+      4800,
+      5400,
+      12946,
+      13196,
+      17191,
+      17441,
+      26536,
+      26786,
+      35860,
+      36110,
+      37061,
+      37311,
+      76075,
+      76275,
+      76276,
+      77275
+    ],
+    "hard": [
+      1200,
+      1800,
+      2400,
+      2445,
+      2695,
+      3000,
+      3002,
+      3250,
+      3252,
+      3600,
+      4200,
+      4800,
+      5400,
+      12646,
+      12896,
+      16891,
+      17141,
+      17836,
+      18086,
+      22060,
+      22310,
+      26561,
+      26811,
+      76075,
+      76275,
+      76276,
+      77275
+    ]
+  },
+  "frame_sha256": {
+    "easy": {
+      "1200": "42ff4c89aa200560c972e8e207c9113f339c931aa1efc44b43a91299aae83c5a",
+      "1800": "27e70eefb89c1bf5999ff651376db4280e8fb510369ca2a5f90a91a08b15f6fa",
+      "2400": "eb2c0eb83eef10929c72afbeb9e06062406620b522b3e9aecadbd1bf8f51a553",
+      "2445": "fc3a3e302e587d4dac3749da4b299104cb79057635677dae25d86d8b0e2fa00e",
+      "2695": "2d5aea59a421661175505941bd4780be071f1780256b4e0f8285d2e8e28f4e6e",
+      "3000": "7e48b971024e3f44436d40257e29a6b385a9564253e935392b682e282c9e36af",
+      "3002": "fd05613ac07638d66cc9573bfa7fcb9957f746d5632ce966b2905ce308fc63c5",
+      "3250": "936da6b4b2f59dc46b1bc80506113de933914fc1399de5b201c519ca7dbf1ec4",
+      "3252": "0f5113b98041a3208901a77cf0abc0f8c64c01c84b26dff7fa8daf93213fd017",
+      "3600": "6a99a67888ceb72a3bfd94f61f9a4a45cfa770aa01257295081577e44b0ba966",
+      "4200": "833e17696407cd2d28f8c30c8670913f8285f05a25c0d7334006bcf3e3f741fb",
+      "4800": "6529173337af8b9d3dbb0fbc049dd3cef688ebdfe88bb704e8ce85d40dc37f23",
+      "5400": "bd5e2cecf9e4ce0b911ab984b40167167e5a71f9222cee499352b109ffd15593",
+      "12946": "48bcdf803af18f21c34be9a43bace387e582be4ddc3032b41bb666b0355f174e",
+      "13196": "7417cd2b7b037c95afef49b5b79903f1899c3d9950b61e9b3da32e455f1742c4",
+      "35791": "494ded450aa261533442d9d2f06c4e934b12d4b1a5c14da0857a00f79eaf0013",
+      "36041": "562fec0d694a96e84e5477c709b2821925263f49ae69d015c9fd4e3afac43bd4",
+      "45736": "d470abb832076153e34f5da2f0496ed72d355e3d75c99993a361d0b3d2cf24b8",
+      "45986": "0d38d74dc457ed1a2de78b2661f5f337b86eddcefa52758d9d8086ce75a61480",
+      "47560": "028d56a7fbe94c79898ee678cb6a1fbd6dcaf7bcb4ad4f8375e6cab14ff46e74",
+      "47810": "e8ca73638f24af135dbcc1812b33f27b0d14f5a6faaf1434089ddf827d51ad5d",
+      "65861": "f0fedec6ce184eb6079f3b84c5d6abf5a17db82d99929cdd466e3a53d89a7b58",
+      "66111": "b202ae50c288410d4d685150cad088a0e3078aef0f8ce34212c9f797e9595918",
+      "76075": "72fb104a8c77a520db47876208a21bb08e308ba0c22addc9400ce9433e8ee2ab",
+      "76275": "fea3466177c6a101b4f8d8b5fab89c5041e5929fe142fc1e3102e192a9831b35",
+      "76276": "8087d551ce7704150067984475d07f99e6c41e2b8aafcba3d3f50905c4575b47",
+      "77275": "0c4a599241dd0e7f85eef18f0ae73ccab3bb7ae4fa6a52ceec943df7caeb16f3"
+    },
+    "normal": {
+      "1200": "96a2dcabcebcddde407e76862703519745534fbd1dde5d8fbbba899000046fd0",
+      "1800": "2962ab8b4fa852d585fb77df5cd7bf16c03d050ab908b216e1d90885a413a3cf",
+      "2400": "f777f93ec633bdb1e7bbc81b5dc4b73cd742def43d5aed8c235ac4c8510369e0",
+      "2445": "dd4f3623f246f67d378ec04f947c256d485f73baff828f1065064f5656fae18c",
+      "2695": "6bfb2130d7646eaef5d1e47661ce1b646785f58a96c6521839f5c515a639dbfb",
+      "3000": "03db99d11dba5d492839c95a9da0cb2d6bb01e8d4e1d93e8b4b1d937c769942e",
+      "3002": "bc9ad34f9a7f679e4d117481a4a8d1f3c0e0d2559cf8d2dadb3b22b46cdefa5d",
+      "3250": "3d57d3c3ca1b991e607a454d2d2bf37df549c3d045bf0153a0551d82e1eaa769",
+      "3252": "aa44b362b9232aec37bd8ddf03ffbe16525c98a8e3db7b1966b044f512e9196c",
+      "3600": "8e95cb4481922b31f8460715ce3564ba1cc64a46e4a451f4fbb2add2f0e4c549",
+      "4200": "5afc1832392d93d5d79ed27eaf6ca1d96eb562309d14737e66d27687874dd0fe",
+      "4800": "2bb596872bde42f8b38ed2e2157dcce966d14fa5120252fbde49e40cb2886e1c",
+      "5400": "cc926fe14db140be43c36c38d650bad080881ffe19125fc960ce5130091efb88",
+      "12946": "7a8e9f6b7cdbc1c15ef76edacb310e65d725fdd6f4843c79a5738a94a04c95e6",
+      "13196": "d334af82a421ee2840e7a50db5c8bfc90f497a632c18623c773d9982bb19e93f",
+      "17191": "dacad53d467544c5515d051c3ee6aa52ab69fbf7432c0aaa050ed8ac4f4e9d78",
+      "17441": "8da7d7bc1df2008ad849d1e1864345db06a9abcc80155239f51ff3ca12db8912",
+      "26536": "2937b96492344ac9330fba8a78cb58b9759771b8b472ceeceb7e41b88a95e759",
+      "26786": "84df2e96170176c975f9d78824adadd4d8b21e4be8f75db76d6b179cff2f8d46",
+      "35860": "32147e1063273d8558b25e95f03fe0a395ef413512dc7e921a1070a35d5a8cfe",
+      "36110": "870841613fecc5f35746a6120f21383a44ccd5efe526b71a985aa7e133f04652",
+      "37061": "4d66f478efaa30958bee09c01f0161ef792fe4776f34bf1ba7dca640738155f3",
+      "37311": "3dbe5747bbe0fa9f0cc567ae98ad832ec2273b0e3acc1dd5ec73e1453f4321ca",
+      "76075": "b5a70db7641a4de192b49dc6516b9705d8ea622211b0ea9978a28de3211372cd",
+      "76275": "fea3466177c6a101b4f8d8b5fab89c5041e5929fe142fc1e3102e192a9831b35",
+      "76276": "8087d551ce7704150067984475d07f99e6c41e2b8aafcba3d3f50905c4575b47",
+      "77275": "0c4a599241dd0e7f85eef18f0ae73ccab3bb7ae4fa6a52ceec943df7caeb16f3"
+    },
+    "hard": {
+      "1200": "d1a3a87bcef8bcaf51bf3c0987d2cb56a97fb9f8fe283571bb3cf1e60d10e289",
+      "1800": "76519612f3975eb216766a3f85c26a0389a81e4dc48806227a1f1cf101960b17",
+      "2400": "e11cf5eb5499ab2ce9881e34cd113a8d85b2a044eb284357f7dee73b96793775",
+      "2445": "2bb385146b94d0b0ccfb3c5ec1f89126f0189062f7412b55688d82eaff914236",
+      "2695": "2060c05fdca11c23b167ad953e713c592ce57fb3321b3c441ad1bb1f4489dfd1",
+      "3000": "2509b7079a30f552851a17e04499bcbf4b660baf760e37f48075a1fb86380746",
+      "3002": "b9ac93f5ef28afcd1b684985d2ed19c80da5eb07a098ea848d83325e84de780d",
+      "3250": "d8127c49146f2afbd6f401f543108324669def6d0affd36da172aff7eec72a1f",
+      "3252": "55364836e427c3e950bb4b5aee86a24120edc45d542a63cc3e3ea22f048a0013",
+      "3600": "17e0bc29138b2042d79e20fc06cc06d1419891ee982f9836e9709ef7aaf37da9",
+      "4200": "281b00f6d76d4e8093f7f6b76711d0495ecc333cc57fea789d2e7d2f8e488c62",
+      "4800": "0ffb0f30907807d2b3867105f8b8f446ad74f8cd341a4c7c71d802f780f77201",
+      "5400": "ecd94e56de09e13b85715746442ae62f31b3bbec808c1945cc40a7d54c46d60f",
+      "12646": "dfb720dfbd236779e5f07e0aee93837d2dda127cd64782380daca71b09155d0b",
+      "12896": "14ccbfc99f4ad9d1d441c25c669879c1e74f6063543825ce2fbc465a48b089af",
+      "16891": "2f08f4daf2dde7cf0ffb8ff10ebb5ec1a8dfedc4ce36c1b1fb8b116e792ce0fe",
+      "17141": "1706dfd6c820429880b82218a7ace7e887843f07752e236e2777844f0d47ec1c",
+      "17836": "615034e13cec7847f04a03b20ec0a7131598e7f46c3bfaf85ce3e936912d36a0",
+      "18086": "a6036875a8e3fe1dd7b36a72b069471aa99f647ce0a82f540da11e6ce210efa7",
+      "22060": "6a3fe503365c11296646abf45bc279c8900f918c4e4163226e4195f909d2dc3d",
+      "22310": "010215b1615e295ebe59804914abd2129b061575e0c7fe0beff7457dc216d1fe",
+      "26561": "93f9ce14c322838162ddfb2189b40523c03ce34069cc2338ddc8a9821facb5c5",
+      "26811": "f5e5cb3b7fc9ccce07d9d20be0a2e5e8d3c01e8eb71e091c676f3758f017be9c",
+      "76075": "1ac18cff5d0c52498f2a020dc25f8abd69537b965c728dae372f06db6ffa8d6d",
+      "76275": "fea3466177c6a101b4f8d8b5fab89c5041e5929fe142fc1e3102e192a9831b35",
+      "76276": "8087d551ce7704150067984475d07f99e6c41e2b8aafcba3d3f50905c4575b47",
+      "77275": "0c4a599241dd0e7f85eef18f0ae73ccab3bb7ae4fa6a52ceec943df7caeb16f3"
+    }
+  },
+  "run_sha256": {
+    "easy": "156394c750a840f2fb20fb77e278e8ceb60206fe236d39ad48bf1a22802d099c",
+    "normal": "0a7060c649eebd7485aa9bb6f2bf2eca4b532887430edbf55a7ae9d0cdd096db",
+    "hard": "00017f529abb4b6af2b4e9f88755793e9bfc5714d674e6634cb5ecf60326934b"
+  },
+  "trace_sha256": {
+    "easy": "22a76423fd3ae082bb083487f423cec25fa8dee63e5ed06cad11754960bf57e8",
+    "normal": "291a0eab5bcdd01d7f0720d1ea9d4ad39489fdd68aad87e47aaa3d4577bb6a19",
+    "hard": "9b674e547bea984aa40d416e17fb72a5d94eba32a50a113ecf9d435bf529e602"
+  },
+  "geometry": {
+    "camera_initial_scroll": [
+      -144.0,
+      1.015800000000013
+    ],
+    "character_bounds": {
+      "bf": [
+        -214.4,
+        -271.3,
+        496.9,
+        513.85
+      ],
+      "dad": [
+        -270.15,
+        -582.4044,
+        566.785472,
+        859.9684
+      ],
+      "gf": [
+        -194.9,
+        -333.65,
+        748.8,
+        674.85
+      ]
+    },
+    "lane_center_y": 76.0,
+    "note_crossing_top_y": 52.6,
+    "note_top_left_y_at_offsets": {
+      "1040": 614.2,
+      "2080": 1175.8
+    },
+    "props": {
+      "stageback": [
+        -600.0,
+        -200.0,
+        2560.0,
+        1400.0
+      ],
+      "stagecurtains": [
+        -500.0,
+        -300.0,
+        2304.0,
+        1260.0
+      ],
+      "stagefront": [
+        -650.0,
+        600.0,
+        2816.0,
+        639.1
+      ]
+    },
+    "receptors": [
+      {
+        "direction": 0,
+        "line": "player",
+        "x": 659.4,
+        "y": 24.0
+      },
+      {
+        "direction": 1,
+        "line": "player",
+        "x": 771.4,
+        "y": 24.0
+      },
+      {
+        "direction": 2,
+        "line": "player",
+        "x": 883.4,
+        "y": 24.0
+      },
+      {
+        "direction": 3,
+        "line": "player",
+        "x": 995.4,
+        "y": 24.0
+      },
+      {
+        "direction": 0,
+        "line": "opponent",
+        "x": 19.4,
+        "y": 24.0
+      },
+      {
+        "direction": 1,
+        "line": "opponent",
+        "x": 131.4,
+        "y": 24.0
+      },
+      {
+        "direction": 2,
+        "line": "opponent",
+        "x": 243.4,
+        "y": 24.0
+      },
+      {
+        "direction": 3,
+        "line": "opponent",
+        "x": 355.4,
+        "y": 24.0
+      }
+    ]
+  },
+  "honesty": "engine fixture established once by the orchestrator per ADR-0020; NOT native pixel parity; digests are adapter-specific (software/llvmpipe pinned); native-game rendered-output trace remains a separately pending obligation; frames are renderer-decision evidence",
+  "established_unix": 1794096205,
+  "frame_counts": {
+    "easy": 27,
+    "normal": 27,
+    "hard": 27
+  }
+}

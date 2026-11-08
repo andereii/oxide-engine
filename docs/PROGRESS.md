@@ -718,3 +718,68 @@ the ledger commit that follows this block.
 - Immediate next objective (human approval #3): M5 phase 2b/3 — mainStage
   stage sprites, bf/dad/gf character rendering/animation, strumline
   note/sustain rendering, then wire `render_diff` and `perf_budget` gates.
+
+## 2026-11-07 — M5 phase 2b: headless Bevy visual slice + render_diff/perf_budget gates wired and passing (local)
+
+- Objective (human approval #3): stage mainStage, characters bf/dad/gf,
+  strumline rendering/animation implemented in `crates/oxide-game` (Bevy
+  =0.20.1, license MIT OR Apache-2.0 verified; manifests/Cargo.lock owned by
+  the orchestrator) behind the frozen boundary
+  `SliceRenderer{build,step,frame,build_for_adapter}` /
+  `AdapterPolicy{Software,AnyHardware}`, plus the M5 `render_diff` and
+  `perf_budget` gates in `xtask/` with fail-closed fixtures
+  (`tests/fixtures/render-slice/`, established once by the orchestrator
+  after review — never regenerated during verification).
+- Spec: `tools/oracle/RENDER-BEHAVIOR.md` (OBSERVED/DERIVED labels; two
+  analyst rounds), contract additions in `docs/M5-CONTRACT.md` §8 and
+  `docs/DECISIONS.md` ADR-0020 + three addenda (adapter policies, debug-build
+  guard, capture swap, review resolutions).
+- Feasibility probe (throwaway project outside the repo): headless
+  render-to-image works (`WGPU_ADAPTER_NAME=llvmpipe`, byte-identical PNG
+  twice; NVIDIA default-backends segfaulted, vulkan-pinned works later).
+- Implementation: `oxide_game::render` (geometry/anim/scene/load/harness):
+  stage/slot/feet placement, additive camera offsets, follow/bop/decay
+  math, strumline receptors/notes/trails per the frozen formulas, character
+  sing/dance scheduling (bf dance restart, gf danceLeft-first alternation,
+  `-hold`, singTimeSteps), per-tick order per §6. Direct GPU readback
+  (persistent COPY_SRC target + RenderGraph copy node + bounded buffer map)
+  replacing the flaky per-frame `Screenshot` capture (observed: 3/3 warmup
+  timeouts, one instrumented PASS, one timeout at frame 116 on NVIDIA —
+  evidence recorded in ADR-0020 addendum 2).
+- Distributions: W1 oxide-atlas `animate_stage` (BTA parse + symbol/label
+  resolution + rotated-tile matrix `[0,1,-1,0,w,0]` confirmed by the observed
+  dad bounds; 29 portable + 3 real-asset tests), W2 renderer, W3 gates; two
+  review rounds (round 1 APPROVED with comments on atlas; aggregate round 1
+  BLOCK: bf singTime default must be the observed 8.0, props LINEAR sampler,
+  chart-event exclusion had to be an explicit scope decision, opponent-hold
+  pruning, dropped holds hidden, covers/splashes exclusions, perf gate must
+  step real frames, trace-digest comparison, bounds constants; re-review 2
+  APPROVE with comments: hold width must be `(416/8)*0.7 = 36.4` (the 52 was
+  my transcription error), opponent prune `> end_ms`, player confirm
+  post-finish plays press while held; all applied).
+- Gates (local evidence; NOT milestone acceptance):
+  `cargo xtask render-diff --assets ...` exit 0 TWICE on the frozen fixture
+  (schema render-slice-1; samples 27×3 difficulties; per-frame/run/trace
+  digests + geometry fail-closed; adapter llvmpipe pinned; digests
+  adapter-specific). `target/release/xtask perf-budget` exit 0 (AnyHardware
+  → NVIDIA GTX 1050 Ti, driver 580.196.07; 16-step 60 Hz discretized frames,
+  mean 3.525 ms / max 5.798 ms vs budgets 16.667/33.333 ms; DebugBuild fail
+  closed observed in a debug run). Quick `cargo xtask verify` exit 0.
+- Honesty: the render fixtures are OUR renderer's frames (engine fixture);
+  they are NOT native pixel parity — native-game rendered-output trace
+  remains a separate pending M5 obligation; chart song events
+  (FocusCamera/PlayAnimation) and hold covers/note splashes are excluded by
+  explicit recorded scope decisions with parity consequences; note/
+  receptor/hold NEAREST filtering is our renderer choice (native funkin path
+  is linear); decisions recorded in M5-CONTRACT §8 / ADR-0020 addenda. The
+  perf numbers are platform-specific hardware measurements on this machine,
+  not CI/Windows/hardware-latency claims. xtask edits were within its
+  assigned tooling task; one W2 manifest-adjacent edit (oxide-atlas dep)
+  was orchestrated and approved; atlas fixture creation by W1 used shell
+  because editor policy denies fixtures (recorded deviation; additive-only).
+- Scope audit: 30 changed paths inside the union write set
+  (crates/oxide-atlas, crates/oxide-game, xtask, tests/fixtures/atlas,
+  tests/fixtures/render-slice, docs, RENDER-BEHAVIOR.md, Cargo.lock, two
+  crate Cargo.toml files); single violation = deletion of my throwaway
+  `out.png` probe artifact at the repo root (no code). M5 acceptance stays
+  blocked on the pending native rendered-output/window-platform obligations.

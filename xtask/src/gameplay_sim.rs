@@ -56,8 +56,8 @@
 //!
 //! Honesty: this gate proves deterministic simulation of the frozen rule set
 //! over a synthesized stream, not native-game parity. `native_note_reference`
-//! is a separate frozen-reference gate; `render_diff`/`perf_budget` remain
-//! separate pending obligations.
+//! is a separate frozen-reference gate; `render_diff`/`perf_budget` are
+//! separate visual-slice gates with their own fixtures.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -638,6 +638,27 @@ struct PreparedStream {
     end_ms: u64,
 }
 
+/// One canonical 1 ms tick: the inputs dispatched into it and the trace events
+/// it emitted. The visual-slice gates replay these ticks into the renderer in
+/// the same order the gameplay gate consumed them.
+pub(crate) struct CanonicalTick {
+    pub(crate) sim_ms: u64,
+    pub(crate) inputs: Vec<InputEvent>,
+    pub(crate) events: Vec<TraceEvent>,
+}
+
+/// The shared canonical replay used by `gameplay-sim` and the phase-2b gates.
+///
+/// The `script` stays private to this module: `gameplay-sim` uses it for the
+/// negative-phase checks while render-diff only needs the tick stream and the
+/// canonical trace digest.
+pub(crate) struct CanonicalReplay {
+    pub(crate) ticks: Vec<CanonicalTick>,
+    pub(crate) trace_bytes: Vec<u8>,
+    pub(crate) digest: String,
+    script: Script,
+}
+
 /// Synthesizes the frozen scripted stream and converts it to the 1 ms grid.
 ///
 /// This is the single synthesis path used by both the gameplay trace gate and
@@ -668,11 +689,16 @@ fn prepare_stream(notes: &[LaneNote]) -> Result<PreparedStream, String> {
     })
 }
 
-fn simulate_with_notes(
+/// Replays the canonical 1 ms input stream through the frozen slice sim.
+///
+/// This is the single simulation path used by `gameplay-sim`, the
+/// `render-diff` two-run trace check and the `perf-budget` scene driver; the
+/// stream synthesis is not re-derived by callers.
+pub(crate) fn canonical_replay(
     assets_root: &Path,
     difficulty: &str,
     notes: &[LaneNote],
-) -> Result<PassOutput, String> {
+) -> Result<CanonicalReplay, String> {
     let PreparedStream {
         script,
         inputs,
@@ -681,18 +707,25 @@ fn simulate_with_notes(
 
     let mut sim = GameplaySimState::build(assets_root, difficulty)
         .map_err(|error| format!("failed to build the bopeebo {difficulty} sim: {error}"))?;
+    let mut ticks = Vec::new();
     let mut trace = Vec::new();
     let mut next_input = 0usize;
     for sim_ms in 0..=end_ms {
-        let mut tick = Vec::new();
+        let mut tick_inputs = Vec::new();
         while let Some(input) = inputs.get(next_input) {
             if input_sim(input) != sim_ms {
                 break;
             }
-            tick.push(input.clone());
+            tick_inputs.push(input.clone());
             next_input += 1;
         }
-        trace.extend(sim.step(sim_ms, &tick));
+        let events = sim.step(sim_ms, &tick_inputs);
+        trace.extend(events.iter().cloned());
+        ticks.push(CanonicalTick {
+            sim_ms,
+            inputs: tick_inputs,
+            events,
+        });
     }
     if next_input != inputs.len() {
         return Err(format!(
@@ -708,17 +741,37 @@ fn simulate_with_notes(
                 .into(),
         );
     }
+    let trace_bytes = serialize_trace(&trace)?;
+    let digest = sha_hex(&trace_bytes);
+    Ok(CanonicalReplay {
+        ticks,
+        trace_bytes,
+        digest,
+        script,
+    })
+}
 
-    let checks = validate_expectations(&trace, &script)?;
+fn simulate_with_notes(
+    assets_root: &Path,
+    difficulty: &str,
+    notes: &[LaneNote],
+) -> Result<PassOutput, String> {
+    let replay = canonical_replay(assets_root, difficulty, notes)?;
+    let trace: Vec<TraceEvent> = replay
+        .ticks
+        .iter()
+        .flat_map(|tick| tick.events.iter().cloned())
+        .collect();
+    let checks = validate_expectations(&trace, &replay.script)?;
     let counts = count_kinds(&trace);
     let event_count = trace.len();
-    let bytes = serialize_trace(&trace)?;
-    let digest = sha_hex(&bytes);
+    let inputs = replay.ticks.iter().map(|tick| tick.inputs.len()).sum();
+    let end_ms = replay.ticks.last().map_or(0, |tick| tick.sim_ms);
     Ok(PassOutput {
-        trace_bytes: bytes,
-        digest,
+        trace_bytes: replay.trace_bytes,
+        digest: replay.digest,
         counts,
-        inputs: inputs.len(),
+        inputs,
         event_count,
         checks,
         stats: note_stats(notes),
@@ -814,7 +867,7 @@ fn input_sim(input: &InputEvent) -> u64 {
 /// The frozen M4 grid conversion: every audio timestamp rounds up to the next
 /// integer millisecond. Fractional sustain releases therefore become
 /// `ceil(note.t + note.l)`, not `ceil(note.t) + note.l`.
-fn grid_ms(value_ms: f64) -> Result<u64, String> {
+pub(crate) fn grid_ms(value_ms: f64) -> Result<u64, String> {
     if !value_ms.is_finite() {
         return Err(format!("non-finite timestamp {value_ms}"));
     }

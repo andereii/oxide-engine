@@ -11,6 +11,8 @@ mod media_check;
 mod note_native_check;
 mod parse_all;
 mod parse_atlas;
+mod perf_budget;
+mod render_diff;
 mod replay;
 mod verify;
 
@@ -44,10 +46,8 @@ fn main() -> ExitCode {
         "fixtures-conductor" => to_code(conductor_check::run(rest)),
         "replay" => replay::run(rest),
         "gameplay-sim" => gameplay_sim::run(rest),
-        "perf-budget" | "render-diff" => {
-            eprintln!("{command}: not implemented yet");
-            ExitCode::from(2)
-        }
+        "render-diff" => render_diff::run(rest),
+        "perf-budget" => perf_budget::run(rest),
         other => {
             eprintln!("unknown xtask command: {other}");
             ExitCode::from(2)

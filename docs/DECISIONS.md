@@ -531,3 +531,179 @@ and what would make us revisit it. Gate/test/threshold changes MUST have an ADR.
 - **Revisit when:** native note reference evidence arrives, a real human/
   device input stream becomes available, or the phase-2 terminal-state
   (Game Over flow / retry) input schema is designed.
+
+## ADR-0020 — M5 phase-2b visual slice: renderer architecture and gate definitions
+
+- **Context / date:** 2026-11-07. Human approval #3: implement stage
+  (mainStage), character (bf/dad/gf), strumline rendering/animation and wire
+  `render_diff` + `perf_budget`. Behavior frozen in `tools/oracle/
+  RENDER-BEHAVIOR.md` (OBSERVED/DERIVED labels; an ADR-0014-style problem).
+- **Adopted stack:** Bevy `=0.20.1` (first Bevy integration; license
+  MIT OR Apache-2.0, verified from crates.io metadata; release build cost on
+  this machine ~minutes on an already-warm registry) enters `crates/oxide-game`
+  only (GOAL: "Bevy =0.20 when required"; foundation crates stay Bevy-free per
+  repository policy). Feasibility probe (throwaway project outside the
+  repository, 2026-11-07): headless Bevy render-to-image — `DefaultPlugins.set(
+  WindowPlugin{primary_window: None, exit_condition: DontExit}).disable::<
+  WinitPlugin>() + ScheduleRunnerPlugin`, camera with `RenderTarget::image`,
+  `Screenshot::image` + `save_to_disk` — renders a valid 256×256 PNG; two-run
+  sha256 identical (`46968d05…4f2ffd27` twice) with
+  `WGPU_ADAPTER_NAME=llvmpipe`; the NVIDIA driver backend segfaulted in the
+  same probe.
+- **Engine decisions:**
+  1. render_diff/perf_budget PIN the wgpu software adapter
+     (`WGPU_ADAPTER_NAME=llvmpipe`) for determinism and machine independence;
+     adapter identity is printed by the gates. GPU-driver/platform render
+     behavior stays a separate pending obligation (Windows/hardware evidence).
+  2. render_diff golden frame digests are OUR renderer's output frozen once
+     (fixture set `tests/fixtures/render-slice/`, to be created AFTER review —
+     never regenerated during verification). They are an engine fixture, NOT
+     native pixel parity; a native-game rendered-output trace remains a
+     separate pending M5 obligation. Exact-digest first establishment; any
+     fallback comparison method needs a BEFORE-USE ADR.
+  3. perf_budget: WARMUP 120 + MEASURED 300 frames on difficulty easy;
+     budget = mean ≤ 16.667 ms AND max ≤ 33.333 ms frame wall time (60 Hz
+     target) on the pinned adapter; failure of the budget fails the gate
+     (loosening requires the ADR/review/human path).
+  4. Atlas semantics: f64 matrices in the resolver (Haxe Float is double);
+     Bevy sprite composition f32 — fixtures pin our composition; no
+     bit-exact-openfl claim is made (printed per gate run).
+  5. Phase-2b frames exclude bf death/fakeout anims, judge popups, HUD, story
+     UI; camera cutout machinery always desktop-equal 1280×720.
+- **Consequences:** three disjoint write sets: `crates/oxide-atlas/`,
+  `crates/oxide-game/` (+ root manifest/lockfile owned by the orchestrator),
+  `xtask/`. M5 acceptance stays blocked for render_diff/perf_budget until the
+  newly wired gates run against established fixtures AND the pending native
+  rendered-output obligation is resolved by later evidence (explicit honesty
+  line in verify coverage text).
+- **Revisit when:** the reference checkout updates (re-freezing native rows /render fixtures separately on the same review path), the acceptance budget for perf_budget is revised, or Windows/hardware render evidence arrives.
+
+## ADR-0017/0014 note (fixture flow applied to render-slice fixtures)
+
+`tests/fixtures/render-slice/` planned content: per-difficulty frozen frame
+digest manifest + sample song-position list + structural geometry constants.
+Creation path: implementer writes gate; orchestrator runs the first
+establishment passage after the reviewer approves the gate code; fixtures are
+then frozen by the orchestrator (like ADR-0019) and verified by
+`cargo xtask render-diff`; during verify, digest/regeneration paths stay
+fail-closed (no auto-repair).
+
+### ADR-0020 addendum (2026-11-07, discriminating experiment)
+
+- **Observed evidence:** the release build of the phase-2b renderer runs at
+  ~35–57 ms/frame on the pinned llvmpipe software adapter (60 Hz budget fail)
+  and at 3.9–14.4 ms/frame steady state (first churn frames ~28–100 ms) on the
+  NVIDIA "GeForce GTX 1050 Ti" hardware adapter of this machine (same scene,
+  same code; per-tick sha256 digests differ between adapters, e.g. easy tick
+  600 = `eb5f1e0e…` GPU vs `47b582d4…` llvmpipe). The harness's llvmpipe pin
+  was verified to still render byte-identical frames across two runs (probe).
+- **Engine decisions (superseding the single-adapter wording of ADR-0020):**
+  1. `SliceRenderer::build(...)` remains pinned to the software adapter
+     (llvmpipe): render_diff fixture digests are adapter-specific and the
+     manifest pins the adapter name. No env-driven adapter override inside
+     deterministic paths.
+  2. A separate explicit-adapter entry point (engine-decision API:
+     `SliceRenderer::build_for_adapter(assets_root, difficulty, policy)` with
+     `policy ∈ {Software, AnyHardware}`) exists ONLY for `perf_budget`, which
+     uses `AnyHardware` and FAILS CLOSED when only a software adapter exists
+     in the environment (a software-raster 60 Hz measurement would not be a
+     hardware performance claim). Both gates print the actual adapter identity
+     chosen, and `AnyHardware` rejects software adapters by the printed
+     adapter name check.
+  3. perf_budget numbers are PLATFORM-SPECIFIC hardware measurements
+     (this machine: NVIDIA GTX 1050 Ti, driver state printed); they are NOT
+     llvmpipe times, NOT CI-agnostic, and NOT a real-game/release-binary
+     latency claim (separate M5/M6 obligation).
+  4. Lint exception policy: `#[allow(reason)]` for harness-specific clippy
+     lints must carry an explanatory comment per repository policy.
+- **Consequences:** gate coverage text for render_diff keeps "software adapter
+  pinned"; perf_budget coverage text says hardware adapter, platform-specific,
+  llvmpipe never substitutes. Budget constants stay 16.667/33.333 ms.
+- **Additional decision (2026-11-07, observed):** the perf-budget gate measures
+  whatever build profile invokes it (verify uses `current_exe()`). A first end-to-end
+  run in a debug executable measured mean 34.191 ms / max 39.129 ms on the SAME
+  hardware adapter where the release build measures 3.9–14.4 ms/frame steady state —
+  debug overhead, not scene cost. Therefore `perf_budget` FAILS CLOSED in a
+  debug (debug_assertions) build with a typed `DebugBuild` error and an instruction
+  to run a release xtask; render_diff is profile-independent (digests already
+  validated identical across profiles on llvmpipe).
+
+### ADR-0020 addendum 2 (2026-11-07, NVIDIA capture flakiness)
+
+- **Observed:** with the per-frame `Screenshot::image` capture, the release
+  gate run on the NVIDIA adapter timed out on the readback poll (16 updates)
+  in three consecutive runs; one instrumented run (identical bytes, only an
+  extra save path) PASSED and wrote the PNG (mean 6.873 ms / max 10.945 ms);
+  the next clean run timed out at measured frame 116 (after 115 passing
+  frames). llvmpipe readback has been reliable in every run. Conclusion:
+  the bevy `Screenshot` capture path is flaky for REPEATED captures on this
+  NVIDIA driver; per-frame capture spawns are not a sound readback design for
+  the perf-budget gate. (Temp diagnostic code was added and will be removed;
+  instrument changes did not alter rendered bytes.)
+- **Decision:** the harness readback is redesigned to the official headless
+  pattern — persistent render-target texture with `COPY_SRC` usage, a custom
+  render-graph node copying the last-base-pass texture to a persistent buffer
+  after the camera node, and buffer-map readback of the SAME bytes each frame.
+  This is internal to the private harness; the public API
+  (`SliceRenderer::{build,step,frame,build_for_adapter}`) is unchanged. The
+  perf-budget and render-diff evidence must be re-established after the swap
+  (render-diff digests may change byte-wise; the fixtures freeze happens
+  AFTER the swap to avoid freezing twice).
+- **Revisit when:** Bevy updates change the screenshot/graph APIs or the
+  driver state changes; Windows needs its own platform observation.
+
+### ADR-0020 addendum 3 (2026-11-07, aggregate review round 1 resolutions)
+
+- **Behavior corrections adopted (review BLOCK, re-established after):**
+  1. Dropped PLAYER holds are hidden, not rendered (observed
+     `Strumline.hx:634-640`: alpha 0.0/"completely hide"); the earlier visible
+     DroppedTrail was an over-generalization of the §3 yOffset wording.
+  2. Stage props sample with LINEAR filtering (`antialiasing = !isPixel`,
+     Stage.hx:250-251; mainStage's three props are non-pixel); notes/
+     receptors/hold sheet nearest remains OUR renderer choice for non-stage
+     sprites (engine decision, inert to geometry).
+  3. `singTimeSteps` defaults to 8.0 when character data omits `singTime`
+     (observed `CharacterData.hx:451/593-596 DEFAULT_SINGTIME = 8.0`); the
+     earlier 4.0 default was an invented value. bf and gf have no `singTime`
+     key and use the default.
+  4. Opponent holds are pruned when `sim_ms >= end_ms` (opponent receptors
+     leave confirm-hold and return to static, Strumline.hx:653-669).
+  5. Player receptor confirm returns to static immediately on key release
+     (native `confirmHoldTimer = -1` semantics for the player); the 0.15 s
+     confirmHoldTimer reset remains the opponent's auto-hit path.
+- **Explicit scope decisions (also in gate coverage/honesty text):**
+  - Chart song events (`FocusCamera`, `PlayAnimation`, chart-linked camera
+    focus) are EXCLUDED from the phase-2b slice. Parity consequence stated:
+    native bopeebo alternates the camera focus every 2.4 s (FocusCamera v:0/v:1)
+    and plays chart `hey` animations; phase-2b frames do not reproduce these.
+    The exclusion is deliberate scope, not a claim that the native scene
+    matches; a later slice may implement chart events with its own evidence.
+  - Hold covers and note splashes are EXCLUDED from the phase-2b scene
+    (later-slice visual deliverable; zIndex 40/50 layers missing by decision).
+- **Evidence process note:** the perf-budget gate now measures a 16-step
+  scene-advancing discretization per frame (60 Hz), with the step cost inside
+  the measured interval; the first measurement wording ("rendered sequentially")
+  now also includes stepping. The fixture freeze happens only after the
+  re-establishment run that includes these corrections (the earlier freeze
+  candidates are superseded and were never held as acceptance evidence).
+- **Re-review resolutions (2026-11-07, before the final fixture freeze):**
+  1. Hold-trail width corrected to the honest formula `(graphic.width/8)*zoom =
+     (416/8)*0.7 = 36.4 px` for funkin (volume notes scale 0.7); the earlier 52
+     was the pre-zoom column width (transcription error, both in RENDER-BEHAVIOR
+     §3 now corrected and in the renderer). Placement flows from the width
+     function (no hardcoded 36.4).
+  2. Opponent holds prune at the first grid tick strictly AFTER the end
+     (`sim_ms > end_ms`) — the completion branch sees the previous-frame
+     snapshot (Strumline.hx:653-669/721-727, ADR-0019 semantics).
+  3. While the key stays held AND the confirm animation span has finished, the
+     player receptor plays `press` (observed Strumline.hx:774-779
+     onAnimationFinished fallback); release still returns to static
+     immediately; the opponent 150 ms confirmHoldTimer path is unchanged.
+- The final establishment froze the fixture with THESE corrections included
+  (`tests/fixtures/render-slice/_manifest.json`, established 2026-11-07 after
+  re-review; establishment log /tmp/opencode/render-diff-establishment.log4);
+  the gate passes twice (two-run equality) and perf-budget passes on the
+  hardware adapter (mean 3.525 ms / max 5.798 ms, 16-step discretized
+  frames). The `render_diff` top-doc now also states which geometry values
+  are independent-recomputed and which are pinned engine-decision
+  constants.

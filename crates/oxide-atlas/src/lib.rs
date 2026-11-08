@@ -10,11 +10,13 @@
 //! values, declarations preceded by blank lines).
 
 pub mod animate;
+pub mod animate_stage;
 pub mod packer;
 pub mod sparrow;
 pub mod xml;
 
 pub use animate::{AnimateAtlas, AnimateSprite, parse_animate};
+pub use animate_stage::{AnimateStage, AnimateStageError, SpriteQuad};
 pub use packer::{PackerAtlas, PackerFrame, parse_packer};
 pub use sparrow::{Atlas, FrameQuad, SubTexture, frame_quad, parse_sparrow};
 

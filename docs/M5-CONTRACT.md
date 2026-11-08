@@ -605,3 +605,20 @@ HIT-path judgement-miss keeps its bump.
 4. The `game_over` kind is unreachable in the native probe (death/clamp
    ordering lives in the unretained `update()`), so its frozen rows never
    exercise it; the §1.4 ordering stays an engine decision.
+
+## 8. Phase 2b (approved 2026-11-07): visual slice semantics pointer + corrigendum
+
+- Render/animation scene semantics are frozen in `tools/oracle/RENDER-BEHAVIOR.md`
+  (OBSERVED/DERIVED labels) and ADR-0020; `render_diff`/`perf_budget` definitions live
+  in RENDER-BEHAVIOR §7. This section adds no new trace schema variants — scene events
+  are consumed from the §2 trace; the §3 add-only rule extends per schema-bump rule.
+- **Corrigendum (observed units):** §0's "dad `singTime: 8.0`" recorded the data value
+  with an "(seconds)" gloss taken from the earlier read; the real consumption is
+  `singTimeSteps * conductor.stepLengthMs / 1000` (BaseCharacter.onUpdate L389-471) —
+  the field is treated as STEPS, i.e. dad `8.0` = 8 steps = 1.2 s at BPM 100. At
+  bopeebo's single time change this divergence never changes any animation boundary in
+  the frozen frames, but the unit is now pinned by RENDER-BEHAVIOR §5.
+- Phase-2b EXCLUSIONS (scope decisions, ADR-0020 addendum 3): chart song events
+  (`FocusCamera`/`PlayAnimation`) and hold covers/note splashes; dropped player
+  hold trails are hidden per the observed alpha-0 path; bf/gf `singTime` default is
+  the observed 8.0 steps. Visual-gate honesty text carries each exclusion.

@@ -1,0 +1,50 @@
+{
+  "AN": {
+    "N": "Collection Stage",
+    "SN": "Collection Main",
+    "TL": {
+      "L": [
+        {
+          "LN": "Labels",
+          "FR": [
+            {"N": "Walk", "I": 0, "DU": 1, "E": []},
+            {"N": "CollectLabel", "I": 3, "DU": 2, "E": []},
+            {"N": "CollectLabel", "I": 6, "DU": 1, "E": []}
+          ]
+        }
+      ]
+    }
+  },
+  "SD": {
+    "S": [
+      {
+        "SN": "CollectOnly",
+        "TL": {
+          "L": [
+            {
+              "FR": [
+                {
+                  "I": 0,
+                  "DU": 1,
+                  "E": [
+                    {"ASI": {"N": "collectBitmap", "MX": [1, 0, 0, 1, 0, 0]}},
+                    {"SI": {"SN": "Nested", "ST": "G", "MX": [1, 0, 0, 1, 0, 0]}}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "MD": {
+    "V": "synthetic",
+    "N": "Collection Stage",
+    "BGC": "#000000",
+    "W": 100,
+    "H": 100,
+    "ASV": 3,
+    "FRT": 12
+  }
+}

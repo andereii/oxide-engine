@@ -63,6 +63,8 @@ enum Action {
     ReplayCorpus,
     GameplaySim,
     NoteNative,
+    RenderDiff,
+    PerfBudget,
     InputJitter,
     ExternalCi,
     Pending,
@@ -288,16 +290,28 @@ const GATES: &[Gate] = &[
         timeout_secs: 300,
         ignored_tests: "not_applicable",
     },
-    pending("render_diff", 5, "Vertical-slice render-diff acceptance."),
-    pending(
-        "perf_budget",
-        5,
-        "Vertical-slice performance-budget acceptance.",
-    ),
+    Gate {
+        id: "render_diff",
+        milestone: 5,
+        coverage: "Deterministic bopeebo visual-slice comparison per ADR-0020 (incl. 2026-11-07 addendum) / RENDER-BEHAVIOR §7 (easy/normal/hard): reuses the gameplay_sim_bopeebo 1 ms stream and oxide_game::slice trace, drives SliceRenderer on the software adapter pinned by build() (llvmpipe), requires two-run slice-trace and per-frame sha256 equality, and verifies the frozen schema render-slice-1 sample positions, per-frame/run digests plus the canonical trace digest and independent structural geometry in tests/fixtures/render-slice/_manifest.json (fail-closed on drift; never regenerated during verification). software adapter pinned; adapter-specific fixture digests (adapter recorded in the manifest); NOT native pixel parity; native rendered-output trace remains a separate pending obligation. chart song events (FocusCamera / PlayAnimation / chart-linked camera focus) are EXCLUDED from the phase-2b slice — an explicit engine scope decision recorded in ADR-0020 addendum 3; native alternates focus every 2.4 s on bopeebo and plays chart `hey` animations, which the phase-2b frames do NOT reproduce. hold covers and note splashes are EXCLUDED from the phase-2b scene (later-slice visual deliverable).",
+        action: Action::RenderDiff,
+        dependencies: BASELINE,
+        timeout_secs: 600,
+        ignored_tests: "not_applicable",
+    },
+    Gate {
+        id: "perf_budget",
+        milestone: 5,
+        coverage: "Difficulty-easy visual-slice frame wall-time budget per ADR-0020 (incl. 2026-11-07 addendum) / RENDER-BEHAVIOR §7: SliceRenderer::build_for_adapter(AnyHardware) hardware adapter measurement (platform-specific; llvmpipe never substitutes; llvmpipe cannot pass the 60 Hz budget and is NOT a valid measurement), 16 replay steps per rendered frame (60 Hz discretization; measured interval includes the 16 step() calls plus one frame()), 120 warmup frames excluded, 300 measured frames rendered sequentially, PASS iff mean <= 16.667 ms AND max <= 33.333 ms (hard constants; no tolerance loosening); budgets mean <= 16.667 ms / max <= 33.333 ms; NOT a real-game/release-binary latency claim; runs only in release-built xtask (debug build fails closed with DebugBuild). chart song events (FocusCamera / PlayAnimation / chart-linked camera focus) are EXCLUDED from the phase-2b slice — an explicit engine scope decision recorded in ADR-0020 addendum 3; native alternates focus every 2.4 s on bopeebo and plays chart `hey` animations, which the phase-2b frames do NOT reproduce. hold covers and note splashes are EXCLUDED from the phase-2b scene (later-slice visual deliverable).",
+        action: Action::PerfBudget,
+        dependencies: BASELINE,
+        timeout_secs: 600,
+        ignored_tests: "not_applicable",
+    },
     Gate {
         id: "gameplay_sim_bopeebo",
         milestone: 5,
-        coverage: "Deterministic bopeebo-slice (easy/normal/hard) gameplay trace per docs/M5-CONTRACT.md §2 (schema '1'): input source 'synthesized from chart (no human replay yet)' plus the scripted negative phase (threshold edges 45/46/90/91/135/136, 110-late, 160/161 full path incl. tallies/combo_max, ghost, big drop, two-case boundary per §6.1 REVISED: stale 161 penalizing at ceil(t+l-160), stale exactly 160.0 zero-penalty at ceil(t+l-159); full-hold tick rates, two-run sha256); per-difficulty trace jsonl with two-run sha256 equality (digests printed). NOT native-game parity; native_note_reference is a separate frozen-reference gate; render_diff/perf_budget remain pending.",
+        coverage: "Deterministic bopeebo-slice (easy/normal/hard) gameplay trace per docs/M5-CONTRACT.md §2 (schema '1'): input source 'synthesized from chart (no human replay yet)' plus the scripted negative phase (threshold edges 45/46/90/91/135/136, 110-late, 160/161 full path incl. tallies/combo_max, ghost, big drop, two-case boundary per §6.1 REVISED: stale 161 penalizing at ceil(t+l-160), stale exactly 160.0 zero-penalty at ceil(t+l-159); full-hold tick rates, two-run sha256); per-difficulty trace jsonl with two-run sha256 equality (digests printed). NOT native-game parity; native_note_reference is a separate frozen-reference gate; render_diff/perf_budget are separate fail-closed visual-slice gates.",
         action: Action::GameplaySim,
         dependencies: BASELINE,
         timeout_secs: 600,
@@ -1300,6 +1314,22 @@ fn gate_command(gate: &Gate, options: &Options, root: &Path, executable: &Path) 
             }
             command
         }
+        Action::RenderDiff => {
+            let mut command = Command::new(executable);
+            command.arg("render-diff");
+            if let Some(assets) = &options.assets {
+                command.arg("--assets").arg(assets);
+            }
+            command
+        }
+        Action::PerfBudget => {
+            let mut command = Command::new(executable);
+            command.arg("perf-budget");
+            if let Some(assets) = &options.assets {
+                command.arg("--assets").arg(assets);
+            }
+            command
+        }
         Action::InputJitter => {
             let mut command = Command::new(executable);
             command.arg("input-jitter");
@@ -1475,6 +1505,8 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
                     | Action::ReplayCorpus
                     | Action::GameplaySim
                     | Action::NoteNative
+                    | Action::RenderDiff
+                    | Action::PerfBudget
             ) {
                 match &options.assets {
                     None => prerequisite_errors.push("explicit --assets DIR is required; no implicit home-specific corpus is accepted".into()),
@@ -2066,6 +2098,8 @@ mod tests {
             "conductor",
             "gameplay_sim_bopeebo",
             "native_note_reference",
+            "render_diff",
+            "perf_budget",
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
             assert_eq!(gate.dependencies, BASELINE, "{id}");
@@ -2167,6 +2201,8 @@ mod tests {
             ("conductor_native_reference", 4, "executable"),
             ("gameplay_sim_bopeebo", 5, "executable"),
             ("native_note_reference", 5, "executable"),
+            ("render_diff", 5, "executable"),
+            ("perf_budget", 5, "executable"),
             ("fuzz_parsers", 9, "pending"),
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
@@ -2220,6 +2256,58 @@ mod tests {
                 note_native.coverage
             );
         }
+        let render_diff = GATES.iter().find(|gate| gate.id == "render_diff").unwrap();
+        assert!(matches!(render_diff.action, Action::RenderDiff));
+        assert_eq!(render_diff.timeout_secs, 600);
+        assert_eq!(render_diff.dependencies, BASELINE);
+        assert_eq!(render_diff.ignored_tests, "not_applicable");
+        for required in [
+            "render-slice-1",
+            "two-run",
+            "sample positions",
+            "per-frame/run digests",
+            "structural geometry",
+            "software adapter pinned",
+            "adapter-specific fixture digests (adapter recorded in the manifest)",
+            "NOT native pixel parity",
+            "native rendered-output trace remains a separate pending obligation",
+            "FocusCamera / PlayAnimation / chart-linked camera focus",
+            "explicit engine scope decision recorded in ADR-0020 addendum 3",
+            "hold covers and note splashes are EXCLUDED from the phase-2b scene",
+        ] {
+            assert!(
+                render_diff.coverage.contains(required),
+                "render_diff coverage is missing {required:?}: {}",
+                render_diff.coverage
+            );
+        }
+        let perf_budget = GATES.iter().find(|gate| gate.id == "perf_budget").unwrap();
+        assert!(matches!(perf_budget.action, Action::PerfBudget));
+        assert_eq!(perf_budget.timeout_secs, 600);
+        assert_eq!(perf_budget.dependencies, BASELINE);
+        assert_eq!(perf_budget.ignored_tests, "not_applicable");
+        for required in [
+            "build_for_adapter(AnyHardware)",
+            "hardware adapter measurement",
+            "platform-specific",
+            "llvmpipe never substitutes",
+            "llvmpipe cannot pass the 60 Hz budget",
+            "NOT a valid measurement",
+            "16 replay steps per rendered frame (60 Hz discretization",
+            "120 warmup frames excluded",
+            "300 measured frames",
+            "budgets mean <= 16.667 ms / max <= 33.333 ms",
+            "NOT a real-game/release-binary latency claim",
+            "runs only in release-built xtask (debug build fails closed with DebugBuild)",
+            "FocusCamera / PlayAnimation / chart-linked camera focus",
+            "hold covers and note splashes are EXCLUDED from the phase-2b scene",
+        ] {
+            assert!(
+                perf_budget.coverage.contains(required),
+                "perf_budget coverage is missing {required:?}: {}",
+                perf_budget.coverage
+            );
+        }
     }
 
     #[test]
@@ -2255,7 +2343,10 @@ mod tests {
             if matches!(gate.action, Action::Corpus(_) | Action::Media) {
                 assert!(args.iter().any(|arg| arg == "--corpus"), "{}", gate.id);
             }
-            if matches!(gate.action, Action::GameplaySim | Action::NoteNative) {
+            if matches!(
+                gate.action,
+                Action::GameplaySim | Action::NoteNative | Action::RenderDiff | Action::PerfBudget
+            ) {
                 assert!(
                     args.iter().any(|arg| arg == "--assets"),
                     "{} must consume the explicit --assets directory",
