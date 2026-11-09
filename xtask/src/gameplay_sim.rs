@@ -514,39 +514,81 @@ fn simulate_difficulty(assets_root: &Path, difficulty: &str) -> Result<PassOutpu
     simulate_with_notes(assets_root, difficulty, &notes)
 }
 
-/// Loads the measured bopeebo chart and this difficulty's player notes in
-/// chart order (the order the slice sim uses for `note_id`). The chart and its
-/// metadata must match the frozen M4 provenance inventory; arbitrary mods or a
-/// drifted checkout are rejected rather than silently accepted as the corpus.
+/// Loads the measured bopeebo chart and this difficulty's player notes.
 pub(crate) fn load_verified_notes(
     assets_root: &Path,
     difficulty: &str,
 ) -> Result<Vec<LaneNote>, String> {
+    load_verified_notes_for_chart(assets_root, CHART_ID, difficulty)
+}
+
+/// Loads a provenance-bound corpus chart and this difficulty's player notes in
+/// chart order (the order the slice sim uses for `note_id`).
+///
+/// The chart-id resolution is shared with the `render-diff` families: a bare
+/// `<song>`/`<song>-default` maps to the unsuffixed chart/metadata pair and a
+/// known `<song>-<variant>` to the suffixed pair (the same rule as
+/// `oxide_game::slice`'s `build_chart_events`). The chart and metadata bytes
+/// must match the committed M4 provenance inventory; arbitrary mods or a
+/// drifted checkout are rejected rather than silently accepted as the corpus.
+pub(crate) fn load_verified_notes_for_chart(
+    assets_root: &Path,
+    chart_id: &str,
+    difficulty: &str,
+) -> Result<Vec<LaneNote>, String> {
     let inventory = provenance_inventory()?;
-    let chart_provenance_path =
-        crate::replay::resolve_chart_path(CHART_ID, &inventory).map_err(|error| error.0)?;
-    let metadata_provenance_path = chart_provenance_path
-        .strip_suffix("-chart.json")
-        .map(|prefix| format!("{prefix}-metadata.json"))
-        .ok_or_else(|| {
-            format!(
-                "provenance chart path {chart_provenance_path:?} does not end in -chart.json; \
-                 cannot derive the metadata path"
-            )
-        })?;
+    let (chart_provenance_path, metadata_provenance_path) =
+        chart_asset_paths_from_inventory(chart_id, &inventory)?;
     let chart_expected = inventory
-        .get(chart_provenance_path)
+        .get(&chart_provenance_path)
         .ok_or_else(|| format!("provenance lost the hash of {chart_provenance_path:?}"))?;
     let metadata_expected = inventory
         .get(&metadata_provenance_path)
         .ok_or_else(|| format!("provenance lost the hash of {metadata_provenance_path:?}"))?;
-    let chart_bytes = read_verified_asset(assets_root, chart_provenance_path, chart_expected)?;
+    let chart_bytes = read_verified_asset(assets_root, &chart_provenance_path, chart_expected)?;
     // The slice sim reads the metadata for difficulty validation; bind its
     // bytes to the measured corpus too even though this harness does not parse
     // those bytes itself.
     let _metadata_bytes =
         read_verified_asset(assets_root, &metadata_provenance_path, metadata_expected)?;
-    parse_notes(&chart_bytes, chart_provenance_path, difficulty)
+    parse_notes(&chart_bytes, &chart_provenance_path, difficulty)
+}
+
+/// Resolves a corpus-style chart id to the provenance-bound chart/metadata
+/// asset paths (game-checkout relative, `assets/...`).
+pub(crate) fn chart_asset_paths(chart_id: &str) -> Result<(String, String), String> {
+    let inventory = provenance_inventory()?;
+    chart_asset_paths_from_inventory(chart_id, &inventory)
+}
+
+fn chart_asset_paths_from_inventory(
+    chart_id: &str,
+    inventory: &BTreeMap<String, String>,
+) -> Result<(String, String), String> {
+    let fixture_id = fixture_chart_id(chart_id);
+    let chart_path = crate::replay::resolve_chart_path(&fixture_id, inventory)
+        .map_err(|error| error.0)?
+        .to_owned();
+    let metadata_path = chart_path
+        .strip_suffix("-chart.json")
+        .map(|prefix| format!("{prefix}-metadata.json"))
+        .ok_or_else(|| {
+            format!(
+                "provenance chart path {chart_path:?} does not end in -chart.json; cannot \
+                 derive the metadata path"
+            )
+        })?;
+    Ok((chart_path, metadata_path))
+}
+
+/// Normalizes a corpus-style chart id to the `fixture_id_of` provenance id.
+fn fixture_chart_id(chart_id: &str) -> String {
+    let (song, suffix) = split_chart_id(chart_id);
+    if suffix.is_empty() {
+        format!("{song}-default")
+    } else {
+        format!("{song}{suffix}")
+    }
 }
 
 fn provenance_inventory() -> Result<BTreeMap<String, String>, String> {
@@ -714,9 +756,10 @@ fn prepare_stream(notes: &[LaneNote]) -> Result<PreparedStream, String> {
 
 /// Replays the canonical 1 ms input stream through the frozen slice sim.
 ///
-/// This is the single simulation path used by `gameplay-sim`, the
-/// `render-diff` two-run trace check and the `perf-budget` scene driver; the
-/// stream synthesis is not re-derived by callers.
+/// This is the single schema-1 simulation path used by `gameplay-sim`, the
+/// `perf-budget` scene driver and the native-note export; the stream synthesis
+/// is not re-derived by callers. The event-enabled `render-diff` path uses
+/// [`canonical_event_replay`], which shares the same tick loop.
 pub(crate) fn canonical_replay(
     assets_root: &Path,
     difficulty: &str,
@@ -730,6 +773,125 @@ pub(crate) fn canonical_replay(
 
     let mut sim = GameplaySimState::build(assets_root, difficulty)
         .map_err(|error| format!("failed to build the bopeebo {difficulty} sim: {error}"))?;
+    let (ticks, trace) = replay_ticks(&mut sim, &inputs, end_ms)?;
+    let trace_bytes = serialize_trace(&trace)?;
+    let digest = sha_hex(&trace_bytes);
+    Ok(CanonicalReplay {
+        ticks,
+        trace_bytes,
+        digest,
+        script,
+    })
+}
+
+/// The 1 ms input plan used by an event-enabled replay.
+///
+/// `Scripted` is the frozen bopeebo negative-phase stream
+/// ([`prepare_stream`]). `ChartTaps` is the exact chart tap/release stream
+/// used by families whose chart cannot satisfy the scripted-phase
+/// preconditions: a read-only scan of `senpai-chart.json` (2026-11-08, all
+/// three difficulties) found ZERO sustains producing the `stale 161`
+/// boundary snapshot on normal/hard and ZERO producing `stale exactly 160.0`
+/// on easy/normal/hard, so the school render fixture would otherwise be
+/// impossible to establish without weakening the gameplay negative phase.
+pub(crate) enum EventInputPlan<'a> {
+    Scripted(&'a [LaneNote]),
+    ChartTaps(&'a [LaneNote]),
+}
+
+impl EventInputPlan<'_> {
+    fn prepare(&self) -> Result<(Vec<InputEvent>, u64), String> {
+        match self {
+            Self::Scripted(notes) => {
+                let PreparedStream { inputs, end_ms, .. } = prepare_stream(notes)?;
+                Ok((inputs, end_ms))
+            }
+            Self::ChartTaps(notes) => prepare_chart_stream(notes),
+        }
+    }
+}
+
+/// The event-enabled canonical replay used by the `render-diff` gate.
+pub(crate) struct EventReplay {
+    pub(crate) ticks: Vec<CanonicalTick>,
+    pub(crate) digest: String,
+}
+
+/// Replays a 1 ms input plan through the schema-3 event sim.
+///
+/// This is the `render-diff` replay path: it builds
+/// [`GameplaySimState::build_chart_events`] and shares the tick loop,
+/// `record()` cross-check and trace serialization with [`canonical_replay`].
+/// The schema-1 [`canonical_replay`] path is unchanged.
+pub(crate) fn canonical_event_replay(
+    assets_root: &Path,
+    chart_id: &str,
+    difficulty: &str,
+    plan: EventInputPlan<'_>,
+) -> Result<EventReplay, String> {
+    let (inputs, end_ms) = plan.prepare()?;
+    let mut sim = GameplaySimState::build_chart_events(assets_root, chart_id, difficulty).map_err(
+        |error| format!("failed to build the {chart_id} {difficulty} event sim: {error}"),
+    )?;
+    let (ticks, trace) = replay_ticks(&mut sim, &inputs, end_ms)?;
+    let trace_bytes = serialize_trace(&trace)?;
+    Ok(EventReplay {
+        ticks,
+        digest: sha_hex(&trace_bytes),
+    })
+}
+
+/// Exact chart taps and releases on the 1 ms grid (no scripted negative phase).
+fn prepare_chart_stream(notes: &[LaneNote]) -> Result<(Vec<InputEvent>, u64), String> {
+    let difficulty = notes
+        .first()
+        .map(|note| note.difficulty.clone())
+        .ok_or_else(|| "cannot build a chart stream for an empty note list".to_string())?;
+    if let Some(note) = notes.iter().find(|note| note.difficulty != difficulty) {
+        return Err(format!(
+            "cannot build a {difficulty:?} chart stream from notes labelled {:?}",
+            note.difficulty
+        ));
+    }
+    let mut events = Vec::with_capacity(notes.len() * 2);
+    for note in notes {
+        events.push(StreamEvent {
+            audio_time_ms: press_audio(note),
+            direction: note.direction,
+            difficulty: difficulty.clone(),
+            state: Key::Down,
+        });
+        events.push(StreamEvent {
+            audio_time_ms: release_audio(note),
+            direction: note.direction,
+            difficulty: difficulty.clone(),
+            state: Key::Up,
+        });
+    }
+    sort_stream(&mut events);
+    let inputs = to_input_events(&events)?;
+    let last_end_ms = grid_ms(
+        notes
+            .iter()
+            .map(|note| note.time_ms + note.hold_ms)
+            .fold(0.0_f64, f64::max),
+    )?;
+    let end_ms = last_end_ms
+        .checked_add(END_TAIL_MS)
+        .ok_or_else(|| "simulation end overflows u64 milliseconds".to_string())?;
+    Ok((inputs, end_ms))
+}
+
+/// Replays one input plan through a built sim and returns the tick stream.
+///
+/// This is the single 1 ms loop shared by the schema-1 and schema-3 replay
+/// paths: same-tick input dispatch, leftover check, and the `record()`
+/// cross-check.
+fn replay_ticks(
+    sim: &mut GameplaySimState,
+    inputs: &[InputEvent],
+    end_ms: u64,
+) -> Result<(Vec<CanonicalTick>, Vec<TraceEvent>), String> {
     let mut ticks = Vec::new();
     let mut trace = Vec::new();
     let mut next_input = 0usize;
@@ -764,14 +926,7 @@ pub(crate) fn canonical_replay(
                 .into(),
         );
     }
-    let trace_bytes = serialize_trace(&trace)?;
-    let digest = sha_hex(&trace_bytes);
-    Ok(CanonicalReplay {
-        ticks,
-        trace_bytes,
-        digest,
-        script,
-    })
+    Ok((ticks, trace))
 }
 
 fn simulate_with_notes(
@@ -2958,6 +3113,10 @@ mod tests {
             let chart = format!(
                 r#"{{"version":"2.0.0","scrollSpeed":{{"easy":1.2,"normal":1.3,"hard":1.6}},"events":[],"notes":{{"easy":[{notes}]}}}}"#
             );
+            Self::with_chart(&chart)
+        }
+
+        fn with_chart(chart: &str) -> Self {
             let root = std::env::temp_dir().join(format!(
                 "oxide-gameplay-sim-test-{}-{}",
                 std::process::id(),
@@ -3172,6 +3331,96 @@ mod tests {
             text.lines().next().unwrap_or("")
         );
         assert!(text.lines().all(|line| !line.is_empty()));
+    }
+
+    #[test]
+    fn chart_tap_stream_keeps_every_note_on_the_frozen_grid() {
+        let notes = vec![note(0, 1000.0, 0.0), note(1, 2000.0, 500.0)];
+        let (inputs, end_ms) = prepare_chart_stream(&notes).expect("chart tap plan");
+        assert_eq!(end_ms, 4500);
+        assert_eq!(
+            inputs,
+            vec![
+                InputEvent::Press {
+                    sim_ms: 1000,
+                    direction: 0
+                },
+                InputEvent::Release {
+                    sim_ms: 1000,
+                    direction: 0
+                },
+                InputEvent::Press {
+                    sim_ms: 2000,
+                    direction: 1
+                },
+                InputEvent::Release {
+                    sim_ms: 2500,
+                    direction: 1
+                },
+            ]
+        );
+        assert!(prepare_chart_stream(&[]).is_err());
+    }
+
+    fn has_schema3_hit(ticks: &[CanonicalTick]) -> bool {
+        ticks
+            .iter()
+            .flat_map(|tick| &tick.events)
+            .any(|event| match event {
+                TraceEvent::Hit { schema, .. } => *schema == "3",
+                _ => false,
+            })
+    }
+
+    #[test]
+    fn event_replay_emits_schema3_rows_and_is_two_run_stable() {
+        let chart = format!(
+            r#"{{"version":"2.0.0","scrollSpeed":{{"easy":1.2,"normal":1.3,"hard":1.6}},"events":[{{"t":1000,"e":"FocusCamera","v":{{"char":1}}}}],"notes":{{"easy":[{SCRIPTED_NOTES}]}}}}"#
+        );
+        let fixture = Fixture::with_chart(&chart);
+        let notes = fixture.notes("easy");
+        let first = canonical_event_replay(
+            &fixture.root,
+            "bopeebo",
+            "easy",
+            EventInputPlan::ChartTaps(&notes),
+        )
+        .expect("first event replay");
+        let second = canonical_event_replay(
+            &fixture.root,
+            "bopeebo",
+            "easy",
+            EventInputPlan::ChartTaps(&notes),
+        )
+        .expect("second event replay");
+        assert_eq!(first.digest, second.digest);
+        assert_eq!(
+            first
+                .ticks
+                .iter()
+                .map(|tick| tick.sim_ms)
+                .collect::<Vec<_>>(),
+            second
+                .ticks
+                .iter()
+                .map(|tick| tick.sim_ms)
+                .collect::<Vec<_>>()
+        );
+
+        let focus = first
+            .ticks
+            .iter()
+            .flat_map(|tick| &tick.events)
+            .find(|event| matches!(event, TraceEvent::CameraFocus { .. }))
+            .expect("the FocusCamera event row");
+        match focus {
+            TraceEvent::CameraFocus { schema, sim, .. } => {
+                assert_eq!(*schema, "3");
+                assert_eq!(*sim, 1000);
+            }
+            other => panic!("unexpected event {other:?}"),
+        }
+        assert!(has_schema3_hit(&first.ticks));
     }
 
     #[test]

@@ -293,7 +293,7 @@ const GATES: &[Gate] = &[
     Gate {
         id: "render_diff",
         milestone: 5,
-        coverage: "Deterministic bopeebo visual-slice comparison per ADR-0020 (incl. 2026-11-07 addendum) / RENDER-BEHAVIOR §7 (easy/normal/hard): reuses the gameplay_sim_bopeebo 1 ms stream and oxide_game::slice trace, drives SliceRenderer on the software adapter pinned by build() (llvmpipe), requires two-run slice-trace and per-frame sha256 equality, and verifies the frozen schema render-slice-1 sample positions, per-frame/run digests plus the canonical trace digest and independent structural geometry in tests/fixtures/render-slice/_manifest.json (fail-closed on drift; never regenerated during verification). software adapter pinned; adapter-specific fixture digests (adapter recorded in the manifest); NOT native pixel parity; native rendered-output trace remains a separate pending obligation. chart song events (FocusCamera / PlayAnimation / chart-linked camera focus) are EXCLUDED from the phase-2b slice — an explicit engine scope decision recorded in ADR-0020 addendum 3; native alternates focus every 2.4 s on bopeebo and plays chart `hey` animations, which the phase-2b frames do NOT reproduce. hold covers and note splashes are EXCLUDED from the phase-2b scene (later-slice visual deliverable).",
+        coverage: "Deterministic visual-slice comparison per ADR-0020 (incl. 2026-11-07 addendum) / RENDER-BEHAVIOR §7 for two chart-id families: bopeebo (easy/normal/hard, schema-3 event-driven canonical stream with the frozen scripted negative phase) and school (senpai, easy/normal/hard declared by metadata, exact chart taps, pixel note style + school stage + 26 FocusCamera rows). Reuses the gameplay_sim 1 ms stream and oxide_game::slice trace, drives SliceRenderer::build_for_song on the software adapter pinned by the renderer (llvmpipe), requires two-run slice-trace and per-frame sha256 equality, and verifies the frozen schema render-slice-2 per-family sample positions, per-frame/run digests, canonical trace digests, frame counts and independent structural geometry in tests/fixtures/render-slice/_manifest.json (fail-closed on a missing/unknown family, difficulty subset mismatch or any drift; never regenerated during verification). schema-3 chart song events (FocusCamera/ZoomCamera/SetCameraBop/PlayAnimation/ScrollSpeed/SetHealthIcon/unknown) are consumed by the scene; they add no sample-plan classes (rows are not scripted-phase classes). software adapter pinned; adapter-specific fixture digests (adapter recorded in the manifest); NOT native pixel parity; native rendered-output trace remains a separate pending obligation. hold covers and note splashes are EXCLUDED from the phase-2b scene (later-slice visual deliverable).",
         action: Action::RenderDiff,
         dependencies: BASELINE,
         timeout_secs: 600,
@@ -2262,17 +2262,21 @@ mod tests {
         assert_eq!(render_diff.dependencies, BASELINE);
         assert_eq!(render_diff.ignored_tests, "not_applicable");
         for required in [
-            "render-slice-1",
+            "render-slice-2",
             "two-run",
             "sample positions",
             "per-frame/run digests",
+            "frame counts",
             "structural geometry",
             "software adapter pinned",
             "adapter-specific fixture digests (adapter recorded in the manifest)",
             "NOT native pixel parity",
             "native rendered-output trace remains a separate pending obligation",
-            "FocusCamera / PlayAnimation / chart-linked camera focus",
-            "explicit engine scope decision recorded in ADR-0020 addendum 3",
+            "bopeebo",
+            "school",
+            "senpai",
+            "FocusCamera",
+            "schema-3 chart song events",
             "hold covers and note splashes are EXCLUDED from the phase-2b scene",
         ] {
             assert!(

@@ -1,25 +1,29 @@
-//! `cargo xtask render-diff` — the M5 phase-2b visual-slice engine fixture.
+//! `cargo xtask render-diff` — the visual-slice engine fixture.
 //!
 //! Implements the ADR-0020 / `tools/oracle/RENDER-BEHAVIOR.md` §7 gate:
 //!
-//! 1. The canonical 1 ms input stream is synthesized by the SAME
-//!    [`crate::gameplay_sim`] path used by `gameplay_sim_bopeebo` (the stream
-//!    recipe is never re-derived here) and replayed through
-//!    [`oxide_game::slice`]. The whole trace is replayed twice per difficulty
-//!    and both canonical trace sha256 digests must match.
-//! 2. The frozen phase-2b [`oxide_game::render::SliceRenderer`] is driven on
-//!    the same ticks. A deterministic per-difficulty sample list is computed
-//!    from the conductor beat grid and the canonical trace's event kinds;
-//!    each sample position renders one frame, writes a PNG and a per-frame
-//!    sha256 under `target/render-diff/<difficulty>/`, and the whole render
+//! 1. Two chart-id families are driven through the schema-3 event-enabled
+//!    canonical replay (`docs/M6-CONTRACT.md` §12.7): `bopeebo` keeps the
+//!    frozen scripted negative-phase input stream, `school` uses the exact
+//!    `senpai` chart taps (that chart cannot satisfy the scripted-phase
+//!    boundary preconditions). The shared 1 ms tick loop, `record()`
+//!    cross-check and trace sha256 live in [`crate::gameplay_sim`].
+//! 2. The canonical ticks are replayed through
+//!    [`oxide_game::render::SliceRenderer::build_for_song`] on the software
+//!    adapter. A deterministic per-difficulty sample list is computed from the
+//!    family metadata beat grid and the canonical trace's scripted-phase event
+//!    kinds; schema-3 chart rows and opponent rows add no sample classes.
+//!    Each sample position renders one frame, writes a PNG and a per-frame
+//!    sha256 under `target/render-diff/<family>/<difficulty>/`, and the whole
 //!    pipeline runs twice. Per-frame digests and the whole-run digest must be
 //!    byte-identical across the two runs.
 //! 3. When `tests/fixtures/render-slice/_manifest.json` exists, the frozen
-//!    schema (`render-slice-1`), adapter token (`llvmpipe`, software-pinned by
-//!    [`SliceRenderer::build`]), sample lists, per-frame digests, whole-run
-//!    digests and structural geometry constants are verified fail-closed. A
-//!    missing or drifted fixture makes the gate exit nonzero; it never writes
-//!    under `tests/` and never regenerates expectations.
+//!    `render-slice-2` schema, adapter token (`llvmpipe`), per-family
+//!    chart-id/difficulty lists, sample lists, per-frame digests, whole-run
+//!    digests, canonical trace digests and structural geometry are verified
+//!    fail-closed. A missing/unknown family section, a difficulty subset
+//!    mismatch or any drift makes the gate exit nonzero; it never writes under
+//!    `tests/` and never regenerates expectations.
 //!
 //! Sample positions are frozen by the first establishment run (owned by the
 //! orchestrator, like ADR-0019), not by this gate:
@@ -32,7 +36,10 @@
 //!   presses), each with one follow-up at `+250 ms` clamped to song bounds;
 //! - the first tick past the last note end.
 //!
-//! The list is sorted and deduplicated. `song_end` is the grid-rounded last
+//! Schema-3 chart song-event rows (FocusCamera/ZoomCamera/SetCameraBop/
+//! PlayAnimation/ScrollSpeed/SetHealthIcon/unknown) and schema-2 opponent rows
+//! are consumed by the scene but carry no scripted-phase sample category. The
+//! list is sorted and deduplicated. `song_end` is the grid-rounded last
 //! player-note end (`ceil(t + l)`) that the canonical stream covers; the
 //! canonical replay then continues for its frozen 2 s tail.
 //!
@@ -42,7 +49,8 @@
 //! receptor positions, lane reference line, note top-left crossing y, stage
 //! prop world rects and the initial camera scroll. Stage/atlas path candidate
 //! order mirrors the renderer's frozen asset-key resolution so the same files
-//! are inspected.
+//! are inspected. The `bopeebo` family keeps the frozen mainStage checks and
+//! character bounds; `school` checks the `senpai` Sparrow first-frame bounds.
 //!
 //! Honesty: frame digests are OUR renderer's output frozen once (an engine
 //! fixture). They are NOT native pixel parity; a native-game rendered-output
@@ -66,10 +74,10 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::gameplay_sim::{self, CanonicalReplay, DIFFICULTIES};
+use crate::gameplay_sim::{self, CanonicalTick, EventInputPlan};
 use crate::replay::LaneNote;
 
-const SCHEMA: &str = "render-slice-1";
+const SCHEMA: &str = "render-slice-2";
 /// Fixture digests are adapter-specific (ADR-0020 addendum 2026-11-07).
 /// `SliceRenderer::build` is the software-pinned entry point, so the manifest
 /// records this stable policy token; the harness echoes the full
@@ -78,9 +86,10 @@ const ADAPTER: &str = "llvmpipe";
 const FIXTURE_DIR: &str = "tests/fixtures/render-slice";
 const MANIFEST_FILE: &str = "_manifest.json";
 const TARGET_DIR: &str = "target/render-diff";
-const HONESTY: &str = "engine fixture; software adapter pinned; adapter-specific fixture digests \
-                       (adapter recorded in the manifest); NOT native pixel parity; native \
-                       rendered-output trace remains a separate pending obligation";
+const HONESTY: &str = "engine fixture; schema-3 event-driven scene consumption; software adapter \
+                       pinned; adapter-specific fixture digests (adapter recorded in the \
+                       manifest); NOT native pixel parity; native rendered-output trace remains a \
+                       separate pending obligation";
 /// RENDER-BEHAVIOR §3 engine decision: sampled frames start after the receptor
 /// fade completes.
 const FADE_COMPLETE_MS: f64 = 1000.0;
@@ -101,21 +110,70 @@ const STRUMLINE_Y: f64 = 24.0;
 const PLAYER_STRUMLINE_X: f64 = 688.0;
 const OPPONENT_STRUMLINE_X: f64 = 48.0;
 const PIXELS_PER_MS: f64 = 0.45;
-const EASY_SCROLL_SPEED: f64 = 1.2;
 /// Nonzero strum offsets used to pin the note TOP-LEFT y formula
 /// (RENDER-BEHAVIOR §3); see [`note_top_left_y_at_offsets`].
 const NOTE_TOP_LEFT_OFFSETS_MS: [u64; 2] = [1040, 2080];
 const GEOMETRY_ABS_TOLERANCE: f64 = 1e-9;
 
-const METADATA_PATH: &str = "preload/data/songs/bopeebo/bopeebo-metadata.json";
+/// The input recipe a family replays through the schema-3 event sim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FamilyStream {
+    /// Frozen bopeebo scripted negative phase (`prepare_stream`).
+    Scripted,
+    /// Exact chart taps/releases (no scripted-phase preconditions).
+    ChartTaps,
+}
+
+/// The independent geometry check that is family-specific.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CharacterBoundsCheck {
+    /// Frozen bopeebo bf/dad/gf content bounds.
+    PinnedBopeebo,
+    /// The family opponent's Sparrow first-frame content bounds.
+    OpponentContent,
+}
+
+struct Family {
+    name: &'static str,
+    chart_id: &'static str,
+    difficulties: &'static [&'static str],
+    stream: FamilyStream,
+    required_props: &'static [&'static str],
+    character_bounds: CharacterBoundsCheck,
+}
+
+const BOPEEBO_FAMILY: Family = Family {
+    name: "bopeebo",
+    chart_id: "bopeebo",
+    difficulties: &["easy", "normal", "hard"],
+    stream: FamilyStream::Scripted,
+    required_props: &["stageback", "stagefront", "stagecurtains"],
+    character_bounds: CharacterBoundsCheck::PinnedBopeebo,
+};
+
+const SCHOOL_FAMILY: Family = Family {
+    name: "school",
+    chart_id: "senpai",
+    // Observed `senpai-metadata.json` playData.difficulties (2026-11-08);
+    // capture re-reads the metadata and fails closed on any mismatch.
+    difficulties: &["easy", "normal", "hard"],
+    // A read-only scan of `senpai-chart.json` found no sustain satisfying
+    // either mandatory scripted boundary case (see `EventInputPlan::ChartTaps`),
+    // so the school family uses exact chart taps.
+    stream: FamilyStream::ChartTaps,
+    required_props: &[],
+    character_bounds: CharacterBoundsCheck::OpponentContent,
+};
+
+const FAMILIES: [&Family; 2] = [&BOPEEBO_FAMILY, &SCHOOL_FAMILY];
 
 /// Typed failure for the fixture-boundary case called out by the gate brief.
 #[derive(Debug, thiserror::Error)]
 enum RenderDiffError {
     #[error(
         "fixtures not established: {path} is missing; the gate never creates or regenerates \
-         fixtures. The computed sample list and frame digests above must be frozen through the \
-         reviewed establishment step (target/render-diff/ is not committed evidence)"
+         fixtures. The per-family sample lists and frame digests above must be frozen through \
+         the reviewed establishment step (target/render-diff/ is not committed evidence)"
     )]
     FixturesNotEstablished { path: String },
     #[error("{0}")]
@@ -160,58 +218,83 @@ pub fn run(rest: &[String]) -> ExitCode {
         );
     }
 
-    let geometry = match compute_geometry(&assets_root) {
-        Ok(geometry) => Some(geometry),
-        Err(error) => {
-            eprintln!("render-diff: geometry check: {error}");
-            None
-        }
-    };
-
-    let mut evidence: BTreeMap<&'static str, DifficultyEvidence> = BTreeMap::new();
+    let mut families: BTreeMap<&'static str, FamilyEvidence> = BTreeMap::new();
     let mut failures: Vec<String> = Vec::new();
-    if geometry.is_none() {
-        failures
-            .push("independent structural geometry could not be computed from the assets".into());
-    }
-    // Print the recomputed geometry before manifest comparison so drift
-    // diagnostics and the establishment log always carry the same values.
-    if let Some(geometry) = &geometry {
-        println!(
-            "render-diff: computed geometry: {}",
-            serde_json::to_string(&geometry.to_json())
-                .unwrap_or_else(|_| "<unserializable>".to_string())
-        );
-    }
-
-    for difficulty in DIFFICULTIES {
-        let target = workspace.join(TARGET_DIR).join(difficulty);
-        match capture_difficulty(&assets_root, difficulty, &target) {
-            Ok(captured) => {
-                print_evidence(&captured);
-                evidence.insert(difficulty, captured);
+    for family in FAMILIES {
+        let mut evidence = FamilyEvidence {
+            entries: BTreeMap::new(),
+            geometry: None,
+        };
+        match declared_difficulties(&assets_root, family.chart_id) {
+            Ok(declared) => {
+                let matches = declared.len() == family.difficulties.len()
+                    && declared
+                        .iter()
+                        .zip(family.difficulties)
+                        .all(|(actual, expected)| actual.as_str() == *expected);
+                if !matches {
+                    failures.push(format!(
+                        "{}: metadata declares difficulties {:?}, but the gate family requires \
+                         {:?}; refusing a difficulty subset mismatch",
+                        family.name, declared, family.difficulties
+                    ));
+                }
+            }
+            Err(error) => failures.push(format!("{}: {error}", family.name)),
+        }
+        // Print the recomputed geometry before manifest comparison so drift
+        // diagnostics and the establishment log always carry the same values.
+        match compute_geometry(&assets_root, family) {
+            Ok(geometry) => {
+                println!(
+                    "render-diff: {}: computed geometry: {}",
+                    family.name,
+                    serde_json::to_string(&geometry.to_json())
+                        .unwrap_or_else(|_| "<unserializable>".to_string())
+                );
+                evidence.geometry = Some(geometry);
             }
             Err(error) => {
-                eprintln!("render-diff: {difficulty}: {error}");
-                failures.push(format!("{difficulty}: {error}"));
+                eprintln!("render-diff: {}: geometry check: {error}", family.name);
+                failures.push(format!(
+                    "{}: independent structural geometry could not be computed: {error}",
+                    family.name
+                ));
             }
         }
+        for difficulty in family.difficulties {
+            let target = workspace
+                .join(TARGET_DIR)
+                .join(family.name)
+                .join(difficulty);
+            match capture_difficulty(&assets_root, family, difficulty, &target) {
+                Ok(captured) => {
+                    print_evidence(family.name, &captured);
+                    evidence.entries.insert(difficulty, captured);
+                }
+                Err(error) => {
+                    eprintln!("render-diff: {}/{}: {error}", family.name, difficulty);
+                    failures.push(format!("{}/{}: {error}", family.name, difficulty));
+                }
+            }
+        }
+        families.insert(family.name, evidence);
     }
 
     if fixtures_present {
         match load_manifest(&manifest_path) {
-            Ok(manifest) => {
-                failures.extend(compare_manifest(&manifest, &evidence));
-                if let Some(geometry) = &geometry {
-                    failures.extend(compare_geometry(geometry, &manifest));
-                }
-            }
+            Ok(manifest) => failures.extend(compare_manifest(&manifest, &families)),
             Err(error) => failures.push(error),
         }
     } else {
         println!(
-            "render-diff: manifest must record \"adapter\": {ADAPTER:?} (the software-pinned \
-             digests are adapter-specific)"
+            "render-diff: manifest must record \"schema\": {SCHEMA:?}, \"adapter\": {ADAPTER:?} \
+             and a \"families\" object with sections {:?}; each section needs chart_id, \
+             difficulties, samples, frame_sha256, run_sha256, trace_sha256 and geometry",
+            FAMILIES
+                .iter()
+                .map(|family| family.name)
+                .collect::<Vec<_>>()
         );
         // The absent-fixture path is the establishment aid: print everything
         // the orchestrator must freeze, but still fail closed.
@@ -224,7 +307,7 @@ pub fn run(rest: &[String]) -> ExitCode {
     if failures.is_empty() {
         println!(
             "render-diff: PASS: two-run slice trace and frame digests are identical and match \
-             the frozen render-slice-1 fixture; {HONESTY}"
+             the frozen {SCHEMA} fixture for every family; {HONESTY}"
         );
         ExitCode::SUCCESS
     } else {
@@ -286,29 +369,61 @@ struct DifficultyEvidence {
     trace_sha256: String,
 }
 
+struct FamilyEvidence {
+    entries: BTreeMap<&'static str, DifficultyEvidence>,
+    geometry: Option<Geometry>,
+}
+
+fn declared_difficulties(assets_root: &Path, chart_id: &str) -> Result<Vec<String>, String> {
+    let (_, metadata_path) = gameplay_sim::chart_asset_paths(chart_id)?;
+    let document = read_data_document(assets_root, &metadata_path)?;
+    let Typed::Metadata(metadata) = document.typed else {
+        return Err(format!(
+            "{metadata_path} parsed as {:?}; metadata was required",
+            document.kind
+        ));
+    };
+    let play_data = metadata
+        .play_data
+        .as_ref()
+        .ok_or_else(|| format!("{metadata_path} lacks playData"))?;
+    if play_data.difficulties.is_empty() {
+        return Err(format!("{metadata_path} declares an empty difficulty list"));
+    }
+    Ok(play_data.difficulties.clone())
+}
+
 fn capture_difficulty(
     assets_root: &Path,
+    family: &'static Family,
     difficulty: &'static str,
     target_dir: &Path,
 ) -> Result<DifficultyEvidence, String> {
-    let notes = gameplay_sim::load_verified_notes(assets_root, difficulty)?;
+    let notes =
+        gameplay_sim::load_verified_notes_for_chart(assets_root, family.chart_id, difficulty)?;
     // The complete pipeline (sim replay, sample derivation, frame rendering
     // and evidence hashing) runs twice from fresh state. Only the first run
     // writes the never-committed target evidence.
-    let first = capture_once(assets_root, difficulty, &notes, Some(target_dir))?;
-    let second = capture_once(assets_root, difficulty, &notes, None)?;
-    compare_runs(difficulty, &first, &second)?;
+    let first = capture_once(assets_root, family, difficulty, &notes, Some(target_dir))?;
+    let second = capture_once(assets_root, family, difficulty, &notes, None)?;
+    compare_runs(&format!("{}/{}", family.name, difficulty), &first, &second)?;
     Ok(first)
 }
 
 fn capture_once(
     assets_root: &Path,
+    family: &Family,
     difficulty: &'static str,
     notes: &[LaneNote],
     write_dir: Option<&Path>,
 ) -> Result<DifficultyEvidence, String> {
-    let replay = gameplay_sim::canonical_replay(assets_root, difficulty, notes)?;
-    let samples = sample_positions(assets_root, notes, &replay)?;
+    let plan = match family.stream {
+        FamilyStream::Scripted => EventInputPlan::Scripted(notes),
+        FamilyStream::ChartTaps => EventInputPlan::ChartTaps(notes),
+    };
+    let replay =
+        gameplay_sim::canonical_event_replay(assets_root, family.chart_id, difficulty, plan)?;
+    let samples = sample_positions(assets_root, family.chart_id, notes, &replay.ticks)?;
     let last_sample = samples
         .last()
         .copied()
@@ -321,7 +436,7 @@ fn capture_once(
         ));
     }
 
-    let mut renderer = SliceRenderer::build(assets_root, difficulty)
+    let mut renderer = SliceRenderer::build_for_song(assets_root, family.chart_id, difficulty)
         .map_err(|error| format!("{difficulty}: renderer build failed: {error}"))?;
     let sample_set: BTreeSet<u64> = samples.iter().copied().collect();
     let mut frames = Vec::with_capacity(samples.len());
@@ -461,15 +576,15 @@ fn compare_runs(
     Ok(())
 }
 
-fn print_evidence(evidence: &DifficultyEvidence) {
+fn print_evidence(family: &str, evidence: &DifficultyEvidence) {
     println!(
-        "render-diff: {}: sample list ({}): {:?}",
+        "render-diff: {family}/{}: sample list ({}): {:?}",
         evidence.difficulty,
         evidence.samples.len(),
         evidence.samples
     );
     println!(
-        "render-diff: {}: slice trace sha256 {}; run sha256 {}; frames {}",
+        "render-diff: {family}/{}: slice trace sha256 {}; run sha256 {}; frames {}",
         evidence.difficulty,
         evidence.trace_sha256,
         evidence.run_sha256,
@@ -477,7 +592,7 @@ fn print_evidence(evidence: &DifficultyEvidence) {
     );
     for frame in &evidence.frames {
         println!(
-            "render-diff: {}: frame {} sha256 {}",
+            "render-diff: {family}/{}: frame {} sha256 {}",
             evidence.difficulty, frame.sample_ms, frame.sha256
         );
     }
@@ -541,22 +656,18 @@ fn event_categories(event: &TraceEvent) -> Result<Vec<EventCategory>, String> {
              live trace"
                 .to_string(),
         ),
-        // Compile-only arm authorized for the schema-2 variant: the frozen
-        // schema-1 canonical render stream never carries opponent rows.
-        TraceEvent::OpponentHit { .. } => {
-            Err("a schema-2 opponent row reached the schema-1 canonical render stream".to_string())
-        }
-        // Schema-3 chart-event rows never appear in the frozen canonical
-        // render streams; treat them like the opponent guard (fail closed).
-        TraceEvent::CameraFocus { .. }
+        // Schema-2 opponent rows and schema-3 chart-event rows are consumed by
+        // the scene but are not scripted-phase sample classes: the frozen
+        // sample plan keeps its eight beats, end margin, scripted categories
+        // and last-note tick.
+        TraceEvent::OpponentHit { .. }
+        | TraceEvent::CameraFocus { .. }
         | TraceEvent::CameraZoom { .. }
         | TraceEvent::CameraBop { .. }
         | TraceEvent::PlayAnimation { .. }
         | TraceEvent::ScrollSpeed { .. }
         | TraceEvent::HealthIcon { .. }
-        | TraceEvent::UnknownEvent { .. } => Err(
-            "a schema-3 chart-event row reached the schema-1 canonical render stream".to_string(),
-        ),
+        | TraceEvent::UnknownEvent { .. } => Ok(Vec::new()),
     }
 }
 
@@ -581,16 +692,18 @@ fn trace_sim(event: &TraceEvent) -> u64 {
     }
 }
 
-/// Deterministic sample plan for one difficulty.
+/// Deterministic sample plan for one family difficulty.
 pub(crate) fn sample_positions(
     assets_root: &Path,
+    chart_id: &str,
     notes: &[LaneNote],
-    replay: &CanonicalReplay,
+    ticks: &[CanonicalTick],
 ) -> Result<Vec<u64>, String> {
+    let (_, metadata_path) = gameplay_sim::chart_asset_paths(chart_id)?;
     let song_end = song_end_ms(notes)?;
-    let beats = beat_times(assets_root, song_end)?;
+    let beats = beat_times(assets_root, &metadata_path, song_end)?;
     let mut categories = Vec::new();
-    for tick in &replay.ticks {
+    for tick in ticks {
         for event in &tick.events {
             for category in event_categories(event)? {
                 categories.push((trace_sim(event), category));
@@ -641,9 +754,9 @@ fn song_end_ms(notes: &[LaneNote]) -> Result<u64, String> {
     Ok(end)
 }
 
-fn beat_times(assets_root: &Path, song_end: u64) -> Result<Vec<u64>, String> {
+fn beat_times(assets_root: &Path, metadata_path: &str, song_end: u64) -> Result<Vec<u64>, String> {
     let mut conductor = Conductor::new();
-    conductor.map_time_changes(&conductor_time_changes(assets_root)?);
+    conductor.map_time_changes(&conductor_time_changes(assets_root, metadata_path)?);
     let mut first = None;
     for index in 0..1_000_000i32 {
         let beat_ms = conductor.get_beat_time_in_ms(f64::from(index));
@@ -675,11 +788,14 @@ fn beat_times(assets_root: &Path, song_end: u64) -> Result<Vec<u64>, String> {
     Ok(beats)
 }
 
-fn conductor_time_changes(assets_root: &Path) -> Result<Vec<TimeChange>, String> {
-    let document = read_data_document(assets_root, METADATA_PATH)?;
+fn conductor_time_changes(
+    assets_root: &Path,
+    metadata_path: &str,
+) -> Result<Vec<TimeChange>, String> {
+    let document = read_data_document(assets_root, metadata_path)?;
     let Typed::Metadata(metadata) = document.typed else {
         return Err(format!(
-            "{METADATA_PATH} parsed as {:?}; metadata was required",
+            "{metadata_path} parsed as {:?}; metadata was required",
             document.kind
         ));
     };
@@ -809,18 +925,19 @@ fn note_crossing_top_y() -> f64 {
 }
 
 /// Note TOP-LEFT y for notes whose strum time is `offset_ms` in the future
-/// (easy scroll speed 1.2). RENDER-BEHAVIOR §3:
+/// at the family's easy scroll speed. RENDER-BEHAVIOR §3:
 /// `y = STRUMLINE_Y - INITIAL_OFFSET + getNoteY`, with
 /// `getNoteY = 0.45 * (song_ms - strum_ms) * scrollSpeed * -1`; for a future
 /// note `(song_ms - strum_ms) = -offset_ms`, hence
-/// `52.6 + 0.45 * offset_ms * 1.2`. Expected: 1040 -> 614.2, 2080 -> 1175.8.
-fn note_top_left_y_at_offsets() -> BTreeMap<String, f64> {
+/// `52.6 + 0.45 * offset_ms * scrollSpeed`. The frozen bopeebo values
+/// (scrollSpeed 1.2): 1040 -> 614.2, 2080 -> 1175.8.
+fn note_top_left_y_at_offsets(scroll_speed: f64) -> BTreeMap<String, f64> {
     NOTE_TOP_LEFT_OFFSETS_MS
         .iter()
         .map(|offset_ms| {
             (
                 offset_ms.to_string(),
-                note_crossing_top_y() + PIXELS_PER_MS * (*offset_ms as f64) * EASY_SCROLL_SPEED,
+                note_crossing_top_y() + PIXELS_PER_MS * (*offset_ms as f64) * scroll_speed,
             )
         })
         .collect()
@@ -866,27 +983,28 @@ fn camera_initial_scroll(
     [focus[0] - GAME_WIDTH / 2.0, focus[1] - GAME_HEIGHT / 2.0]
 }
 
-fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
-    let metadata_document = read_data_document(assets_root, METADATA_PATH)?;
+fn compute_geometry(assets_root: &Path, family: &Family) -> Result<Geometry, String> {
+    let (chart_path, metadata_path) = gameplay_sim::chart_asset_paths(family.chart_id)?;
+    let metadata_document = read_data_document(assets_root, &metadata_path)?;
     let Typed::Metadata(metadata) = metadata_document.typed else {
         return Err(format!(
-            "{METADATA_PATH} parsed as {:?}; metadata was required",
+            "{metadata_path} parsed as {:?}; metadata was required",
             metadata_document.kind
         ));
     };
     let play_data = metadata
         .play_data
         .as_ref()
-        .ok_or_else(|| format!("{METADATA_PATH} lacks playData"))?;
+        .ok_or_else(|| format!("{metadata_path} lacks playData"))?;
     let stage_name = play_data
         .stage
         .as_deref()
-        .ok_or_else(|| format!("{METADATA_PATH} lacks playData.stage"))?;
+        .ok_or_else(|| format!("{metadata_path} lacks playData.stage"))?;
     let opponent_name = play_data
         .characters
         .as_ref()
         .and_then(|characters| characters.opponent.as_deref())
-        .ok_or_else(|| format!("{METADATA_PATH} lacks playData.characters.opponent"))?;
+        .ok_or_else(|| format!("{metadata_path} lacks playData.characters.opponent"))?;
 
     let stage_path = format!("preload/data/stages/{stage_name}.json");
     let stage_document = read_data_document(assets_root, &stage_path)?;
@@ -896,6 +1014,7 @@ fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
             stage_document.kind
         ));
     };
+    let level_dir = stage.directory.as_deref();
 
     let mut props = BTreeMap::new();
     for prop in &stage.props {
@@ -903,7 +1022,7 @@ fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
             .asset_path
             .as_deref()
             .ok_or_else(|| format!("{stage_path} prop {:?} lacks assetPath", prop.name))?;
-        let image_size = image_size(assets_root, asset_path)?;
+        let image_size = image_size(assets_root, asset_path, level_dir)?;
         let position = prop.position.unwrap_or((0.0, 0.0));
         let scale = prop.scale.unwrap_or((1.0, 1.0));
         let key = prop.name.to_ascii_lowercase();
@@ -917,10 +1036,10 @@ fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
             return Err(format!("{stage_path} has duplicate prop name {key:?}"));
         }
     }
-    for required in ["stageback", "stagefront", "stagecurtains"] {
-        if !props.contains_key(required) {
+    for required in family.required_props {
+        if !props.contains_key(*required) {
             return Err(format!(
-                "{stage_path} does not define the frozen mainStage prop {required:?}"
+                "{stage_path} does not define the frozen {required:?} prop"
             ));
         }
     }
@@ -930,23 +1049,20 @@ fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
         .as_ref()
         .and_then(Value::as_object)
         .ok_or_else(|| format!("{stage_path} characters is not an object"))?;
+    // Stage character slots are role-keyed (`bf`/`dad`/`gf`); the metadata
+    // opponent id selects the character data, not the slot key.
     let opponent_slot = characters
-        .get(opponent_name)
-        .ok_or_else(|| format!("{stage_path} lacks the {opponent_name:?} character slot"))?;
+        .get("dad")
+        .ok_or_else(|| format!("{stage_path} lacks the \"dad\" character slot"))?;
     let slot_position = json_pair(
         opponent_slot
             .get("position")
-            .ok_or_else(|| format!("{stage_path} {opponent_name:?} lacks position"))?,
-        &format!("{stage_path} {opponent_name:?}.position"),
+            .ok_or_else(|| format!("{stage_path} \"dad\" lacks position"))?,
+        &format!("{stage_path} \"dad\".position"),
     )?;
     let slot_camera = opponent_slot
         .get("cameraOffsets")
-        .map(|value| {
-            json_pair(
-                value,
-                &format!("{stage_path} {opponent_name:?}.cameraOffsets"),
-            )
-        })
+        .map(|value| json_pair(value, &format!("{stage_path} \"dad\".cameraOffsets")))
         .transpose()?
         .unwrap_or([0.0, 0.0]);
     let slot_scale = opponent_slot
@@ -966,14 +1082,39 @@ fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
         .camera_offsets
         .map_or([0.0, 0.0], |offsets| [offsets.0, offsets.1]);
     let character_scale = character.scale.unwrap_or(1.0);
-    let bounds = atlas_bounds(assets_root, &character.asset_path)?;
+    let bounds = character_content_bounds(assets_root, &character, level_dir)?;
+    let character_bounds = match family.character_bounds {
+        CharacterBoundsCheck::PinnedBopeebo => character_bounds(),
+        CharacterBoundsCheck::OpponentContent => {
+            BTreeMap::from([(opponent_name.to_string(), bounds)])
+        }
+    };
+
+    let chart_document = read_data_document(assets_root, &chart_path)?;
+    let Typed::Chart(chart) = chart_document.typed else {
+        return Err(format!(
+            "{chart_path} parsed as {:?}; a chart was required",
+            chart_document.kind
+        ));
+    };
+    let scroll_speed = chart
+        .scroll_speed
+        .as_ref()
+        .and_then(|scroll| scroll.get("easy"))
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
+    if !scroll_speed.is_finite() || scroll_speed <= 0.0 {
+        return Err(format!(
+            "{chart_path} easy scrollSpeed {scroll_speed} must be finite and positive"
+        ));
+    }
 
     Ok(Geometry {
         receptors: receptor_positions(),
         lane_center_y: lane_center_y(),
         note_crossing_top_y: note_crossing_top_y(),
-        note_top_left_y_at_offsets: note_top_left_y_at_offsets(),
-        character_bounds: character_bounds(),
+        note_top_left_y_at_offsets: note_top_left_y_at_offsets(scroll_speed),
+        character_bounds,
         props,
         camera_initial_scroll: camera_initial_scroll(
             slot_position,
@@ -984,6 +1125,66 @@ fn compute_geometry(assets_root: &Path) -> Result<Geometry, String> {
             bounds[3],
         ),
     })
+}
+
+/// The opponent character's whole-sprite bounds at scale 1, mirroring the
+/// renderer's `Sheet::bounds` rule: animate atlases use the parsed stage
+/// bounds; Sparrow characters use the first document frame's destination size
+/// as `[0, 0, width, height]`.
+fn character_content_bounds(
+    assets_root: &Path,
+    character: &oxide_data::character::CharacterData,
+    level_dir: Option<&str>,
+) -> Result<[f64; 4], String> {
+    match character.render_type.as_deref() {
+        Some("animateatlas") | Some("multianimateatlas") => {
+            atlas_bounds(assets_root, &character.asset_path, level_dir)
+        }
+        None | Some("sparrow") | Some("multisparrow") => {
+            sparrow_bounds(assets_root, &character.asset_path, level_dir)
+        }
+        Some(other) => Err(format!(
+            "character {:?} renderType {other:?} is outside the render-diff geometry families",
+            character.name
+        )),
+    }
+}
+
+fn sparrow_bounds(
+    assets_root: &Path,
+    asset_path: &str,
+    level_dir: Option<&str>,
+) -> Result<[f64; 4], String> {
+    let bases = image_dir_candidates(asset_path, level_dir);
+    for base in &bases {
+        let path = assets_root.join(format!("{base}.xml"));
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("cannot read sparrow atlas {}: {error}", path.display()))?;
+        let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+        let text = String::from_utf8(bytes.to_vec())
+            .map_err(|error| format!("sparrow atlas {} is not UTF-8: {error}", path.display()))?;
+        let atlas = oxide_atlas::parse_sparrow(&text)
+            .map_err(|error| format!("sparrow atlas {} failed: {error}", path.display()))?;
+        let first = atlas
+            .subtextures
+            .first()
+            .ok_or_else(|| format!("sparrow atlas {} has no subtextures", path.display()))?;
+        let quad = oxide_atlas::frame_quad(first);
+        let [width, height] = quad.dest_size;
+        if width <= 0 || height <= 0 {
+            return Err(format!(
+                "sparrow atlas {} first frame has empty content {width}x{height}",
+                path.display()
+            ));
+        }
+        return Ok([0.0, 0.0, f64::from(width), f64::from(height)]);
+    }
+    Err(format!(
+        "sparrow atlas {asset_path:?} is missing from candidate directories {bases:?}"
+    ))
 }
 
 fn json_pair(value: &Value, context: &str) -> Result<[f64; 2], String> {
@@ -1009,6 +1210,9 @@ fn read_data_document(
     assets_root: &Path,
     relative: &str,
 ) -> Result<oxide_data::ParsedDocument, String> {
+    // Provenance paths are game-checkout relative (`assets/preload/...`); the
+    // caller supplies the assets directory itself.
+    let relative = relative.strip_prefix("assets/").unwrap_or(relative);
     let path = assets_root.join(relative);
     let bytes = fs::read(&path)
         .map_err(|error| format!("cannot read asset {}: {error}", path.display()))?;
@@ -1016,34 +1220,42 @@ fn read_data_document(
         .map_err(|error| format!("asset {relative} parse error: {error}"))
 }
 
-/// V-Slice image-key candidates from RENDER-BEHAVIOR §1/§3: an explicit
-/// `shared:` maps to the shared tree; otherwise preload is tried first. The
-/// renderer owns this resolution privately, so the geometry check mirrors the
-/// frozen candidate order to read the same files (no VFS mod-layer claim).
 /// V-Slice file bases for an image key, mirroring the renderer's observed
 /// `image_file_bases` contract (`crates/oxide-game/src/render/load.rs`, read
-/// only): an explicit `shared:` searches shared first, otherwise preload first.
+/// only): an explicit `<lib>:` searches `<lib>/images` first, then shared and
+/// preload; a plain key searches the stage's level directory first, then
+/// shared and preload.
 /// xtask does not depend on `oxide-vfs`, so this replicates the OBSERVED
 /// `ResKind::Image` contract table (one `.png` extension fallback, see
 /// `crates/oxide-vfs/src/kinds.rs` tests) instead of copying VFS layer logic;
 /// it is only used to read assets for the independent geometry assertion.
-fn image_file_bases(key: &str) -> Vec<String> {
-    if let Some(rest) = key.strip_prefix("shared:") {
-        vec![
-            format!("shared/images/{rest}"),
-            format!("preload/images/{rest}"),
-        ]
-    } else {
-        vec![
-            format!("preload/images/{key}"),
-            format!("shared/images/{key}"),
-        ]
+fn image_file_bases(key: &str, level_dir: Option<&str>) -> Vec<String> {
+    if let Some((library, rest)) = key.split_once(':') {
+        let mut bases = vec![format!("{library}/images/{rest}")];
+        for fallback in ["shared", "preload"] {
+            let candidate = format!("{fallback}/images/{rest}");
+            if !bases.contains(&candidate) {
+                bases.push(candidate);
+            }
+        }
+        return bases;
     }
+    let mut bases = Vec::with_capacity(3);
+    if let Some(directory) = level_dir {
+        bases.push(format!("{directory}/images/{key}"));
+    }
+    for fallback in ["shared", "preload"] {
+        let candidate = format!("{fallback}/images/{key}");
+        if !bases.contains(&candidate) {
+            bases.push(candidate);
+        }
+    }
+    bases
 }
 
 /// Multi-file atlas directory bases (Animation.json, spritemap1.json).
-fn image_dir_candidates(key: &str) -> Vec<String> {
-    image_file_bases(key)
+fn image_dir_candidates(key: &str, level_dir: Option<&str>) -> Vec<String> {
+    image_file_bases(key, level_dir)
 }
 
 fn resolve_in_dirs(assets_root: &Path, dirs: &[String], file: &str) -> Result<PathBuf, String> {
@@ -1058,9 +1270,9 @@ fn resolve_in_dirs(assets_root: &Path, dirs: &[String], file: &str) -> Result<Pa
     ))
 }
 
-fn image_size(assets_root: &Path, key: &str) -> Result<[f64; 2], String> {
+fn image_size(assets_root: &Path, key: &str, level_dir: Option<&str>) -> Result<[f64; 2], String> {
     let mut tried = Vec::new();
-    for base in image_file_bases(key) {
+    for base in image_file_bases(key, level_dir) {
         let relative = format!("{base}.png");
         let path = assets_root.join(&relative);
         if path.is_file() {
@@ -1077,8 +1289,12 @@ fn image_size(assets_root: &Path, key: &str) -> Result<[f64; 2], String> {
     ))
 }
 
-fn atlas_bounds(assets_root: &Path, asset_path: &str) -> Result<[f64; 4], String> {
-    let dirs = image_dir_candidates(asset_path);
+fn atlas_bounds(
+    assets_root: &Path,
+    asset_path: &str,
+    level_dir: Option<&str>,
+) -> Result<[f64; 4], String> {
+    let dirs = image_dir_candidates(asset_path, level_dir);
     let (spritemap_path, spritemap) = read_text_in_dirs(assets_root, &dirs, "spritemap1.json")?;
     let (animation_path, animation) = read_text_in_dirs(assets_root, &dirs, "Animation.json")?;
     let stage = AnimateStage::parse(&animation, &spritemap).map_err(|error| {
@@ -1143,6 +1359,11 @@ fn load_manifest(path: &Path) -> Result<Value, String> {
             path.display()
         )
     })?;
+    validate_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_manifest(manifest: &Value) -> Result<(), String> {
     let schema = manifest
         .get("schema")
         .and_then(Value::as_str)
@@ -1152,26 +1373,115 @@ fn load_manifest(path: &Path) -> Result<Value, String> {
             "fixtures manifest schema is {schema:?}, expected {SCHEMA:?}"
         ));
     }
-    Ok(manifest)
+    let families = manifest
+        .get("families")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            format!("fixtures manifest lacks the families object required by {SCHEMA}")
+        })?;
+    for name in families.keys() {
+        if !FAMILIES.iter().any(|family| family.name == name) {
+            return Err(format!(
+                "fixtures manifest has unknown family section {name:?}; expected {:?}",
+                FAMILIES
+                    .iter()
+                    .map(|family| family.name)
+                    .collect::<Vec<_>>()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn compare_manifest(
     manifest: &Value,
-    evidence: &BTreeMap<&'static str, DifficultyEvidence>,
+    evidence: &BTreeMap<&'static str, FamilyEvidence>,
 ) -> Vec<String> {
     let mut errors = Vec::new();
     if manifest.get("schema").and_then(Value::as_str) != Some(SCHEMA) {
         errors.push(format!("fixtures manifest schema must be {SCHEMA:?}"));
     }
     errors.extend(compare_adapter(manifest));
-    for difficulty in DIFFICULTIES {
-        let Some(captured) = evidence.get(difficulty) else {
+    let Some(families) = manifest.get("families").and_then(Value::as_object) else {
+        errors.push("fixtures manifest lacks the families object".into());
+        return errors;
+    };
+    for name in families.keys() {
+        if !FAMILIES.iter().any(|family| family.name == name) {
             errors.push(format!(
-                "{difficulty}: no captured evidence; the manifest cannot be verified"
+                "fixtures manifest has an unknown family section {name:?}"
+            ));
+        }
+    }
+    for family in FAMILIES {
+        let Some(section) = families.get(family.name) else {
+            errors.push(format!(
+                "{}: manifest lacks the family section (expected chart_id {:?}, difficulties \
+                 {:?})",
+                family.name, family.chart_id, family.difficulties
             ));
             continue;
         };
-        errors.extend(compare_difficulty_manifest(difficulty, captured, manifest));
+        match section.get("chart_id").and_then(Value::as_str) {
+            Some(chart_id) if chart_id == family.chart_id => {}
+            Some(chart_id) => errors.push(format!(
+                "{}: manifest chart_id {chart_id:?} != expected {:?}",
+                family.name, family.chart_id
+            )),
+            None => errors.push(format!(
+                "{}: manifest lacks the string chart_id",
+                family.name
+            )),
+        }
+        match section.get("difficulties").and_then(Value::as_array) {
+            Some(values) => {
+                let frozen: Vec<&str> = values.iter().filter_map(Value::as_str).collect();
+                if frozen.len() != values.len() || frozen.as_slice() != family.difficulties {
+                    errors.push(format!(
+                        "{}: manifest difficulties {values:?} != expected {:?}",
+                        family.name, family.difficulties
+                    ));
+                }
+            }
+            None => errors.push(format!(
+                "{}: manifest lacks the difficulties array",
+                family.name
+            )),
+        }
+        for map_name in ["samples", "frame_sha256", "run_sha256", "trace_sha256"] {
+            if let Some(map) = section.get(map_name).and_then(Value::as_object) {
+                for key in map.keys() {
+                    if !family.difficulties.contains(&key.as_str()) {
+                        errors.push(format!(
+                            "{}: manifest {map_name} has an extra difficulty {key:?} outside {:?}",
+                            family.name, family.difficulties
+                        ));
+                    }
+                }
+            }
+        }
+        let Some(captured_family) = evidence.get(family.name) else {
+            errors.push(format!("{}: no captured family evidence", family.name));
+            continue;
+        };
+        match &captured_family.geometry {
+            Some(geometry) => errors.extend(compare_geometry(geometry, section)),
+            None => errors.push(format!("{}: no computed geometry", family.name)),
+        }
+        for difficulty in family.difficulties {
+            match captured_family.entries.get(difficulty) {
+                Some(captured) => errors.extend(compare_difficulty_manifest(
+                    family.name,
+                    difficulty,
+                    captured,
+                    section,
+                )),
+                None => errors.push(format!(
+                    "{}/{}: no captured evidence; the manifest cannot be verified",
+                    family.name, difficulty
+                )),
+            }
+        }
     }
     errors
 }
@@ -1191,12 +1501,14 @@ fn compare_adapter(manifest: &Value) -> Vec<String> {
 }
 
 fn compare_difficulty_manifest(
+    family: &str,
     difficulty: &str,
     evidence: &DifficultyEvidence,
-    manifest: &Value,
+    section: &Value,
 ) -> Vec<String> {
     let mut errors = Vec::new();
-    let samples = manifest
+    let label = format!("{family}/{difficulty}");
+    let samples = section
         .get("samples")
         .and_then(Value::as_object)
         .and_then(|samples| samples.get(difficulty))
@@ -1207,22 +1519,22 @@ fn compare_difficulty_manifest(
             match value.as_u64() {
                 Some(sample) => frozen_samples.push(sample),
                 None => errors.push(format!(
-                    "{difficulty}: manifest sample {index} is not a non-negative integer"
+                    "{label}: manifest sample {index} is not a non-negative integer"
                 )),
             }
         }
     } else {
-        errors.push(format!("{difficulty}: manifest lacks the samples array"));
+        errors.push(format!("{label}: manifest lacks the samples array"));
     }
     if frozen_samples != evidence.samples {
         errors.push(format!(
-            "{difficulty}: frozen sample list drift: manifest {frozen_samples:?} != computed \
+            "{label}: frozen sample list drift: manifest {frozen_samples:?} != computed \
              {:?}; no fixture regeneration during verification",
             evidence.samples
         ));
     }
 
-    let frozen_frames = manifest
+    let frozen_frames = section
         .get("frame_sha256")
         .and_then(Value::as_object)
         .and_then(|frames| frames.get(difficulty))
@@ -1234,15 +1546,15 @@ fn compare_difficulty_manifest(
                 match frames.get(&key).and_then(Value::as_str) {
                     Some(frozen) if is_sha256_hex(frozen) && frozen == frame.sha256 => {}
                     Some(frozen) if is_sha256_hex(frozen) => errors.push(format!(
-                        "{difficulty}: frame {} sha256 {frozen} != computed {}",
+                        "{label}: frame {} sha256 {frozen} != computed {}",
                         frame.sample_ms, frame.sha256
                     )),
                     Some(frozen) => errors.push(format!(
-                        "{difficulty}: frame {key} manifest digest {frozen:?} is not a \
+                        "{label}: frame {key} manifest digest {frozen:?} is not a \
                          64-character lowercase hex sha256"
                     )),
                     None => errors.push(format!(
-                        "{difficulty}: manifest lacks the frame digest for {key} ms"
+                        "{label}: manifest lacks the frame digest for {key} ms"
                     )),
                 }
             }
@@ -1253,16 +1565,30 @@ fn compare_difficulty_manifest(
                     .any(|frame| frame.sample_ms.to_string() == *key)
                 {
                     errors.push(format!(
-                        "{difficulty}: manifest has an extra frame digest {key:?} outside the \
+                        "{label}: manifest has an extra frame digest {key:?} outside the \
                          computed sample list"
                     ));
                 }
             }
         }
-        None => errors.push(format!("{difficulty}: manifest lacks the frame_sha256 map")),
+        None => errors.push(format!("{label}: manifest lacks the frame_sha256 map")),
     }
 
-    match manifest
+    match section
+        .get("frame_counts")
+        .and_then(Value::as_object)
+        .and_then(|counts| counts.get(difficulty))
+        .and_then(Value::as_u64)
+    {
+        Some(count) if count as usize == evidence.frames.len() => {}
+        Some(count) => errors.push(format!(
+            "{label}: frame count {count} != computed {}",
+            evidence.frames.len()
+        )),
+        None => errors.push(format!("{label}: manifest lacks the frame_counts entry")),
+    }
+
+    match section
         .get("run_sha256")
         .and_then(Value::as_object)
         .and_then(|runs| runs.get(difficulty))
@@ -1270,16 +1596,16 @@ fn compare_difficulty_manifest(
     {
         Some(frozen) if is_sha256_hex(frozen) && frozen == evidence.run_sha256 => {}
         Some(frozen) if is_sha256_hex(frozen) => errors.push(format!(
-            "{difficulty}: run sha256 {frozen} != computed {}",
+            "{label}: run sha256 {frozen} != computed {}",
             evidence.run_sha256
         )),
         Some(frozen) => errors.push(format!(
-            "{difficulty}: run sha256 {frozen:?} is not a 64-character lowercase hex sha256"
+            "{label}: run sha256 {frozen:?} is not a 64-character lowercase hex sha256"
         )),
-        None => errors.push(format!("{difficulty}: manifest lacks the run_sha256 entry")),
+        None => errors.push(format!("{label}: manifest lacks the run_sha256 entry")),
     }
 
-    match manifest
+    match section
         .get("trace_sha256")
         .and_then(Value::as_object)
         .and_then(|traces| traces.get(difficulty))
@@ -1287,15 +1613,13 @@ fn compare_difficulty_manifest(
     {
         Some(frozen) if is_sha256_hex(frozen) && frozen == evidence.trace_sha256 => {}
         Some(frozen) if is_sha256_hex(frozen) => errors.push(format!(
-            "{difficulty}: trace sha256 {frozen} != computed {}; canonical slice trace drift",
+            "{label}: trace sha256 {frozen} != computed {}; canonical slice trace drift",
             evidence.trace_sha256
         )),
         Some(frozen) => errors.push(format!(
-            "{difficulty}: trace sha256 {frozen:?} is not a 64-character lowercase hex sha256"
+            "{label}: trace sha256 {frozen:?} is not a 64-character lowercase hex sha256"
         )),
-        None => errors.push(format!(
-            "{difficulty}: manifest lacks the trace_sha256 entry"
-        )),
+        None => errors.push(format!("{label}: manifest lacks the trace_sha256 entry")),
     }
     errors
 }
@@ -1621,6 +1945,7 @@ fn adler32(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn close(actual: f64, expected: f64) {
         assert!(
@@ -1656,20 +1981,70 @@ mod tests {
         }
     }
 
-    fn manifest_for(evidence: &DifficultyEvidence) -> Value {
-        let frames = evidence
-            .frames
-            .iter()
-            .map(|frame| (frame.sample_ms.to_string(), json!(frame.sha256)))
-            .collect::<serde_json::Map<_, _>>();
+    fn evidence_for(difficulty: &'static str) -> DifficultyEvidence {
+        let mut evidence = evidence();
+        evidence.difficulty = difficulty;
+        evidence
+    }
+
+    fn family_section(family: &Family) -> Value {
+        let mut samples = serde_json::Map::new();
+        let mut frame_sha256 = serde_json::Map::new();
+        let mut run_sha256 = serde_json::Map::new();
+        let mut trace_sha256 = serde_json::Map::new();
+        let mut frame_counts = serde_json::Map::new();
+        for difficulty in family.difficulties {
+            let evidence = evidence_for(difficulty);
+            let frames = evidence
+                .frames
+                .iter()
+                .map(|frame| (frame.sample_ms.to_string(), json!(frame.sha256)))
+                .collect::<serde_json::Map<_, _>>();
+            samples.insert((*difficulty).to_string(), json!(evidence.samples));
+            frame_sha256.insert((*difficulty).to_string(), Value::Object(frames));
+            run_sha256.insert((*difficulty).to_string(), json!(evidence.run_sha256));
+            trace_sha256.insert((*difficulty).to_string(), json!(evidence.trace_sha256));
+            frame_counts.insert((*difficulty).to_string(), json!(evidence.frames.len()));
+        }
+        json!({
+            "chart_id": family.chart_id,
+            "difficulties": family.difficulties,
+            "samples": samples,
+            "frame_sha256": frame_sha256,
+            "run_sha256": run_sha256,
+            "trace_sha256": trace_sha256,
+            "frame_counts": frame_counts,
+            "geometry": geometry().to_json(),
+        })
+    }
+
+    fn family_evidence(family: &'static Family) -> FamilyEvidence {
+        FamilyEvidence {
+            entries: family
+                .difficulties
+                .iter()
+                .map(|difficulty| (*difficulty, evidence_for(difficulty)))
+                .collect(),
+            geometry: Some(geometry()),
+        }
+    }
+
+    fn full_manifest() -> Value {
         json!({
             "schema": SCHEMA,
             "adapter": ADAPTER,
-            "samples": {"easy": evidence.samples},
-            "frame_sha256": {"easy": frames},
-            "run_sha256": {"easy": evidence.run_sha256},
-            "trace_sha256": {"easy": evidence.trace_sha256},
+            "families": {
+                "bopeebo": family_section(&BOPEEBO_FAMILY),
+                "school": family_section(&SCHOOL_FAMILY),
+            }
         })
+    }
+
+    fn full_evidence() -> BTreeMap<&'static str, FamilyEvidence> {
+        FAMILIES
+            .iter()
+            .map(|family| (family.name, family_evidence(family)))
+            .collect()
     }
 
     fn geometry() -> Geometry {
@@ -1677,7 +2052,7 @@ mod tests {
             receptors: receptor_positions(),
             lane_center_y: lane_center_y(),
             note_crossing_top_y: note_crossing_top_y(),
-            note_top_left_y_at_offsets: note_top_left_y_at_offsets(),
+            note_top_left_y_at_offsets: note_top_left_y_at_offsets(1.2),
             character_bounds: character_bounds(),
             props: BTreeMap::from([
                 ("stageback".to_string(), [-600.0, -200.0, 100.0, 50.0]),
@@ -1695,23 +2070,39 @@ mod tests {
     #[test]
     fn image_candidates_mirror_the_renderer_file_shapes() {
         assert_eq!(
-            image_file_bases("stageback"),
+            image_file_bases("stageback", None),
             [
-                "preload/images/stageback".to_string(),
-                "shared/images/stageback".to_string()
+                "shared/images/stageback".to_string(),
+                "preload/images/stageback".to_string()
             ]
         );
         assert_eq!(
-            image_file_bases("shared:characters/dad"),
+            image_file_bases("stageback", Some("week1")),
+            [
+                "week1/images/stageback".to_string(),
+                "shared/images/stageback".to_string(),
+                "preload/images/stageback".to_string()
+            ]
+        );
+        assert_eq!(
+            image_file_bases("shared:characters/dad", None),
             [
                 "shared/images/characters/dad".to_string(),
                 "preload/images/characters/dad".to_string()
             ]
         );
+        assert_eq!(
+            image_file_bases("week6:weeb/pixelUI/arrows-pixels", None),
+            [
+                "week6/images/weeb/pixelUI/arrows-pixels".to_string(),
+                "shared/images/weeb/pixelUI/arrows-pixels".to_string(),
+                "preload/images/weeb/pixelUI/arrows-pixels".to_string()
+            ]
+        );
         // The PNG join is a file base plus the one contract extension, not a
         // directory plus the last path segment (the establishment-run bug).
         assert_eq!(
-            format!("{}.png", image_file_bases("stageback")[1]),
+            format!("{}.png", image_file_bases("stageback", None)[0]),
             "shared/images/stageback.png"
         );
     }
@@ -1737,7 +2128,7 @@ mod tests {
         close(lane_center_y(), 76.0);
         close(note_crossing_top_y(), 52.6);
         close(STRUMLINE_Y - INITIAL_OFFSET, 52.6);
-        let offsets = note_top_left_y_at_offsets();
+        let offsets = note_top_left_y_at_offsets(1.2);
         close(offsets["1040"], 614.2);
         close(offsets["2080"], 1175.8);
         let bounds = character_bounds();
@@ -1825,6 +2216,270 @@ mod tests {
         assert!(hit_categories("killer", 0).is_err());
     }
 
+    fn hit_sick(sim: u64) -> TraceEvent {
+        TraceEvent::Hit {
+            schema: "3",
+            kind: "hit",
+            sim,
+            input_ms: sim as f64,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "sick",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            score_delta: 350,
+            health_before: 1.0,
+            health_after: 1.0,
+            combo_before: 0,
+            combo_after: 1,
+            combo_max: 1,
+            tallies: oxide_game::slice::TallyCounts {
+                sick: 1,
+                total_notes_hit: 1,
+                ..oxide_game::slice::TallyCounts::default()
+            },
+        }
+    }
+
+    fn opponent_hit_row() -> TraceEvent {
+        TraceEvent::OpponentHit {
+            schema: "3",
+            kind: "opponent_hit",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 4,
+            judgement: "sick",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+        }
+    }
+
+    fn camera_focus_row() -> TraceEvent {
+        TraceEvent::CameraFocus {
+            schema: "3",
+            kind: "camera_focus",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            target_char: 1,
+            target_kind: "dad",
+            x: 0.0,
+            y: 0.0,
+            world_focus: [0.0, 0.0],
+            duration: 4.0,
+            ease_kind: "classic",
+            ease: None,
+            ease_dir: None,
+        }
+    }
+
+    fn camera_zoom_row() -> TraceEvent {
+        TraceEvent::CameraZoom {
+            schema: "3",
+            kind: "camera_zoom",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            zoom: 1.0,
+            mode: "stage",
+            resolved_target_zoom: 1.0,
+            duration: 4.0,
+            ease: Some("linear".into()),
+            ease_dir: Some(String::new()),
+        }
+    }
+
+    fn camera_bop_row() -> TraceEvent {
+        TraceEvent::CameraBop {
+            schema: "3",
+            kind: "camera_bop",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            intensity: 1.0,
+            camera_bop_intensity: 1.015,
+            hud_intensity: 0.03,
+            rate: 4.0,
+            offset: 0.0,
+        }
+    }
+
+    fn play_animation_row() -> TraceEvent {
+        TraceEvent::PlayAnimation {
+            schema: "3",
+            kind: "play_animation",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            target: "dad".into(),
+            anim: "singLEFT".into(),
+            force: false,
+            resolved_kind: "dad".into(),
+            skipped_old: false,
+        }
+    }
+
+    fn scroll_speed_row() -> TraceEvent {
+        TraceEvent::ScrollSpeed {
+            schema: "3",
+            kind: "scroll_speed",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            strumline: "player",
+            target: 1.2,
+            absolute: true,
+            base_scroll: 1.2,
+            duration: 4.0,
+            ease: Some("linear".into()),
+            ease_dir: Some(String::new()),
+        }
+    }
+
+    fn health_icon_row() -> TraceEvent {
+        TraceEvent::HealthIcon {
+            schema: "3",
+            kind: "health_icon",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            char: 0,
+            id: "face".into(),
+            should_bop: true,
+            scale: 1.0,
+            flip_x: false,
+            is_pixel: false,
+            offsets: [0.0, 0.0],
+        }
+    }
+
+    fn unknown_event_row() -> TraceEvent {
+        TraceEvent::UnknownEvent {
+            schema: "3",
+            kind: "unknown_event",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event_kind: "EnableMask".into(),
+            value: None,
+        }
+    }
+
+    #[test]
+    fn event_categories_ignore_opponent_and_schema3_rows() {
+        for event in [
+            opponent_hit_row(),
+            camera_focus_row(),
+            camera_zoom_row(),
+            camera_bop_row(),
+            play_animation_row(),
+            scroll_speed_row(),
+            health_icon_row(),
+            unknown_event_row(),
+        ] {
+            assert_eq!(
+                event_categories(&event).unwrap(),
+                Vec::<EventCategory>::new()
+            );
+        }
+        let game_over = TraceEvent::GameOver {
+            schema: "3",
+            kind: "game_over",
+            sim: 1000,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "miss",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            death_count: 1,
+        };
+        assert!(event_categories(&game_over).is_err());
+    }
+
+    #[test]
+    fn schema3_rows_do_not_change_the_sample_plan() {
+        let hit = hit_sick(2000);
+        let mut categories = Vec::new();
+        for event in [&hit, &camera_focus_row(), &opponent_hit_row()] {
+            for category in event_categories(event).unwrap() {
+                categories.push((trace_sim(event), category));
+            }
+        }
+        let samples = sample_positions_from(&[1200, 1800], 5000, &categories).unwrap();
+        assert_eq!(samples, vec![1200, 1800, 2000, 2250, 4800, 5001]);
+    }
+
+    #[test]
+    fn chart_asset_paths_are_family_parameterized() {
+        assert_eq!(
+            gameplay_sim::chart_asset_paths("bopeebo").unwrap(),
+            (
+                String::from("assets/preload/data/songs/bopeebo/bopeebo-chart.json"),
+                String::from("assets/preload/data/songs/bopeebo/bopeebo-metadata.json"),
+            )
+        );
+        assert_eq!(
+            gameplay_sim::chart_asset_paths("senpai").unwrap(),
+            (
+                String::from("assets/preload/data/songs/senpai/senpai-chart.json"),
+                String::from("assets/preload/data/songs/senpai/senpai-metadata.json"),
+            )
+        );
+        assert_eq!(
+            gameplay_sim::chart_asset_paths("philly-nice").unwrap().0,
+            "assets/preload/data/songs/philly-nice/philly-nice-chart.json"
+        );
+    }
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+
+    struct TempAssets {
+        root: PathBuf,
+    }
+
+    impl TempAssets {
+        fn new() -> Self {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../target/render-diff-tests")
+                .join(format!(
+                    "{}-{}",
+                    std::process::id(),
+                    NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
+                ));
+            fs::create_dir_all(&root).expect("create fixture root");
+            Self { root }
+        }
+    }
+
+    impl Drop for TempAssets {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn beat_derivation_reads_the_family_metadata_path() {
+        let assets = TempAssets::new();
+        let metadata_path = "preload/data/songs/senpai/senpai-metadata.json";
+        let file = assets.root.join(metadata_path);
+        fs::create_dir_all(file.parent().expect("metadata parent")).expect("create metadata dir");
+        fs::write(
+            &file,
+            r#"{"version":"2.2.4","songName":"Senpai","playData":{"difficulties":["easy","normal","hard"],"stage":"school"},"timeChanges":[{"t":0,"bpm":144}]}"#,
+        )
+        .expect("write metadata");
+        let changes = conductor_time_changes(&assets.root, metadata_path).expect("time changes");
+        assert_eq!(changes.len(), 1);
+        assert!((changes[0].bpm - 144.0).abs() < 1e-12);
+        let beats = beat_times(&assets.root, metadata_path, 5000).expect("beat grid");
+        assert_eq!(beats, vec![1250, 1667, 2084, 2500, 2917, 3334, 3750, 4167]);
+    }
+
     #[test]
     fn identical_two_runs_pass() {
         let first = evidence();
@@ -1852,16 +2507,74 @@ mod tests {
 
     #[test]
     fn matching_manifest_passes() {
-        let captured = evidence();
-        let errors = compare_difficulty_manifest("easy", &captured, &manifest_for(&captured));
+        let manifest = full_manifest();
+        assert!(validate_manifest(&manifest).is_ok());
+        let errors = compare_manifest(&manifest, &full_evidence());
         assert!(errors.is_empty(), "{errors:?}");
-        assert!(compare_adapter(&manifest_for(&captured)).is_empty());
+        assert!(compare_adapter(&manifest).is_empty());
+    }
+
+    #[test]
+    fn manifest_schema_token_must_be_render_slice_2() {
+        let mut manifest = full_manifest();
+        manifest["schema"] = json!("render-slice-1");
+        let error = validate_manifest(&manifest).unwrap_err();
+        assert!(error.contains("render-slice-2"), "{error}");
+    }
+
+    #[test]
+    fn unknown_family_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]["weekend1"] = json!({});
+        let error = validate_manifest(&manifest).unwrap_err();
+        assert!(error.contains("unknown family"), "{error}");
+    }
+
+    #[test]
+    fn missing_family_section_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]
+            .as_object_mut()
+            .unwrap()
+            .remove("school");
+        let errors = compare_manifest(&manifest, &full_evidence());
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("school") && error.contains("lacks the family")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn difficulty_subset_mismatch_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]["school"]["difficulties"] = json!(["easy", "normal"]);
+        let errors = compare_manifest(&manifest, &full_evidence());
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("school") && error.contains("difficulties")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn extra_difficulty_map_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]["bopeebo"]["samples"]["pico"] = json!([1200]);
+        let errors = compare_manifest(&manifest, &full_evidence());
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("extra difficulty") && error.contains("pico")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn adapter_drift_fails_closed() {
-        let captured = evidence();
-        let mut manifest = manifest_for(&captured);
+        let mut manifest = full_manifest();
         manifest["adapter"] = json!("GeForce GTX 1050 Ti");
         let errors = compare_adapter(&manifest);
         assert!(
@@ -1882,10 +2595,9 @@ mod tests {
 
     #[test]
     fn sample_list_drift_fails_closed() {
-        let captured = evidence();
-        let mut manifest = manifest_for(&captured);
-        manifest["samples"]["easy"] = json!([1200, 1800, 4800]);
-        let errors = compare_difficulty_manifest("easy", &captured, &manifest);
+        let mut manifest = full_manifest();
+        manifest["families"]["bopeebo"]["samples"]["easy"] = json!([1200, 1800, 4800]);
+        let errors = compare_manifest(&manifest, &full_evidence());
         assert!(
             errors
                 .iter()
@@ -1896,10 +2608,9 @@ mod tests {
 
     #[test]
     fn frame_digest_mismatch_fails_closed() {
-        let captured = evidence();
-        let mut manifest = manifest_for(&captured);
-        manifest["frame_sha256"]["easy"]["1800"] = json!("0".repeat(64));
-        let errors = compare_difficulty_manifest("easy", &captured, &manifest);
+        let mut manifest = full_manifest();
+        manifest["families"]["bopeebo"]["frame_sha256"]["easy"]["1800"] = json!("0".repeat(64));
+        let errors = compare_manifest(&manifest, &full_evidence());
         assert!(
             errors
                 .iter()
@@ -1909,11 +2620,32 @@ mod tests {
     }
 
     #[test]
+    fn frame_count_mismatch_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]["bopeebo"]["frame_counts"]["easy"] = json!(3);
+        let errors = compare_manifest(&manifest, &full_evidence());
+        assert!(
+            errors.iter().any(|error| error.contains("frame count 3")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn run_digest_mismatch_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]["bopeebo"]["run_sha256"]["easy"] = json!("0".repeat(64));
+        let errors = compare_manifest(&manifest, &full_evidence());
+        assert!(
+            errors.iter().any(|error| error.contains("run sha256")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
     fn trace_digest_mismatch_fails_closed() {
-        let captured = evidence();
-        let mut manifest = manifest_for(&captured);
-        manifest["trace_sha256"]["easy"] = json!("0".repeat(64));
-        let errors = compare_difficulty_manifest("easy", &captured, &manifest);
+        let mut manifest = full_manifest();
+        manifest["families"]["bopeebo"]["trace_sha256"]["easy"] = json!("0".repeat(64));
+        let errors = compare_manifest(&manifest, &full_evidence());
         assert!(
             errors
                 .iter()

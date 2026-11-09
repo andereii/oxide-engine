@@ -183,7 +183,8 @@ fn measure_with_renderer(
 ) -> Result<PerfReport, String> {
     let notes = gameplay_sim::load_verified_notes(assets_root, "easy")?;
     let replay = gameplay_sim::canonical_replay(assets_root, "easy", &notes)?;
-    let samples = render_diff::sample_positions(assets_root, &notes, &replay)?;
+    let samples =
+        render_diff::sample_positions(assets_root, gameplay_sim::CHART_ID, &notes, &replay.ticks)?;
     let scene_ms = samples
         .first()
         .copied()
