@@ -1042,3 +1042,19 @@ limitation, reversible if later phase evidence requires).
   The honesty wall stands: engine fixtures on the pinned llvmpipe adapter,
   NOT native pixel parity; the native rendered-output trace remains the
   separate pending obligation.
+- **2026-11-09 review round (APPROVE WITH COMMENTS) resolutions:** (1) the
+  post-GameOver decay follows the native `subState == null` gate — the scene
+  freezes both the bop decay and the virtual HUD zoom after a GameOver row
+  (scene test `game_over_row_freezes_the_decay_and_hud_zoom_block`);
+  (2) the §12.6 finding-3 headless-helper factoring is DEFERRED to a later
+  slice (it spans `slice/events.rs` focus/asset resolution and `render/load.rs`
+  internals wide enough to deserve its own session) with an in-crate
+  asset-gated equivalence gate instead:
+  `sim_and_scene_agree_on_the_sampled_focus_points` asserts every resolvable
+  `camera_focus.world_focus` row equals the scene rig target + the literal
+  offsets for bopeebo/senpai; (3) the only corpus chart with ScrollSpeed rows
+  (south-chart-pico) replays through the event-enabled stream and the real
+  `SliceRenderer` asserting zero `ScrollBaseMismatch` (xtask test
+  `south_pico_scroll_speed_rows_replay_through_the_real_scene`); the variant-
+  chart provenance metadata-path derivation (`-chart-pico.json`) was fixed in
+  the process.

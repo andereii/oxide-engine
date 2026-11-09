@@ -2719,4 +2719,44 @@ mod tests {
         assert_eq!(adler32(b"Wikipedia"), 0x11e60398);
         assert_eq!(crc32(b"123456789"), 0xcbf43926);
     }
+    #[test]
+    fn south_pico_scroll_speed_rows_replay_through_the_real_scene() {
+        // Review round resolution (2026-11-09): the exact chart-tap plan
+        // streams the schema-3 rows through the real loaded scene, proving
+        // the sim's and the scene's cancel/snap/prev-target orders agree on
+        // the only corpus chart that carries ScrollSpeed rows
+        // (south-chart-pico; the established bopeebo/school families have
+        // none). A sim/scene `base_scroll` disagreement surfaces as the
+        // typed ScrollBaseMismatch render error.
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let notes =
+            gameplay_sim::load_verified_notes_for_chart(&root, "south-pico", "hard").unwrap();
+        let replay = gameplay_sim::canonical_event_replay(
+            &root,
+            "south-pico",
+            "hard",
+            gameplay_sim::EventInputPlan::ChartTaps(&notes),
+        )
+        .unwrap();
+        let mut renderer =
+            oxide_game::render::SliceRenderer::build_for_song(&root, "south-pico", "hard").unwrap();
+        let mut scroll_rows = 0usize;
+        for tick in &replay.ticks {
+            renderer
+                .step(tick.sim_ms, &tick.events, &tick.inputs)
+                .unwrap();
+            for event in &tick.events {
+                if matches!(event, TraceEvent::ScrollSpeed { .. }) {
+                    scroll_rows += 1;
+                }
+            }
+        }
+        assert!(
+            scroll_rows >= 30,
+            "south-chart-pico carries 15 ScrollSpeed events ('both' = 2 rows/event); got {scroll_rows}"
+        );
+    }
 }

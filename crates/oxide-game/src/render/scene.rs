@@ -826,13 +826,11 @@ impl Scene {
 
         let dispatches = self.conductor.update(Some(self.sim_ms), false, false, 0.0);
         if self.dead {
-            // GameOverSubState freezes the native camera updates; keep the
-            // frozen M5 decay only when the bop rate is active (native
-            // `subState == null && cameraZoomRate > 0.0`).
-            if self.camera_events.bop.rate > 0.0 {
-                self.camera.decay(TICK_SECONDS);
-                self.camera_events.decay_hud(TICK_SECONDS);
-            }
+            // Native `subState == null` gate (PlayState.hx L1214): with the
+            // GameOverSubState open the decay/zoom-assign block does not run,
+            // so both the bop decay and the virtual HUD zoom FREEZE after a
+            // GameOver row (review finding: this is the native behavior, not
+            // a rate-gated M5 variant).
             return Ok(());
         }
         for dispatch in dispatches {
@@ -3449,5 +3447,123 @@ mod tests {
         assert_eq!(scene.camera.current_zoom, before.1);
         assert_eq!(scene.camera_events.follow_focus, before.2);
         assert_eq!(scene.camera_events.bop.rate, before.3.rate);
+    }
+
+    #[test]
+    fn game_over_row_freezes_the_decay_and_hud_zoom_block() {
+        // Native `subState == null` gate (PlayState.hx L1214): once the
+        // GameOverSubState opens neither the bop decay nor the virtual HUD
+        // zoom may keep moving (review round resolution, 2026-11-09).
+        let mut scene = default_scene();
+        scene
+            .step(0, &[camera_bop_row(0, 1.045, 0.06, 1.0, 0.0)], &[])
+            .expect("bop row applies");
+        // rate 1 / offset 0 pulses at steps 4, 8, ... (600 ms, 1200 ms, ...).
+        step_empty(&mut scene, 1, 599);
+        assert_eq!(scene.camera.bop_multiplier, 1.0);
+        step_empty(&mut scene, 600, 600);
+        assert!(
+            scene.camera.bop_multiplier > 1.0,
+            "the pulse must have fired at step 4"
+        );
+        assert!(scene.camera_events.hud_zoom > DEFAULT_HUD_CAMERA_ZOOM);
+        let game_over = TraceEvent::GameOver {
+            schema: "3",
+            kind: "game_over",
+            sim: 601,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "miss",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            death_count: 1,
+        };
+        scene.step(601, &[game_over], &[]).expect("game over row");
+        let frozen = (
+            scene.camera.zoom,
+            scene.camera.bop_multiplier,
+            scene.camera_events.hud_zoom,
+        );
+        step_empty(&mut scene, 602, 1200);
+        let still_frozen = (
+            scene.camera.zoom,
+            scene.camera.bop_multiplier,
+            scene.camera_events.hud_zoom,
+        );
+        assert_eq!(
+            frozen, still_frozen,
+            "post-GameOver ticks must freeze the block"
+        );
+        // Tweens keep advancing in `super.update` even while a substate is
+        // open (native), so the follow state is NOT asserted frozen here.
+    }
+
+    #[test]
+    fn sim_and_scene_agree_on_the_sampled_focus_points() {
+        // OXIDE_ASSETS_ROOT guard: sim `world_focus` rows must equal the
+        // scene's own rig targets for the two established families
+        // (review finding 2: the §12.6 finding-3 helper factoring is
+        // deferred to a later slice; this equivalence gate catches algebra
+        // drift between the headless sim and the render loader).
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        for chart_id in ["bopeebo", "senpai"] {
+            let loaded = super::super::load::load_slice_for_song(&root, chart_id, "normal")
+                .unwrap_or_else(|error| panic!("{chart_id}: load failed: {error}"));
+            let scene = Scene::new(loaded).expect("scene builds").0;
+            let rig_for = |kind: &str| -> Option<[f64; 2]> {
+                let role = match kind {
+                    "bf" => Role::Player,
+                    "dad" => Role::Opponent,
+                    _ => return None,
+                };
+                scene
+                    .characters
+                    .iter()
+                    .find(|character| character.role == role)
+                    .map(|character| character.camera_focus)
+            };
+            let mut sim =
+                crate::slice::GameplaySimState::build_chart_events(&root, chart_id, "normal")
+                    .unwrap_or_else(|error| panic!("{chart_id}: sim build failed: {error}"));
+            let mut emitted = false;
+            for tick in 0..60_000u64 {
+                let rows = sim.step(tick, &[]);
+                for row in &rows {
+                    let TraceEvent::CameraFocus {
+                        target_kind,
+                        x,
+                        y,
+                        world_focus,
+                        ..
+                    } = row
+                    else {
+                        continue;
+                    };
+                    if *target_kind != "bf" && *target_kind != "dad" {
+                        continue;
+                    }
+                    let Some(rig) = rig_for(target_kind) else {
+                        continue;
+                    };
+                    emitted = true;
+                    // The handler ADDS the literal x/y on top of the focus
+                    // point (FocusCameraSongEvent.hx L113-134).
+                    let want = [x + rig[0], y + rig[1]];
+                    assert_eq!(
+                        *world_focus, want,
+                        "{chart_id}: world_focus row drifts from the scene rig target"
+                    );
+                }
+            }
+            assert!(
+                emitted,
+                "{chart_id}: expected at least one resolvable camera_focus row"
+            );
+        }
     }
 }

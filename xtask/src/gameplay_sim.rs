@@ -569,15 +569,15 @@ fn chart_asset_paths_from_inventory(
     let chart_path = crate::replay::resolve_chart_path(&fixture_id, inventory)
         .map_err(|error| error.0)?
         .to_owned();
-    let metadata_path = chart_path
-        .strip_suffix("-chart.json")
-        .map(|prefix| format!("{prefix}-metadata.json"))
-        .ok_or_else(|| {
-            format!(
-                "provenance chart path {chart_path:?} does not end in -chart.json; cannot \
+    let metadata_path = match chart_path.rsplit_once("-chart") {
+        Some((prefix, suffix)) => format!("{prefix}-metadata{suffix}"),
+        None => {
+            return Err(format!(
+                "provenance chart path {chart_path:?} does not contain -chart; cannot \
                  derive the metadata path"
-            )
-        })?;
+            ));
+        }
+    };
     Ok((chart_path, metadata_path))
 }
 
