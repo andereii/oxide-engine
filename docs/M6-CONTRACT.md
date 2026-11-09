@@ -1058,3 +1058,31 @@ limitation, reversible if later phase evidence requires).
   `south_pico_scroll_speed_rows_replay_through_the_real_scene`); the variant-
   chart provenance metadata-path derivation (`-chart-pico.json`) was fixed in
   the process.
+
+### 12.8 Amendment (2026-11-09, playtest-verified animation parity fixes)
+
+- **OBSERVED** (`PlayState.hx` L2838-2852, inside `processNotes`): on every
+  frame while any opponent hold note has `hitNote && !missedNote &&
+  sustainLength > 0`, if `getDad() != null && getDad().isSinging()`, then
+  `getDad().holdTimer = 0` — the opponent's sing animation survives long
+  sustains (playtest: dad stepped off mid-hold on the bopeebo easy
+  t=52800/d=7/l=1875 ms note around 54000-54675 ms). Scene wiring: the reset
+  runs after the opponent hold prune and before the per-character scheduler
+  updates (`CharacterScheduler::reset_hold_timer_under_opponent_hold` keeps
+  the native `isSinging()` guard).
+- **OBSERVED** (`BaseCharacter.hx` L174 + `Bopper.hx` L261-282):
+  `BaseCharacter.new` sets `ignoreExclusionPref = ['sing']`; a locked
+  Bopper's `playAnimation` early return is BYPASSED for any animation whose
+  name starts with a listed entry (`sing{DIR}` and `sing{DIR}miss` both
+  play), while `ignoreOther = force` keeps the lock closed and a restart of
+  a non-current non-sing animation stays dropped. Consequently a note-hit
+  sing DOES play through a forced chart animation (playtest: `hey`
+  force:true blocked `sing*` on bopeebo). The lock reopens when the
+  currently-playing animation finishes regardless of which animation owns
+  it when it finishes.
+- **Fixtures (approved ADR-0020 path, 2nd establishment pass):** sample
+  lists unchanged in all six captures; every frame/run/trace digest
+  refreshed (both fixes change animation state inside sampled windows;
+  school normal/hard still share one run digest). The 2026-11-09 fixture
+  freeze reasons are recorded in the manifest honesty line; in-crate tests
+  pin both fixes (playAnimation sing-bypass + opponent hold reset).

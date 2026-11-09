@@ -875,3 +875,29 @@ fail-closed (no auto-repair).
   `canPlayOtherAnims` until the fired animation finishes
   (Bopper.hx:250/291/110-117), so forced chart animations suppress
   sing/dance until they end; restart = force.
+
+## 2026-11-08 — M8 scripting engine decision: Rhai exclusively on base branch; mruby reserved for a separate flavor/fork (human product decision)
+
+- **Decision (human-approved 2026-11-08):** Milestone M8 (`oxide-script`) on the
+  base branch will exclusively use **Rhai** (pure Rust softcoding/scripting engine,
+  zero C toolchain/FFI overhead, compact binary footprint, and native Rust/Bevy
+  integration).
+- **Status of mruby:** Ruby/`mruby` is NOT discarded conceptually; it is reserved
+  for a separate fork/flavor of Oxide aimed at modders who prefer Ruby's simple,
+  comfortable syntax. Because of `mruby`'s larger C build footprint and potential
+  runtime/FFI overhead, `mruby` must NOT be implemented in the base branch.
+- **Timing:** Per `AGENTS.md`, the `rhai` crate dependency will be added when M8
+  implementation begins (no unused planned dependencies in `Cargo.toml` during M6/M7).
+
+## 2026-11-09 — playtest-verified animation parity fixes (M6-CONTRACT §12.8)
+
+- Two human-playtest findings fixed directly (no subagents): (1) the native
+  `processNotes` opponent-hold `holdTimer = 0` reset was missing from the
+  scene step, so the dad stepped off its sing animation in the middle of
+  long opponent sustains; (2) `ignoreExclusionPref = ['sing']` lets
+  `sing{DIR}`/`sing{DIR}miss` bypass the `canPlayOtherAnims` lock of a
+  forced `PlayAnimation`, which the Rust lock blocked.
+- Fixture consequence: render-diff digests re-frozen a second time under the
+  same human-approved ADR-0020 establishment; sample lists unchanged (the sample plan does not derive from animation state); school normal/hard
+  still share one run digest with distinct trace digests. No tolerance or
+  coverage semantics changed.

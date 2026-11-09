@@ -15,6 +15,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::geometry::DANCE_STEPS_PER_BEAT;
 
+/// `Bopper.ignoreExclusionPref` with the `BaseCharacter.new` override
+/// (`BaseCharacter.hx:174`): a locked character still plays animations whose
+/// names begin with one of these prefixes (Bopper.hx L267-279), covering both
+/// `sing{DIR}` and `sing{DIR}miss`.
+const IGNORE_EXCLUSION_PREFS: [&str; 1] = ["sing"];
+
 /// `frameRate ?? 24` from the character animation data.
 pub(crate) const DEFAULT_ANIMATION_FPS: f64 = 24.0;
 /// Observed `CharacterData` default (`CharacterData.hx:451/593-596`
@@ -218,9 +224,14 @@ impl CharacterScheduler {
             && !self
                 .current_name()
                 .is_some_and(|current| current == name && restart)
+            && !IGNORE_EXCLUSION_PREFS
+                .iter()
+                .any(|entry| name.starts_with(entry))
         {
             // Native `playAnimation`: a locked Bopper ignores every request
-            // that is not a restart of the current animation.
+            // that is neither a restart of the current animation nor covered
+            // by an `ignoreExclusionPref` entry (Bopper.hx L261-279: a
+            // detected entry skips the early return and plays immediately).
             return false;
         }
         let Some(animation) = self.animations.get(name) else {
@@ -388,6 +399,18 @@ impl CharacterScheduler {
         };
         self.hold_timer_seconds = 0.0;
         self.play(&name, true)
+    }
+
+    /// Native `PlayState.processNotes` (PlayState.hx L2838-2852): while an
+    /// opponent hold note is active (`hitNote && !missedNote &&
+    /// sustainLength > 0`), every frame resets `getDad().holdTimer = 0` (when
+    /// the opponent is singing), which keeps the sing animation alive through
+    /// long sustains. Folded into one call from the scene step; a no-op when
+    /// the character is not singing (the native `if (...isSinging())` guard).
+    pub(crate) fn reset_hold_timer_under_opponent_hold(&mut self) {
+        if self.is_singing() {
+            self.hold_timer_seconds = 0.0;
+        }
     }
 
     pub(crate) fn set_holding(&mut self, holding: bool) {
@@ -702,20 +725,94 @@ mod tests {
         assert_eq!(sched.current_name(), Some("hey"));
         assert!(sched.locked());
 
-        // A different animation (including the dance/sing derived callers) is
-        // ignored while the forced animation runs.
+        // A dance animation is ignored while the forced animation runs, but
+        // sing animations bypass via `ignoreExclusionPref = ['sing']`
+        // (BaseCharacter.hx:174) and play immediately; the lock persists
+        // (the sing call passes `ignoreOther = false`).
         assert!(!sched.play("idle", true));
-        assert!(!sched.on_sing(0, false));
-        assert_eq!(sched.current_name(), Some("hey"));
-        // Restarting the CURRENT animation is allowed while locked.
-        assert!(sched.play_with_ignore_other("hey", true, true));
-        assert_eq!(sched.current_name(), Some("hey"));
+        assert!(sched.on_sing(0, false));
+        assert_eq!(sched.current_name(), Some("singLEFT"));
+        assert!(sched.locked());
+        // Restarting a NON-current non-sing animation ('hey' is no longer
+        // current after the bypasssing sing) is dropped per the native gate.
+        assert!(!sched.play_with_ignore_other("hey", true, true));
+        assert_eq!(sched.current_name(), Some("singLEFT"));
+        // Restarting the CURRENT animation (the sing) stays allowed.
+        assert!(sched.on_sing(0, false));
+        assert_eq!(sched.current_name(), Some("singLEFT"));
+        assert!(sched.locked());
 
-        // `hey` has two frames at 24 fps -> 83.3 ms; the lock reopens after
-        // the animation finishes (lazily at the next request).
-        sched.update(0.084, 150.0);
+        // `singLEFT` is one frame at 24 fps (41.7 ms); the lock reopens once
+        // the sing finishes and the dance caller works again.
+        sched.update(0.05, 150.0);
         assert!(!sched.locked());
         assert!(sched.play("idle", true));
+        assert_eq!(sched.current_name(), Some("idle"));
+    }
+
+    /// `ignoreExclusionPref = ['sing']` (`BaseCharacter.hx:174`): both
+    /// `sing{DIR}` and `sing{DIR}miss` play immediately while locked, and
+    /// the lock only reopens after the fired animation finishes.
+    #[test]
+    fn sing_prefix_bypasses_the_forced_animation_lock() {
+        let mut sched = scheduler(
+            &[
+                ("idle", animation(&[0, 1], true)),
+                ("hey", animation(&[5, 6], false)),
+                ("singLEFT", animation(&[1], false)),
+                ("singRIGHTmiss", animation(&[1], false)),
+                ("hey-alt", animation(&[5, 6], false)),
+            ],
+            8.0,
+        );
+        sched.play("idle", true);
+        assert!(sched.play_with_ignore_other("hey", true, true));
+        assert!(sched.locked());
+        // sing{DIR} plays through the lock...
+        assert!(sched.on_sing(0, false));
+        assert_eq!(sched.current_name(), Some("singLEFT"));
+        // ...as does sing{DIR}miss (same 'sing' prefix), which also exercises
+        // the restart of a DIFFERENT animation under the lock.
+        assert!(sched.on_sing(3, true));
+        assert_eq!(sched.current_name(), Some("singRIGHTmiss"));
+        assert!(sched.locked());
+        // Non-sing names are still dropped.
+        assert!(!sched.play("hey-alt", true));
+        assert_eq!(sched.current_name(), Some("singRIGHTmiss"));
+        // The lock reopens when the currently-playing animation finishes.
+        sched.update(0.05, 150.0);
+        assert!(!sched.locked());
+        assert!(sched.play("hey-alt", true));
+        assert_eq!(sched.current_name(), Some("hey-alt"));
+    }
+
+    /// Native `PlayState.processNotes` reset (PlayState.hx L2838-2852): the
+    /// opponent hold timer restarts while the hold is active, so the sing
+    /// animation survives long sustains and only stops `singTimeSeconds`
+    /// after the hold ends.
+    #[test]
+    fn opponent_hold_reset_keeps_long_sustains_singing() {
+        let mut sched = scheduler(
+            &[
+                ("idle", animation(&[0, 1], true)),
+                ("singLEFT", animation(&[1], false)),
+            ],
+            8.0,
+        );
+        // Default sing time = 8 steps * 150 ms = 1.2 s; the hold resets the
+        // timer every frame, so 2 s of accrual never stops the sing.
+        assert!(sched.on_sing(0, false));
+        sched.update(0.001, 150.0);
+        for _ in 0..2000 {
+            sched.reset_hold_timer_under_opponent_hold();
+            sched.update(0.001, 150.0);
+        }
+        assert_eq!(sched.current_name(), Some("singLEFT"));
+        // Once the hold ends (no more resets), the timer completes its
+        // `singTimeSeconds` and the character stops singing.
+        for _ in 0..1400 {
+            sched.update(0.001, 150.0);
+        }
         assert_eq!(sched.current_name(), Some("idle"));
     }
 

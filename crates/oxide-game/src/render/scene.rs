@@ -894,6 +894,14 @@ impl Scene {
         if let Some(player) = self.character_mut(Role::Player) {
             player.scheduler.set_holding(holding);
         }
+        // Native `PlayState.processNotes` (PlayState.hx L2838-2852): while
+        // any opponent hold note is active, every frame resets
+        // `getDad().holdTimer = 0` so the sing animation survives long
+        // sustains (playtest finding on the bopeebo easy 52800/1875 ms hold).
+        let opponent_holding = self.opponent_holds.iter().any(Option::is_some);
+        if opponent_holding && let Some(dad) = self.character_mut(Role::Opponent) {
+            dad.scheduler.reset_hold_timer_under_opponent_hold();
+        }
         let step_length_ms = self.conductor.step_length_ms();
         for character in &mut self.characters {
             character.scheduler.update(TICK_SECONDS, step_length_ms);
@@ -2814,13 +2822,22 @@ mod tests {
         props: Vec<LoadedStageProp>,
         chart_scroll: f64,
     ) -> Scene {
+        test_scene_with_notes(characters, props, chart_scroll, Vec::new())
+    }
+
+    fn test_scene_with_notes(
+        characters: Vec<LoadedCharacter>,
+        props: Vec<LoadedStageProp>,
+        chart_scroll: f64,
+        notes: Vec<LoadedNote>,
+    ) -> Scene {
         let loaded = LoadedSlice {
             pages: Vec::new(),
             stage_zoom: 1.1,
             props,
             characters,
             note_style: test_note_style(),
-            notes: Vec::new(),
+            notes,
             scroll_speed: chart_scroll,
             conductor_changes: vec![TimeChange {
                 time_stamp: 0.0,
@@ -3301,12 +3318,16 @@ mod tests {
         assert_eq!(player.scheduler.current_name(), Some("hey"));
         assert!(player.scheduler.locked());
         assert!(!player.scheduler.play("idle", true));
-        assert!(!player.scheduler.on_sing(0, false));
+        // The note-hit sing BYPASSES the lock (`ignoreExclusionPref = ['sing']`,
+        // BaseCharacter.hx:174) while the dance stays locked.
+        assert!(player.scheduler.on_sing(0, false));
+        assert_eq!(player.scheduler.current_name(), Some("singLEFT"));
+        assert!(player.scheduler.locked());
         assert!(!player.scheduler.dance(true));
-        assert_eq!(player.scheduler.current_name(), Some("hey"));
 
-        // `hey` is two frames at 24 fps (83.3 ms): the lock reopens lazily and
-        // a later unforced row plays.
+        // `hey` is two frames at 24 fps; the bypassing sing (one frame,
+        // 41.7 ms) also finished inside the window, so the lock reopens
+        // lazily and a later unforced row plays.
         step_empty(&mut scene, 1, 84);
         assert!(
             !scene
@@ -3498,6 +3519,77 @@ mod tests {
         );
         // Tweens keep advancing in `super.update` even while a substate is
         // open (native), so the follow state is NOT asserted frozen here.
+    }
+
+    /// Native processNotes hard-reset while the opponent hold is active
+    /// (PlayState.hx L2838-2852; playtest finding on the bopeebo easy
+    /// 52800 d=7 l=1875 hold): the dad keeps `singLEFT` through the sustain
+    /// and returns to the dance only `singTimeSeconds` after the hold ends.
+    #[test]
+    fn opponent_hold_sustain_keeps_the_dad_singing() {
+        let animations = BTreeMap::from([
+            ("idle".to_string(), animation(&[0, 1], true)),
+            ("singLEFT".to_string(), animation(&[1], false)),
+        ]);
+        let mut scene = test_scene_with_notes(
+            vec![
+                test_character(Role::Player, (100.0, 200.0), bf_animations(), Some("idle")),
+                test_character(Role::Opponent, (300.0, 400.0), animations, None),
+            ],
+            Vec::new(),
+            1.5,
+            vec![LoadedNote {
+                time: 0.0,
+                direction: 0,
+                sustain_ms: 3000.0,
+                opponent: true,
+                note_id: Some(0),
+            }],
+        );
+        let opponent_hit = TraceEvent::OpponentHit {
+            schema: "3",
+            kind: "opponent_hit",
+            sim: 0,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "sick",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+        };
+        scene
+            .step(0, &[opponent_hit], &[])
+            .expect("opponent hit row");
+        assert_eq!(
+            scene
+                .characters
+                .iter()
+                .find(|character| character.role == Role::Opponent)
+                .and_then(|dad| dad.scheduler.current_name()),
+            Some("singLEFT")
+        );
+        // Through the 3000 ms sustain (default sing time 1200 ms) the sing
+        // must still be current at 4000 ms...
+        step_empty(&mut scene, 1, 4000);
+        assert_eq!(
+            scene
+                .characters
+                .iter()
+                .find(|character| character.role == Role::Opponent)
+                .and_then(|dad| dad.scheduler.current_name()),
+            Some("singLEFT")
+        );
+        // ...and by 5000 ms the >1.2 s post-hold accrual has stopped it.
+        step_empty(&mut scene, 4001, 5000);
+        assert_ne!(
+            scene
+                .characters
+                .iter()
+                .find(|character| character.role == Role::Opponent)
+                .and_then(|dad| dad.scheduler.current_name()),
+            Some("singLEFT")
+        );
     }
 
     #[test]
