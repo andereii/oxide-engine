@@ -67,10 +67,17 @@ use thiserror::Error;
 use oxide_data::Typed;
 use oxide_vfs::Vfs;
 
+mod events;
+use events::EventState;
+
 /// The frozen phase-1 player-only wire schema (`docs/M5-CONTRACT.md` §2).
 const SCHEMA_V1: &str = "1";
 /// The add-only phase-6A wire schema (`docs/M6-CONTRACT.md` §10.2).
 const SCHEMA_V2: &str = "2";
+/// The add-only phase-6C wire schema (`docs/M6-CONTRACT.md` §12.4.1): chart
+/// song-event rows. The event-enabled build path stamps every row "3"; the
+/// frozen "1"/"2" paths are unchanged.
+const SCHEMA_V3: &str = "3";
 
 /// Upper bound for the two small JSON assets, matching the VFS read contract.
 const ASSET_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
@@ -290,6 +297,129 @@ pub enum TraceEvent {
         raw_note_diff: f64,
         note_diff_int: i32,
     },
+    /// `FocusCamera` (`docs/M6-CONTRACT.md` §12.4.1).
+    CameraFocus {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        target_char: i64,
+        target_kind: &'static str,
+        x: f64,
+        y: f64,
+        world_focus: [f64; 2],
+        /// Duration in steps (the native duration unit).
+        duration: f64,
+        ease_kind: &'static str,
+        /// Resolved `FlxEase` name for a named ease, else null.
+        ease: Option<String>,
+        /// `In`/`Out`/`InOut`/`` for a named ease, else null.
+        ease_dir: Option<String>,
+    },
+    /// `ZoomCamera` (`docs/M6-CONTRACT.md` §12.4.1).
+    CameraZoom {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        zoom: f64,
+        mode: &'static str,
+        resolved_target_zoom: f64,
+        /// Duration in steps (the native duration unit).
+        duration: f64,
+        ease: Option<String>,
+        ease_dir: Option<String>,
+    },
+    /// `SetCameraBop` (`docs/M6-CONTRACT.md` §12.4.1).
+    CameraBop {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        intensity: f64,
+        camera_bop_intensity: f64,
+        hud_intensity: f64,
+        rate: f64,
+        offset: f64,
+    },
+    /// `PlayAnimation` (`docs/M6-CONTRACT.md` §12.4.1/§12.4.3).
+    PlayAnimation {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        target: String,
+        anim: String,
+        force: bool,
+        resolved_kind: String,
+        /// The >1000 ms `processOldEvents = false` skip; no state change.
+        skipped_old: bool,
+    },
+    /// One `ScrollSpeed` target strumline (`docs/M6-CONTRACT.md` §12.4.1).
+    ScrollSpeed {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        strumline: &'static str,
+        target: f64,
+        absolute: bool,
+        base_scroll: f64,
+        /// Duration in steps (the native duration unit).
+        duration: f64,
+        ease: Option<String>,
+        ease_dir: Option<String>,
+    },
+    /// `SetHealthIcon` (`docs/M6-CONTRACT.md` §12.4.1); record-only for 6C.
+    HealthIcon {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        char: i64,
+        id: String,
+        should_bop: bool,
+        scale: f64,
+        flip_x: bool,
+        is_pixel: bool,
+        offsets: [f64; 2],
+    },
+    /// EnableMask / sserafim / any no-handler kind: record-only
+    /// (`docs/M6-CONTRACT.md` §12.2/§12.4.1).
+    ///
+    /// The raw payload is preserved through `value`; the source event name is
+    /// `event_kind` because the shared header already owns `kind`.
+    UnknownEvent {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        event_kind: String,
+        #[serde(serialize_with = "serialize_event_payload")]
+        value: Option<oxide_data::chart::SongEvent>,
+    },
+}
+
+/// Serializes only the raw `v` payload of the source event
+/// (`docs/M6-CONTRACT.md` §12.4.1 `unknown_event.value`).
+fn serialize_event_payload<S>(
+    value: &Option<oxide_data::chart::SongEvent>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match value.as_ref().and_then(|event| event.value.as_ref()) {
+        Some(payload) => payload.serialize(serializer),
+        None => serializer.serialize_none(),
+    }
 }
 
 /// Shared §2 header values used by the private constructors below.
@@ -407,6 +537,10 @@ pub enum SliceError {
     },
     #[error("input event at {event_ms} ms does not belong to the active {step_ms} ms sim tick")]
     OutOfGridEvent { event_ms: u64, step_ms: u64 },
+    #[error("chart event at index {index} is invalid: {detail}")]
+    InvalidEvent { index: usize, detail: &'static str },
+    #[error("asset {path:?} cannot be used for event focus resolution: {detail}")]
+    InvalidAsset { path: String, detail: String },
 }
 
 /// Deterministic simulation state for one chart difficulty.
@@ -429,6 +563,8 @@ pub struct GameplaySimState {
     dead: bool,
     held: [bool; 4],
     active_holds: [Option<ActiveHold>; 4],
+    /// Chart-event walker; present only on the schema-3 event-enabled path.
+    events: Option<EventState>,
     trace: Vec<TraceEvent>,
 }
 
@@ -528,7 +664,14 @@ impl GameplaySimState {
             return Err(SliceError::UnknownDifficulty(difficulty.to_owned()));
         }
         let (chart_path, metadata_path) = chart_paths(BOPEEBO_CHART_ID)?;
-        Self::build_selected(assets_root, &chart_path, &metadata_path, difficulty, false)
+        Self::build_selected(
+            assets_root,
+            &chart_path,
+            &metadata_path,
+            difficulty,
+            false,
+            false,
+        )
     }
 
     /// Builds the schema "2" sim for any `corpus.txt`-style chart id.
@@ -548,17 +691,50 @@ impl GameplaySimState {
         difficulty: &str,
     ) -> Result<Self, SliceError> {
         let (chart_path, metadata_path) = chart_paths(chart_id)?;
-        Self::build_selected(assets_root, &chart_path, &metadata_path, difficulty, true)
+        Self::build_selected(
+            assets_root,
+            &chart_path,
+            &metadata_path,
+            difficulty,
+            true,
+            false,
+        )
+    }
+
+    /// Builds the schema "3" sim with chart song-event consumption.
+    ///
+    /// Same chart-id/difficulty resolution as [`Self::build_chart`], plus the
+    /// `docs/M6-CONTRACT.md` §12 event walker: event rows are emitted in the
+    /// native per-tick dispatch position and every row is stamped schema "3".
+    /// The frozen [`Self::build`] (schema "1") and [`Self::build_chart`]
+    /// (schema "2") paths never consume events, so their fixture streams stay
+    /// byte-identical.
+    pub fn build_chart_events(
+        assets_root: &Path,
+        chart_id: &str,
+        difficulty: &str,
+    ) -> Result<Self, SliceError> {
+        let (chart_path, metadata_path) = chart_paths(chart_id)?;
+        Self::build_selected(
+            assets_root,
+            &chart_path,
+            &metadata_path,
+            difficulty,
+            true,
+            true,
+        )
     }
 
     /// Shared chart/metadata loading. `opponent_side` selects the add-only
-    /// schema "2" behavior; `false` is the frozen M5 player-only path.
+    /// schema "2" behavior and `event_side` the schema "3" event walker;
+    /// both `false` is the frozen M5 player-only path.
     fn build_selected(
         assets_root: &Path,
         chart_path: &str,
         metadata_path: &str,
         difficulty: &str,
         opponent_side: bool,
+        event_side: bool,
     ) -> Result<Self, SliceError> {
         let vfs = Vfs::new(assets_root.to_path_buf());
         let chart_bytes = read_asset(&vfs, chart_path)?;
@@ -681,10 +857,24 @@ impl GameplaySimState {
             }
         }
 
+        // The event walker resolves its focus points/stage zoom from the same
+        // VFS data the renderer uses; only the event-enabled path pays for it.
+        let events = if event_side {
+            Some(EventState::build(&vfs, &metadata, &chart, difficulty)?)
+        } else {
+            None
+        };
+
         let mut state = Self {
             notes,
             opponent_notes,
-            schema: if opponent_side { SCHEMA_V2 } else { SCHEMA_V1 },
+            schema: if event_side {
+                SCHEMA_V3
+            } else if opponent_side {
+                SCHEMA_V2
+            } else {
+                SCHEMA_V1
+            },
             health: HEALTH_STARTING,
             song_score: 0.0,
             combo: 0,
@@ -694,6 +884,7 @@ impl GameplaySimState {
             dead: false,
             held: [false; 4],
             active_holds: [None; 4],
+            events,
             trace: Vec::new(),
         };
         // The first processed frame always follows a previous window pass in
@@ -742,6 +933,13 @@ impl GameplaySimState {
 
         self.mirror_holds(sim_ms);
         let mut dispatched = Vec::new();
+
+        // Native `processSongEvents` runs after the camera/bop decay block and
+        // before `processInputQueue`/`processNotes`; its rows therefore
+        // precede this tick's input and note rows.
+        if let Some(chart_events) = &mut self.events {
+            chart_events.dispatch(sim_ms, &mut dispatched);
+        }
 
         for event in events {
             match event {

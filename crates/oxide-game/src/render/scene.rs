@@ -748,6 +748,15 @@ impl Scene {
                 // scene at the substate boundary; the sim stops dispatching.
                 self.dead = true;
             }
+            // Schema-3 chart-event rows are consumed by the 6C scene
+            // integration task; the phase-2b/6A scene ignores them for now.
+            TraceEvent::CameraFocus { .. }
+            | TraceEvent::CameraZoom { .. }
+            | TraceEvent::CameraBop { .. }
+            | TraceEvent::PlayAnimation { .. }
+            | TraceEvent::ScrollSpeed { .. }
+            | TraceEvent::HealthIcon { .. }
+            | TraceEvent::UnknownEvent { .. } => {}
             TraceEvent::OpponentHit {
                 note_id,
                 note_direction,
@@ -1683,7 +1692,14 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HoldDrop { sim, .. }
         | TraceEvent::HoldEnd { sim, .. }
         | TraceEvent::GameOver { sim, .. }
-        | TraceEvent::OpponentHit { sim, .. } => *sim,
+        | TraceEvent::OpponentHit { sim, .. }
+        | TraceEvent::CameraFocus { sim, .. }
+        | TraceEvent::CameraZoom { sim, .. }
+        | TraceEvent::CameraBop { sim, .. }
+        | TraceEvent::PlayAnimation { sim, .. }
+        | TraceEvent::ScrollSpeed { sim, .. }
+        | TraceEvent::HealthIcon { sim, .. }
+        | TraceEvent::UnknownEvent { sim, .. } => *sim,
     }
 }
 

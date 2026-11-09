@@ -850,6 +850,15 @@ fn count_kinds(trace: &[TraceEvent]) -> KindCounts {
             // Compile-only arm authorized for the schema-2 variant: the M5
             // schema-1 gate path never produces opponent rows.
             TraceEvent::OpponentHit { .. } => {}
+            // Schema-3 chart-event rows are outside the player counting
+            // surface; event totals are verified separately (contract 12.5).
+            TraceEvent::CameraFocus { .. }
+            | TraceEvent::CameraZoom { .. }
+            | TraceEvent::CameraBop { .. }
+            | TraceEvent::PlayAnimation { .. }
+            | TraceEvent::ScrollSpeed { .. }
+            | TraceEvent::HealthIcon { .. }
+            | TraceEvent::UnknownEvent { .. } => {}
         }
     }
     counts
@@ -881,7 +890,14 @@ fn input_time_us(event: &TraceEvent) -> f64 {
         | TraceEvent::HoldDrop { input_time_us, .. }
         | TraceEvent::HoldEnd { input_time_us, .. }
         | TraceEvent::GameOver { input_time_us, .. }
-        | TraceEvent::OpponentHit { input_time_us, .. } => *input_time_us,
+        | TraceEvent::OpponentHit { input_time_us, .. }
+        | TraceEvent::CameraFocus { input_time_us, .. }
+        | TraceEvent::CameraZoom { input_time_us, .. }
+        | TraceEvent::CameraBop { input_time_us, .. }
+        | TraceEvent::PlayAnimation { input_time_us, .. }
+        | TraceEvent::ScrollSpeed { input_time_us, .. }
+        | TraceEvent::HealthIcon { input_time_us, .. }
+        | TraceEvent::UnknownEvent { input_time_us, .. } => *input_time_us,
     }
 }
 
@@ -2418,8 +2434,17 @@ fn note_events(trace: &[TraceEvent], note_id: u32) -> Vec<String> {
                     judgement,
                     note_id,
                     ..
-                } => (kind, sim, judgement, note_id),
-            };
+                } => Some((kind, sim, judgement, note_id)),
+                // Chart-event rows are not player path rows and never match a
+                // note_id; the closure filter drops them.
+                TraceEvent::CameraFocus { .. }
+                | TraceEvent::CameraZoom { .. }
+                | TraceEvent::CameraBop { .. }
+                | TraceEvent::PlayAnimation { .. }
+                | TraceEvent::ScrollSpeed { .. }
+                | TraceEvent::HealthIcon { .. }
+                | TraceEvent::UnknownEvent { .. } => None,
+            }?;
             (*event_note_id == note_id).then(|| format!("{kind} sim={sim} judgement={judgement}"))
         })
         .collect()
@@ -2469,10 +2494,17 @@ struct CorpusRun {
     opponent_count: usize,
     tap_count: usize,
     digest: String,
+    // Schema-3 event pass (contract §12.5): full-trace digest, row total and
+    // the per-kind row counts (== parsed chart event counts per run).
+    event_digest: String,
+    event_rows: usize,
+    event_counts: Vec<(String, usize)>,
 }
 
 fn run_corpus(assets_root: &Path, trace_dir: &Path) -> Result<String, String> {
     let mut lines = Vec::new();
+    let mut aggregate: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
     for chart_id in corpus_ids() {
         let (song, suffix) = split_chart_id(chart_id);
         let metadata_path = format!("preload/data/songs/{song}/{song}-metadata{suffix}.json");
@@ -2501,17 +2533,42 @@ fn run_corpus(assets_root: &Path, trace_dir: &Path) -> Result<String, String> {
         }
         for difficulty in &difficulties {
             let run = corpus_run(assets_root, chart_id, difficulty, trace_dir)?;
+            let mut event_kinds = run
+                .event_counts
+                .iter()
+                .map(|(kind, count)| format!("{kind}={count}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            if event_kinds.is_empty() {
+                event_kinds.push_str("none");
+            }
             lines.push(format!(
-                "{chart_id}/{difficulty}: {} events ({} opponent_hit, {} taps) two-run sha256 {}",
-                run.event_count, run.opponent_count, run.tap_count, run.digest
+                "{chart_id}/{difficulty}: {} rows ({} opponent_hit, {} event-pass rows, \
+                 {} taps) two-run sha256 {} / event digest {} [{}]",
+                run.event_count,
+                run.opponent_count,
+                run.event_rows,
+                run.tap_count,
+                run.digest,
+                run.event_digest,
+                event_kinds
             ));
+            for (kind, count) in &run.event_counts {
+                *aggregate.entry(kind.clone()).or_insert(0) += count;
+            }
         }
     }
+    let aggregate_text = aggregate
+        .iter()
+        .map(|(kind, count)| format!("{kind}={count}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let mut summary = format!(
         "gameplay-sim --corpus: PASS: {} chart-ids over the measured corpus inventory; every \
-         difficulty ran the deterministic schema-2 sim on the 1 ms grid without misses or \
-         game-over; digests below are prototype evidence (not milestone acceptance; not \
-         native-game parity)",
+         difficulty ran the deterministic schema-2 sim plus the schema-3 event pass on the \
+         1 ms grid without misses or game-over; per-kind schema-3 row totals across all runs: \
+         {aggregate_text}; digests below are prototype evidence (not milestone acceptance; \
+         not native-game parity; native camera-probe rows remain a standing obligation)",
         corpus_ids().len()
     );
     summary.push('\n');
@@ -2530,7 +2587,15 @@ fn corpus_run(
     let second_sim = GameplaySimState::build_chart(assets_root, chart_id, difficulty)
         .map_err(|error| format!("{chart_id}/{difficulty}: second sim build: {error}"))?;
     let mut sims = [first_sim, second_sim];
-    let (notes, last_end_ms, opponent_notes) = player_notes_for(assets_root, chart_id, difficulty)?;
+    let first_event_sim =
+        GameplaySimState::build_chart_events(assets_root, chart_id, difficulty)
+            .map_err(|error| format!("{chart_id}/{difficulty}: event sim build: {error}"))?;
+    let second_event_sim = GameplaySimState::build_chart_events(assets_root, chart_id, difficulty)
+        .map_err(|error| format!("{chart_id}/{difficulty}: second event sim build: {error}"))?;
+    let mut event_sims = [first_event_sim, second_event_sim];
+    let mut event_traces: [Vec<TraceEvent>; 2] = [Vec::new(), Vec::new()];
+    let (notes, last_end_ms, opponent_notes, event_counts, last_event_ms) =
+        player_notes_for(assets_root, chart_id, difficulty)?;
     if notes.is_empty() {
         return Err(format!(
             "{chart_id}/{difficulty}: the difficulty has zero player notes; a run without \
@@ -2550,11 +2615,19 @@ fn corpus_run(
     let end_ms = grid_ms(last_end_ms)?
         .checked_add(END_TAIL_MS)
         .ok_or_else(|| format!("{chart_id}/{difficulty}: simulation end overflows u64 ms"))?;
+    // Native gameplay keeps processing song events through the song outro, so
+    // the event pass runs at least to the last event tick (the near-final
+    // camera choreography of four corpus charts lands after the last note).
+    let event_end_ms = if last_event_ms > 0.0 {
+        grid_ms(last_event_ms)?.max(end_ms)
+    } else {
+        end_ms
+    };
 
     let mut traces = [Vec::new(), Vec::new()];
     let mut tap_next = 0usize;
     let mut release_next = 0usize;
-    for sim_ms in 0..=end_ms {
+    for sim_ms in 0..=event_end_ms {
         let mut tick_inputs = Vec::new();
         while let Some(&(input_ms, lane)) = taps.get(tap_next) {
             if input_ms != sim_ms {
@@ -2582,6 +2655,10 @@ fn corpus_run(
             // fails closed on leftovers.
         }
         for (sim, trace) in sims.iter_mut().zip(traces.iter_mut()) {
+            let tick_events = sim.step(sim_ms, &tick_inputs);
+            trace.extend(tick_events.iter().cloned());
+        }
+        for (sim, trace) in event_sims.iter_mut().zip(event_traces.iter_mut()) {
             let tick_events = sim.step(sim_ms, &tick_inputs);
             trace.extend(tick_events.iter().cloned());
         }
@@ -2644,12 +2721,106 @@ fn corpus_run(
              computed {digest} but wrote {written}"
         ));
     }
+    // Schema-3 event pass: record()/dispatched equality, two-run determinism
+    // on the compact serialized trace through the extended outro end, and the
+    // per-kind row totals against the parsed chart events (contract §12.5).
+    let recorded_events = event_sims[0].record();
+    if recorded_events != event_traces[0] {
+        return Err(format!(
+            "{chart_id}/{difficulty}: event sim.record() differs from the dispatched trace"
+        ));
+    }
+    let event_bytes = serialize_trace(&event_traces[0])?;
+    let event_digest = sha_hex(&event_bytes);
+    let second_event_bytes = serialize_trace(&event_traces[1])?;
+    if event_bytes != second_event_bytes || event_digest != sha_hex(&second_event_bytes) {
+        return Err(format!(
+            "{chart_id}/{difficulty}: event two-run determinism failure              ({event_digest} vs {})",
+            sha_hex(&second_event_bytes)
+        ));
+    }
+    for event in &event_traces[0] {
+        match event {
+            TraceEvent::Miss { .. } => {
+                return Err(format!(
+                    "{chart_id}/{difficulty}: an event-pass tick must never miss a note"
+                ));
+            }
+            TraceEvent::GameOver { .. } => {
+                return Err(format!(
+                    "{chart_id}/{difficulty}: the event pass must never reach game over"
+                ));
+            }
+            _ => {}
+        }
+    }
+    let mut row_counts = std::collections::BTreeMap::<String, usize>::new();
+    for event in &event_traces[0] {
+        if matches!(
+            event,
+            TraceEvent::CameraFocus { .. }
+                | TraceEvent::CameraZoom { .. }
+                | TraceEvent::CameraBop { .. }
+                | TraceEvent::PlayAnimation { .. }
+                | TraceEvent::ScrollSpeed { .. }
+                | TraceEvent::HealthIcon { .. }
+                | TraceEvent::UnknownEvent { .. }
+        ) {
+            *row_counts
+                .entry(schema3_chart_kind(event).to_owned())
+                .or_insert(0) += 1;
+        }
+    }
+    let expectations: std::collections::BTreeMap<String, usize> =
+        event_counts.iter().cloned().collect();
+    if row_counts != expectations {
+        let diff: Vec<String> = expectations
+            .iter()
+            .chain(row_counts.iter())
+            .map(|(kind, _count)| {
+                let expected = expectations.get(kind);
+                let got = row_counts.get(kind);
+                format!("{kind}: expected {expected:?} rows, got {got:?}")
+            })
+            .collect::<std::collections::BTreeSet<String>>()
+            .into_iter()
+            .collect();
+        return Err(format!(
+            "{chart_id}/{difficulty}: schema-3 row totals diverge from the parsed chart              events: {}",
+            diff.join("; ")
+        ));
+    }
+    let event_trace_path = trace_dir.join(format!("corpus-events-{chart_id}-{difficulty}.jsonl"));
+    let written_events = write_and_hash(&event_trace_path, &event_bytes)?;
+    if written_events != event_digest {
+        return Err(format!(
+            "{chart_id}/{difficulty}: event trace digest changed across the write: computed              {event_digest} but wrote {written_events}"
+        ));
+    }
     Ok(CorpusRun {
         event_count: traces[0].len(),
         opponent_count,
         tap_count: taps.len(),
         digest,
+        event_digest,
+        event_rows: event_traces[0].len(),
+        event_counts: event_counts.into_iter().collect(),
     })
+}
+
+/// The source event kind a schema-3 row was emitted for (unknown rows keep
+/// the raw kind from `event_kind`, including EnableMask and sserafim kinds).
+fn schema3_chart_kind(event: &TraceEvent) -> &str {
+    match event {
+        TraceEvent::CameraFocus { .. } => "FocusCamera",
+        TraceEvent::CameraZoom { .. } => "ZoomCamera",
+        TraceEvent::CameraBop { .. } => "SetCameraBop",
+        TraceEvent::PlayAnimation { .. } => "PlayAnimation",
+        TraceEvent::ScrollSpeed { .. } => "ScrollSpeed",
+        TraceEvent::HealthIcon { .. } => "SetHealthIcon",
+        TraceEvent::UnknownEvent { event_kind, .. } => event_kind,
+        _ => "not_a_schema3_row",
+    }
 }
 
 /// Corpus notes split for the synthesis (review finding 5): player notes feed
@@ -2662,7 +2833,7 @@ fn player_notes_for(
     assets_root: &Path,
     chart_id: &str,
     difficulty: &str,
-) -> Result<(Vec<LaneNote>, f64, usize), String> {
+) -> Result<(Vec<LaneNote>, f64, usize, EventCounts, f64), String> {
     let (song, suffix) = split_chart_id(chart_id);
     let chart_path = format!("preload/data/songs/{song}/{song}-chart{suffix}.json");
     let bytes = fs::read(assets_root.join(&chart_path))
@@ -2713,8 +2884,56 @@ fn player_notes_for(
             hold_ms,
         });
     }
-    Ok((notes, last_end, opponent_note_count))
+    let mut event_counts: EventCounts = Vec::new();
+    let mut last_event = 0.0_f64;
+    if let Some(events) = chart.get("events").and_then(serde_json::Value::as_array) {
+        let mut counts = std::collections::BTreeMap::new();
+        for (index, value) in events.iter().enumerate() {
+            let kind = value
+                .get("e")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| format!("{chart_path:?}: events[{index}] lacks string e"))?;
+            // ScrollSpeed 'both' (the default) emits one row per target
+            // strumline; every other current kind emits exactly one row.
+            let row_count = if kind == "ScrollSpeed" {
+                let strumline = value
+                    .get("v")
+                    .and_then(|v| v.get("strumline"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("both");
+                usize::from(strumline == "both") + 1
+            } else {
+                1
+            };
+            counts
+                .entry(kind.to_owned())
+                .and_modify(|count| *count += row_count)
+                .or_insert(row_count);
+            if let Some(time_ms) = value.get("t").and_then(serde_json::Value::as_f64) {
+                if time_ms.is_finite() && time_ms >= 0.0 {
+                    last_event = last_event.max(time_ms);
+                    continue;
+                }
+                return Err(format!(
+                    "{chart_path:?}: events[{index}].t must be finite and non-negative"
+                ));
+            }
+            return Err(format!("{chart_path:?}: events[{index}] lacks numeric t"));
+        }
+        event_counts = counts.into_iter().collect();
+    }
+    Ok((
+        notes,
+        last_end,
+        opponent_note_count,
+        event_counts,
+        last_event,
+    ))
 }
+
+/// Per-kind counts of the chart file's `events` array (the walker dispatches
+/// each parsed event exactly once per run on the 1 ms grid; contract §12.5).
+type EventCounts = Vec<(String, usize)>;
 
 #[cfg(test)]
 mod tests {

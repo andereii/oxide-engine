@@ -184,8 +184,7 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
 
 - M4 pending obligations (input replay/jitter, native conductor corpus traces)
   are NOT M6 deliverables and stay listed on M4 acceptance.
-- One heavy queue job; `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0` per the
-  recorded bounded-RAM policy.
+- One heavy queue job at a time; do NOT set `CARGO_BUILD_JOBS` or `-j` CPU caps during Cargo compilation (superseding the earlier `CARGO_BUILD_JOBS=2` limit per human instruction; let Cargo use all available CPU cores).
 - Foundation crates never depend on oxide-game; new dependencies need the
   AGENTS rationale (no additions anticipated; existing serde/kira/bevy stack).
 - Every fixture/tolerance/acceptance-meaning change needs its ADR + human
@@ -909,3 +908,32 @@ limitation, reversible if later phase evidence requires).
   rows would change digests) needs the ADR-0020 establishment approval
   together with the school-pixel/school-test fixtures from 11.4; neither is
   pre-authorized.
+
+### 12.6 Amendment (2026-11-08, 6C integration): row-shape resolution + corpus accounting
+
+- ENGINE DECISION (`unknown_event` row fields, resolving the §12.4.1
+  self-contradiction): the shared header already owns `kind` (the row-kind
+  discriminator), so the schema-3 unknown row uses `event_kind` for the
+  SOURCE event name plus `value` = the raw preserved `v` payload (null →
+  `null`). Consumed only as: `kind = "unknown_event"` and `event_kind`
+  = source name (EnableMask / sserafim* / any no-handler kind).
+- ENGINE DECISION (ease endpoint honesty): the transcribed flixel 6.1.2
+  formulas (§12.3) are pinned by endpoints INCLUDING the native
+  overshoots: expoIn(0) = 2^-10, expoOut(1) = 1 - 2^-10, expoInOut edges at
+  ±2^-11, elasticIn(0) = -2^-10 (the `t -= 1` phase lands on a 5.5π sine),
+  elasticOut(1) = 1 + 2^-10 (a 4.5π sine); elasticInOut and all other
+  families hit 0/1 within 1e-12. No idealized endpoint invariant is used.
+- ENGINE DECISION (corpus event-pass accounting): the 6C corpus prototype
+  runs a SECOND sim pair (`build_chart_events`); its pass end is
+  `max(last note end + 2000 ms tail, last event tick)` because native
+  gameplay keeps dispatching song events through the song outro (observed
+  trailing events on philly-nice-chart-pico, blammed-chart-erect,
+  bopeebo-chart-erect, spookeez-chart-erect). Per (id,difficulty) run the
+  schema-3 row totals per kind MUST equal the parsed chart-file `events`
+  counts with ScrollSpeed 'both' (the default) contributing one row per
+  strumline; the schema-1/2 note-pass end and digests stay byte-frozen.
+- OBSERVED correction inside this phase's accounting: the 61 corpus ids
+  yield **166 difficulty runs** (the earlier 6A PROGRESS line quoted 167,
+  a header-inclusive count); per-kind row totals across all 166 runs are
+  recorded in the run output (PlayAnimation rows can NEVER fire more than
+  once per event in normal playback — the age rule does not trigger).

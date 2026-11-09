@@ -546,6 +546,17 @@ fn event_categories(event: &TraceEvent) -> Result<Vec<EventCategory>, String> {
         TraceEvent::OpponentHit { .. } => {
             Err("a schema-2 opponent row reached the schema-1 canonical render stream".to_string())
         }
+        // Schema-3 chart-event rows never appear in the frozen canonical
+        // render streams; treat them like the opponent guard (fail closed).
+        TraceEvent::CameraFocus { .. }
+        | TraceEvent::CameraZoom { .. }
+        | TraceEvent::CameraBop { .. }
+        | TraceEvent::PlayAnimation { .. }
+        | TraceEvent::ScrollSpeed { .. }
+        | TraceEvent::HealthIcon { .. }
+        | TraceEvent::UnknownEvent { .. } => Err(
+            "a schema-3 chart-event row reached the schema-1 canonical render stream".to_string(),
+        ),
     }
 }
 
@@ -559,7 +570,14 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HoldDrop { sim, .. }
         | TraceEvent::HoldEnd { sim, .. }
         | TraceEvent::GameOver { sim, .. }
-        | TraceEvent::OpponentHit { sim, .. } => *sim,
+        | TraceEvent::OpponentHit { sim, .. }
+        | TraceEvent::CameraFocus { sim, .. }
+        | TraceEvent::CameraZoom { sim, .. }
+        | TraceEvent::CameraBop { sim, .. }
+        | TraceEvent::PlayAnimation { sim, .. }
+        | TraceEvent::ScrollSpeed { sim, .. }
+        | TraceEvent::HealthIcon { sim, .. }
+        | TraceEvent::UnknownEvent { sim, .. } => *sim,
     }
 }
 

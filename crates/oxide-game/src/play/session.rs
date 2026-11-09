@@ -246,6 +246,14 @@ impl ScoreTracker {
                 // Compile-only arm authorized for the schema-2 variant:
                 // opponent rows never mutate player score/health/combo.
                 TraceEvent::OpponentHit { .. } => {}
+                // Schema-3 chart-event rows are not player scoring state.
+                TraceEvent::CameraFocus { .. }
+                | TraceEvent::CameraZoom { .. }
+                | TraceEvent::CameraBop { .. }
+                | TraceEvent::PlayAnimation { .. }
+                | TraceEvent::ScrollSpeed { .. }
+                | TraceEvent::HealthIcon { .. }
+                | TraceEvent::UnknownEvent { .. } => {}
             }
         }
     }

@@ -99,6 +99,23 @@ impl Fixture {
     ) -> Result<GameplaySimState, SliceError> {
         GameplaySimState::build_chart(&self.root, chart_id, difficulty)
     }
+
+    fn build_chart_events(
+        &self,
+        chart_id: &str,
+        difficulty: &str,
+    ) -> Result<GameplaySimState, SliceError> {
+        GameplaySimState::build_chart_events(&self.root, chart_id, difficulty)
+    }
+
+    /// Writes one asset relative to the VFS root (`preload/...`).
+    fn write_asset(&self, relative: &str, contents: &str) {
+        let path = self.root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create fixture asset directory");
+        }
+        fs::write(path, contents).expect("write fixture asset");
+    }
 }
 
 impl Drop for Fixture {
@@ -163,6 +180,58 @@ fn run_chart(
         events.extend(sim.step(sim_ms, &tick));
     }
     (sim, events)
+}
+
+/// Same canonical tick loop as [`run`], but through the schema-3
+/// event-enabled chart-id builder.
+fn run_chart_events(
+    fixture: &Fixture,
+    chart_id: &str,
+    difficulty: &str,
+    last_ms: u64,
+    inputs: &[InputEvent],
+) -> (GameplaySimState, Vec<TraceEvent>) {
+    let mut sim = fixture
+        .build_chart_events(chart_id, difficulty)
+        .expect("fixture chart builds");
+    let mut events = Vec::new();
+    for sim_ms in 0..=last_ms {
+        let tick: Vec<InputEvent> = inputs
+            .iter()
+            .filter(|event| event_ms(event) == sim_ms)
+            .cloned()
+            .collect();
+        events.extend(sim.step(sim_ms, &tick));
+    }
+    (sim, events)
+}
+
+fn event_rows<'a>(events: &'a [TraceEvent], kind: &str) -> Vec<&'a TraceEvent> {
+    events
+        .iter()
+        .filter(|event| trace_kind(event) == kind)
+        .collect()
+}
+
+fn trace_schema(event: &TraceEvent) -> &'static str {
+    match event {
+        TraceEvent::Hit { schema, .. }
+        | TraceEvent::Miss { schema, .. }
+        | TraceEvent::GhostPress { schema, .. }
+        | TraceEvent::HoldStart { schema, .. }
+        | TraceEvent::HoldTick { schema, .. }
+        | TraceEvent::HoldDrop { schema, .. }
+        | TraceEvent::HoldEnd { schema, .. }
+        | TraceEvent::GameOver { schema, .. }
+        | TraceEvent::OpponentHit { schema, .. }
+        | TraceEvent::CameraFocus { schema, .. }
+        | TraceEvent::CameraZoom { schema, .. }
+        | TraceEvent::CameraBop { schema, .. }
+        | TraceEvent::PlayAnimation { schema, .. }
+        | TraceEvent::ScrollSpeed { schema, .. }
+        | TraceEvent::HealthIcon { schema, .. }
+        | TraceEvent::UnknownEvent { schema, .. } => schema,
+    }
 }
 
 fn opponent_hits(events: &[TraceEvent]) -> Vec<&TraceEvent> {
@@ -1267,7 +1336,14 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HoldDrop { sim, .. }
         | TraceEvent::HoldEnd { sim, .. }
         | TraceEvent::GameOver { sim, .. }
-        | TraceEvent::OpponentHit { sim, .. } => *sim,
+        | TraceEvent::OpponentHit { sim, .. }
+        | TraceEvent::CameraFocus { sim, .. }
+        | TraceEvent::CameraZoom { sim, .. }
+        | TraceEvent::CameraBop { sim, .. }
+        | TraceEvent::PlayAnimation { sim, .. }
+        | TraceEvent::ScrollSpeed { sim, .. }
+        | TraceEvent::HealthIcon { sim, .. }
+        | TraceEvent::UnknownEvent { sim, .. } => *sim,
     }
 }
 
@@ -1281,7 +1357,14 @@ fn trace_kind(event: &TraceEvent) -> &'static str {
         | TraceEvent::HoldDrop { kind, .. }
         | TraceEvent::HoldEnd { kind, .. }
         | TraceEvent::GameOver { kind, .. }
-        | TraceEvent::OpponentHit { kind, .. } => kind,
+        | TraceEvent::OpponentHit { kind, .. }
+        | TraceEvent::CameraFocus { kind, .. }
+        | TraceEvent::CameraZoom { kind, .. }
+        | TraceEvent::CameraBop { kind, .. }
+        | TraceEvent::PlayAnimation { kind, .. }
+        | TraceEvent::ScrollSpeed { kind, .. }
+        | TraceEvent::HealthIcon { kind, .. }
+        | TraceEvent::UnknownEvent { kind, .. } => kind,
     }
 }
 
@@ -1557,7 +1640,14 @@ fn m5_build_stays_schema_one_and_player_only_with_opponent_notes_present() {
         | TraceEvent::HoldDrop { schema, .. }
         | TraceEvent::HoldEnd { schema, .. }
         | TraceEvent::GameOver { schema, .. } => *schema == SCHEMA_V1,
-        TraceEvent::OpponentHit { .. } => false,
+        TraceEvent::OpponentHit { .. }
+        | TraceEvent::CameraFocus { .. }
+        | TraceEvent::CameraZoom { .. }
+        | TraceEvent::CameraBop { .. }
+        | TraceEvent::PlayAnimation { .. }
+        | TraceEvent::ScrollSpeed { .. }
+        | TraceEvent::HealthIcon { .. }
+        | TraceEvent::UnknownEvent { .. } => false,
     }));
 
     // The same fixture on the chart-id path takes the schema-2 extension and
@@ -2017,4 +2107,763 @@ fn sha256_hex(input: &[u8]) -> String {
     }
 
     state.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+// --- M6 §12 chart song-event consumption (schema "3") ----------------------
+
+const EVENTS_METADATA: &str = r#"{
+  "version": "2.2.4",
+  "songName": "Events",
+  "playData": {
+    "difficulties": ["easy"],
+    "stage": "testStage",
+    "characters": { "player": "bf", "opponent": "dad", "girlfriend": "gf" }
+  },
+  "timeChanges": [{ "t": 0, "bpm": 120 }]
+}"#;
+
+const MISSING_CHARACTER_METADATA: &str = r#"{
+  "version": "2.2.4",
+  "songName": "Missing",
+  "playData": {
+    "difficulties": ["easy"],
+    "stage": "testStage",
+    "characters": { "player": "missing", "opponent": "missingDad", "girlfriend": "" }
+  },
+  "timeChanges": [{ "t": 0, "bpm": 120 }]
+}"#;
+
+const TEST_STAGE: &str = r#"{
+  "version": "1.0.0",
+  "name": "testStage",
+  "cameraZoom": 1.1,
+  "directory": "week1",
+  "characters": {
+    "bf": { "position": [100, 300], "cameraOffsets": [10, 20] },
+    "dad": { "position": [200, 400], "cameraOffsets": [-10, -20] },
+    "gf": { "position": [300, 500], "cameraOffsets": [1, 1] }
+  },
+  "props": [{ "name": "speaker", "assetPath": "x", "danceEvery": 1 }]
+}"#;
+
+const BF_CHARACTER: &str = r#"{
+  "version": "1.0.0",
+  "name": "bf",
+  "assetPath": "sheet_bf",
+  "renderType": "sparrow",
+  "cameraOffsets": [0, 0],
+  "scale": 1,
+  "animations": []
+}"#;
+
+const DAD_CHARACTER: &str = r#"{
+  "version": "1.0.0",
+  "name": "dad",
+  "assetPath": "sheet_dad",
+  "renderType": "sparrow",
+  "cameraOffsets": [0, 0],
+  "scale": 1,
+  "animations": []
+}"#;
+
+const GF_CHARACTER: &str = r#"{
+  "version": "1.0.0",
+  "name": "gf",
+  "assetPath": "sheet_gf",
+  "renderType": "sparrow",
+  "cameraOffsets": [0, 0],
+  "scale": 1,
+  "animations": []
+}"#;
+
+fn sparrow_sheet(height: i32) -> String {
+    format!(
+        r#"<TextureAtlas imagePath="sheet.png"><SubTexture name="frame" x="0" y="0" width="100" height="{height}"/></TextureAtlas>"#
+    )
+}
+
+fn install_focus_assets(fixture: &Fixture) {
+    fixture.write_asset("preload/data/stages/testStage.json", TEST_STAGE);
+    fixture.write_asset("preload/data/characters/bf.json", BF_CHARACTER);
+    fixture.write_asset("preload/data/characters/dad.json", DAD_CHARACTER);
+    fixture.write_asset("preload/data/characters/gf.json", GF_CHARACTER);
+    fixture.write_asset("preload/images/sheet_bf.xml", &sparrow_sheet(200));
+    fixture.write_asset("preload/images/sheet_dad.xml", &sparrow_sheet(400));
+    fixture.write_asset("preload/images/sheet_gf.xml", &sparrow_sheet(100));
+}
+
+/// Chart with events, empty notes, and the chart base scroll speed 1.5.
+fn with_events(events: &str) -> Fixture {
+    let chart = format!(
+        r#"{{"version":"2.0.0","scrollSpeed":{{"easy":1.5}},"events":[{events}],"notes":{{"easy":[]}}}}"#
+    );
+    Fixture::with_documents(&chart, METADATA)
+}
+
+fn with_stage_events(events: &str) -> Fixture {
+    let fixture = with_events(events);
+    fixture.write_metadata("bopeebo", "bopeebo-metadata", EVENTS_METADATA);
+    install_focus_assets(&fixture);
+    fixture
+}
+
+#[test]
+fn chart_events_stay_out_of_the_frozen_schema_one_and_two_paths() {
+    let fixture = with_events(r#"{"t":0,"e":"FocusCamera","v":{"char":0}}"#);
+
+    let (_, schema_one) = run(&fixture, 0, &[]);
+    assert!(
+        schema_one
+            .iter()
+            .all(|event| trace_schema(event) == SCHEMA_V1),
+        "the M5 build path must not emit event rows: {schema_one:?}"
+    );
+    assert!(event_rows(&schema_one, "camera_focus").is_empty());
+
+    let (schema_two_sim, schema_two) = run_chart(&fixture, "bopeebo", "easy", 0, &[]);
+    assert_eq!(schema_two_sim.schema, SCHEMA_V2);
+    assert!(
+        schema_two
+            .iter()
+            .all(|event| trace_schema(event) == SCHEMA_V2),
+        "the 6A build_chart path must not emit event rows: {schema_two:?}"
+    );
+    assert!(event_rows(&schema_two, "camera_focus").is_empty());
+
+    let (schema_three_sim, schema_three) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    assert_eq!(schema_three_sim.schema, SCHEMA_V3);
+    assert!(
+        schema_three
+            .iter()
+            .all(|event| trace_schema(event) == SCHEMA_V3),
+        "the event-enabled path stamps every row schema 3: {schema_three:?}"
+    );
+    assert_eq!(event_rows(&schema_three, "camera_focus").len(), 1);
+}
+
+#[test]
+fn camera_focus_defaults_string_coercion_and_character_world_focus() {
+    let fixture = with_stage_events(
+        r#"{"t":0,"e":"FocusCamera","v":{"char":"0","x":"0","y":"0"}},
+           {"t":0,"e":"FocusCamera","v":{"char":1,"x":5,"y":7}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let rows = event_rows(&events, "camera_focus");
+    assert_eq!(rows.len(), 2);
+
+    let TraceEvent::CameraFocus {
+        sim,
+        target_char,
+        target_kind,
+        x,
+        y,
+        world_focus,
+        duration,
+        ease_kind,
+        ease,
+        ease_dir,
+        ..
+    } = rows[0]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*sim, 0);
+    assert_eq!(*target_char, 0, "char string coerces to int");
+    assert_eq!(*target_kind, "bf");
+    assert_eq!(*x, 0.0, "x string coerces to float");
+    assert_eq!(*y, 0.0);
+    assert_eq!(
+        *world_focus,
+        [110.0, 220.0],
+        "mainStage-style focus = slot position + bounds height/2 + char/slot offsets"
+    );
+    assert_eq!(*duration, 4.0);
+    assert_eq!(*ease_kind, "classic");
+    assert_eq!(*ease, None);
+    assert_eq!(*ease_dir, None);
+
+    let TraceEvent::CameraFocus {
+        target_char,
+        target_kind,
+        x,
+        y,
+        world_focus,
+        ..
+    } = rows[1]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*target_char, 1);
+    assert_eq!(*target_kind, "dad");
+    assert_eq!(*x, 5.0);
+    assert_eq!(*y, 7.0);
+    assert_eq!(*world_focus, [190.0, 180.0]);
+}
+
+#[test]
+fn unknown_char_falls_through_to_the_literal_position_with_unknown_kind() {
+    let fixture = with_events(
+        r#"{"t":0,"e":"FocusCamera","v":{"char":3,"x":10,"y":20,"duration":2,"ease":"INSTANT"}},
+           {"t":0,"e":"FocusCamera","v":{"char":-1,"x":30,"y":40}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let rows = event_rows(&events, "camera_focus");
+    assert_eq!(rows.len(), 2);
+
+    let TraceEvent::CameraFocus {
+        target_char,
+        target_kind,
+        world_focus,
+        duration,
+        ease_kind,
+        ease,
+        ease_dir,
+        ..
+    } = rows[0]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*target_char, 3);
+    assert_eq!(*target_kind, "unknown");
+    assert_eq!(*world_focus, [10.0, 20.0]);
+    assert_eq!(*duration, 2.0);
+    assert_eq!(*ease_kind, "instant");
+    assert_eq!(*ease, None);
+    assert_eq!(*ease_dir, None);
+
+    let TraceEvent::CameraFocus {
+        target_char,
+        target_kind,
+        world_focus,
+        ..
+    } = rows[1]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*target_char, -1);
+    assert_eq!(*target_kind, "position");
+    assert_eq!(*world_focus, [30.0, 40.0]);
+}
+
+#[test]
+fn null_character_records_the_literal_focus_without_a_state_change() {
+    // No stage at all: the native character object is null.
+    let fixture = with_events(r#"{"t":0,"e":"FocusCamera","v":{"char":0,"x":11,"y":12}}"#);
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let TraceEvent::CameraFocus {
+        target_kind,
+        world_focus,
+        x,
+        y,
+        ..
+    } = event_rows(&events, "camera_focus")[0]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*target_kind, "bf");
+    assert_eq!(*x, 11.0);
+    assert_eq!(*y, 12.0);
+    assert_eq!(*world_focus, [11.0, 12.0]);
+
+    // Stage present but the declared character file is missing.
+    let fixture = with_events(r#"{"t":0,"e":"FocusCamera","v":{"char":0,"x":3,"y":4}}"#);
+    fixture.write_metadata("bopeebo", "bopeebo-metadata", MISSING_CHARACTER_METADATA);
+    fixture.write_asset("preload/data/stages/testStage.json", TEST_STAGE);
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let TraceEvent::CameraFocus {
+        target_kind,
+        world_focus,
+        ..
+    } = event_rows(&events, "camera_focus")[0]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*target_kind, "bf");
+    assert_eq!(*world_focus, [3.0, 4.0]);
+}
+
+#[test]
+fn unknown_ease_records_the_full_row_and_applies_nothing() {
+    let fixture = with_events(
+        r#"{"t":0,"e":"FocusCamera","v":{"char":-1,"x":1,"y":2,"ease":"bogus"}},
+           {"t":0,"e":"ZoomCamera","v":{"zoom":2,"mode":"direct","ease":"bogus"}},
+           {"t":0,"e":"ScrollSpeed","v":{"scroll":2,"absolute":true,"ease":"bogus","strumline":"both"}},
+           {"t":0,"e":"ScrollSpeed","v":{"scroll":3,"absolute":true,"ease":"INSTANT","strumline":"both"}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+
+    let TraceEvent::CameraFocus {
+        ease_kind,
+        ease,
+        ease_dir,
+        ..
+    } = event_rows(&events, "camera_focus")[0]
+    else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*ease_kind, "named");
+    assert_eq!(*ease, None);
+    assert_eq!(*ease_dir, None);
+
+    let TraceEvent::CameraZoom { ease, ease_dir, .. } = event_rows(&events, "camera_zoom")[0]
+    else {
+        unreachable!("event_rows returns camera-zoom rows");
+    };
+    assert_eq!(*ease, None);
+    assert_eq!(*ease_dir, None);
+
+    let scroll = event_rows(&events, "scroll_speed");
+    assert_eq!(scroll.len(), 4, "two rows per event, both strumlines");
+    for row in &scroll[0..2] {
+        let TraceEvent::ScrollSpeed {
+            base_scroll,
+            ease,
+            ease_dir,
+            ..
+        } = row
+        else {
+            unreachable!("event_rows returns scroll rows");
+        };
+        assert_eq!(*base_scroll, 1.5, "the unknown ease did not change state");
+        assert_eq!(*ease, None);
+        assert_eq!(*ease_dir, None);
+    }
+    for row in &scroll[2..4] {
+        let TraceEvent::ScrollSpeed { base_scroll, .. } = row else {
+            unreachable!("event_rows returns scroll rows");
+        };
+        assert_eq!(
+            *base_scroll, 1.5,
+            "the instant event starts from the untouched chart value"
+        );
+    }
+}
+
+#[test]
+fn instant_and_stage_direct_zoom_paths() {
+    let fixture = with_stage_events(
+        r#"{"t":0,"e":"ZoomCamera","v":{"zoom":2,"mode":"stage","ease":"INSTANT"}},
+           {"t":0,"e":"ZoomCamera","v":{"zoom":2,"mode":"direct","ease":"INSTANT"}},
+           {"t":0,"e":"ZoomCamera","v":{"zoom":1.5,"ease":"INSTANT"}},
+           {"t":0,"e":"FocusCamera","v":{"char":-1,"ease":"INSTANT"}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let rows = event_rows(&events, "camera_zoom");
+    assert_eq!(rows.len(), 3);
+
+    let expected = [
+        (2.0, "stage", 2.0 * 1.1),
+        (2.0, "direct", 2.0),
+        (1.5, "direct", 1.5),
+    ];
+    for (row, (zoom, mode, resolved)) in rows.iter().zip(expected) {
+        let TraceEvent::CameraZoom {
+            zoom: actual_zoom,
+            mode: actual_mode,
+            resolved_target_zoom,
+            ease,
+            ease_dir,
+            ..
+        } = row
+        else {
+            unreachable!("event_rows returns camera-zoom rows");
+        };
+        assert_eq!(*actual_zoom, zoom);
+        assert_eq!(*actual_mode, mode);
+        assert!((*resolved_target_zoom - resolved).abs() < 1e-12);
+        assert_eq!(ease.as_deref(), Some("INSTANT"));
+        assert_eq!(*ease_dir, None);
+    }
+
+    let TraceEvent::CameraFocus { ease_kind, .. } = event_rows(&events, "camera_focus")[0] else {
+        unreachable!("event_rows returns camera-focus rows");
+    };
+    assert_eq!(*ease_kind, "instant");
+}
+
+#[test]
+fn camera_bop_state_algebra_matches_the_observed_formulas() {
+    let fixture = with_events(
+        r#"{"t":0,"e":"SetCameraBop","v":{"intensity":1.5,"rate":2,"offset":1}},
+           {"t":0,"e":"SetCameraBop","v":{}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let rows = event_rows(&events, "camera_bop");
+    assert_eq!(rows.len(), 2);
+
+    let TraceEvent::CameraBop {
+        intensity,
+        camera_bop_intensity,
+        hud_intensity,
+        rate,
+        offset,
+        ..
+    } = rows[0]
+    else {
+        unreachable!("event_rows returns camera-bop rows");
+    };
+    assert_eq!(*intensity, 1.5);
+    assert_eq!(*camera_bop_intensity, (1.015 - 1.0) * 1.5 + 1.0);
+    assert_eq!(*hud_intensity, (1.015 - 1.0) * 1.5 * 2.0);
+    assert_eq!(*rate, 2.0);
+    assert_eq!(*offset, 1.0);
+
+    let TraceEvent::CameraBop {
+        intensity,
+        rate,
+        offset,
+        ..
+    } = rows[1]
+    else {
+        unreachable!("event_rows returns camera-bop rows");
+    };
+    assert_eq!(*intensity, 1.0);
+    assert_eq!(*rate, 4.0);
+    assert_eq!(*offset, 0.0);
+}
+
+#[test]
+fn scroll_speed_rows_use_the_chart_base_and_snap_to_previous_targets() {
+    let fixture = with_events(
+        r#"{"t":100,"e":"ScrollSpeed","v":{"scroll":2,"absolute":false,"duration":8,"ease":"linear","strumline":"both"}},
+           {"t":600,"e":"ScrollSpeed","v":{"scroll":3,"absolute":true,"duration":4,"ease":"INSTANT","strumline":"both"}},
+           {"t":700,"e":"ScrollSpeed","v":{"scroll":2.5,"absolute":true,"ease":"INSTANT","strumline":"player"}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 700, &[]);
+    assert_eq!(tick_kinds(&events, 100), ["scroll_speed", "scroll_speed"]);
+    assert_eq!(tick_kinds(&events, 600), ["scroll_speed", "scroll_speed"]);
+    assert_eq!(tick_kinds(&events, 700), ["scroll_speed"]);
+
+    let first = event_rows(&events, "scroll_speed");
+    let mut observed = Vec::new();
+    for row in &first[0..2] {
+        let TraceEvent::ScrollSpeed {
+            strumline,
+            target,
+            absolute,
+            base_scroll,
+            duration,
+            ease,
+            ease_dir,
+            ..
+        } = row
+        else {
+            unreachable!("event_rows returns scroll rows");
+        };
+        observed.push((
+            *strumline,
+            *target,
+            *absolute,
+            *base_scroll,
+            *duration,
+            ease.clone(),
+            ease_dir.clone(),
+        ));
+    }
+    assert_eq!(
+        observed,
+        vec![
+            (
+                "player",
+                3.0,
+                false,
+                1.5,
+                8.0,
+                Some("linear".to_owned()),
+                Some(String::new()),
+            ),
+            (
+                "opponent",
+                3.0,
+                false,
+                1.5,
+                8.0,
+                Some("linear".to_owned()),
+                Some(String::new()),
+            ),
+        ],
+        "absolute=false multiplies the chart base; player row comes first"
+    );
+
+    // The second event cancels the in-flight tween and snaps to the previous
+    // event target before recording base_scroll (native prevScrollTargets).
+    let TraceEvent::ScrollSpeed {
+        strumline,
+        target,
+        base_scroll,
+        ease,
+        ease_dir,
+        ..
+    } = first[2]
+    else {
+        unreachable!("event_rows returns scroll rows");
+    };
+    assert_eq!(*strumline, "player");
+    assert_eq!(*target, 3.0);
+    assert_eq!(*base_scroll, 3.0);
+    assert_eq!(ease.as_deref(), Some("INSTANT"));
+    assert_eq!(*ease_dir, None);
+    let TraceEvent::ScrollSpeed { base_scroll, .. } = first[3] else {
+        unreachable!("event_rows returns scroll rows");
+    };
+    assert_eq!(*base_scroll, 3.0);
+
+    // A single-strumline event records only that strumline; the player line
+    // starts from the snapped previous target.
+    let TraceEvent::ScrollSpeed {
+        strumline,
+        target,
+        base_scroll,
+        ..
+    } = first[4]
+    else {
+        unreachable!("event_rows returns scroll rows");
+    };
+    assert_eq!(*strumline, "player");
+    assert_eq!(*target, 2.5);
+    assert_eq!(*base_scroll, 3.0);
+}
+
+#[test]
+fn play_animation_old_age_skip_and_unknown_event_raw_preservation() {
+    let fixture = with_stage_events(
+        r#"{"t":0,"e":"PlayAnimation","v":{"target":"bf","anim":"hey","force":true}},
+           {"t":0,"e":"PlayAnimation","v":{"target":"speaker","anim":"dance"}},
+           {"t":0,"e":"SetCameraBop","v":{}},
+           {"t":0,"e":"EnableMask","v":{}},
+           {"t":0,"e":"sserafimKick","v":[1,2]},
+           {"t":2000,"e":"PlayAnimation","v":{"target":"dad","anim":"idle"}}"#,
+    );
+    let mut sim = fixture
+        .build_chart_events("bopeebo", "easy")
+        .expect("fixture builds");
+    // A synthetic frame schedule that first observes the song at 2000 ms:
+    // every t=0 event is more than 1000 ms old.
+    let events = sim.step(2000, &[]);
+
+    let animations = event_rows(&events, "play_animation");
+    assert_eq!(animations.len(), 3);
+    let TraceEvent::PlayAnimation {
+        target,
+        anim,
+        force,
+        resolved_kind,
+        skipped_old,
+        ..
+    } = animations[0]
+    else {
+        unreachable!("event_rows returns play-animation rows");
+    };
+    assert_eq!(target, "bf");
+    assert_eq!(anim, "hey");
+    assert!(*force);
+    assert_eq!(resolved_kind, "bf");
+    assert!(*skipped_old, ">1000 ms old PlayAnimation is skipped");
+    let TraceEvent::PlayAnimation {
+        resolved_kind,
+        skipped_old,
+        ..
+    } = animations[1]
+    else {
+        unreachable!("event_rows returns play-animation rows");
+    };
+    assert_eq!(resolved_kind, "prop:speaker");
+    assert!(*skipped_old);
+    let TraceEvent::PlayAnimation {
+        target,
+        resolved_kind,
+        skipped_old,
+        ..
+    } = animations[2]
+    else {
+        unreachable!("event_rows returns play-animation rows");
+    };
+    assert_eq!(target, "dad");
+    assert_eq!(resolved_kind, "dad");
+    assert!(
+        !*skipped_old,
+        "the event exactly at the observed tick is fresh"
+    );
+
+    // processOldEvents=true handlers still apply when old.
+    assert_eq!(event_rows(&events, "camera_bop").len(), 1);
+
+    let unknown = event_rows(&events, "unknown_event");
+    assert_eq!(unknown.len(), 2);
+    let TraceEvent::UnknownEvent {
+        event_kind, value, ..
+    } = unknown[0]
+    else {
+        unreachable!("event_rows returns unknown-event rows");
+    };
+    assert_eq!(event_kind, "EnableMask");
+    let json = serde_json::to_string(unknown[0]).expect("unknown row serializes");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("row is JSON");
+    assert_eq!(parsed["value"], serde_json::json!({}));
+    let TraceEvent::UnknownEvent { event_kind, .. } = unknown[1] else {
+        unreachable!("event_rows returns unknown-event rows");
+    };
+    assert_eq!(event_kind, "sserafimKick");
+    let json = serde_json::to_string(unknown[1]).expect("unknown row serializes");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("row is JSON");
+    assert_eq!(parsed["event_kind"], "sserafimKick");
+    assert_eq!(parsed["value"], serde_json::json!([1, 2]));
+    assert!(value.is_some());
+}
+
+#[test]
+fn health_icon_defaults_and_record_only_unknown_char() {
+    let fixture = with_events(
+        r#"{"t":0,"e":"SetHealthIcon","v":{}},
+           {"t":0,"e":"SetHealthIcon","v":{"char":5,"id":"x","shouldBop":false,"scale":2,"flipX":true,"isPixel":true,"offsetX":3,"offsetY":4}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let rows = event_rows(&events, "health_icon");
+    assert_eq!(rows.len(), 2);
+
+    let TraceEvent::HealthIcon {
+        char,
+        id,
+        should_bop,
+        scale,
+        flip_x,
+        is_pixel,
+        offsets,
+        ..
+    } = rows[0]
+    else {
+        unreachable!("event_rows returns health-icon rows");
+    };
+    assert_eq!(*char, 0);
+    assert_eq!(id, "face");
+    assert!(*should_bop);
+    assert_eq!(*scale, 1.0);
+    assert!(!*flip_x);
+    assert!(!*is_pixel);
+    assert_eq!(*offsets, [0.0, 0.0]);
+
+    let TraceEvent::HealthIcon {
+        char,
+        id,
+        should_bop,
+        scale,
+        flip_x,
+        is_pixel,
+        offsets,
+        ..
+    } = rows[1]
+    else {
+        unreachable!("event_rows returns health-icon rows");
+    };
+    assert_eq!(
+        *char, 5,
+        "unknown char is preserved for trace-only accounting"
+    );
+    assert_eq!(id, "x");
+    assert!(!*should_bop);
+    assert_eq!(*scale, 2.0);
+    assert!(*flip_x);
+    assert!(*is_pixel);
+    assert_eq!(*offsets, [3.0, 4.0]);
+}
+
+#[test]
+fn schema_three_rows_serialize_in_contract_field_order() {
+    let fixture = with_events(
+        r#"{"t":0,"e":"FocusCamera","v":{}},
+           {"t":0,"e":"ZoomCamera","v":{}},
+           {"t":0,"e":"SetCameraBop","v":{}},
+           {"t":0,"e":"PlayAnimation","v":{}},
+           {"t":0,"e":"ScrollSpeed","v":{}},
+           {"t":0,"e":"SetHealthIcon","v":{}},
+           {"t":0,"e":"EnableMask","v":{}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let json: Vec<String> = events
+        .iter()
+        .map(|event| serde_json::to_string(event).expect("serialize event row"))
+        .collect();
+
+    assert_eq!(
+        json[0],
+        r#"{"schema":"3","kind":"camera_focus","sim":0,"input_ms":0.0,"input_time_us":0.0,"target_char":0,"target_kind":"bf","x":0.0,"y":0.0,"world_focus":[0.0,0.0],"duration":4.0,"ease_kind":"classic","ease":null,"ease_dir":null}"#
+    );
+    assert_eq!(
+        json[1],
+        r#"{"schema":"3","kind":"camera_zoom","sim":0,"input_ms":0.0,"input_time_us":0.0,"zoom":1.0,"mode":"direct","resolved_target_zoom":1.0,"duration":4.0,"ease":"linear","ease_dir":""}"#
+    );
+    assert_eq!(
+        json[2],
+        r#"{"schema":"3","kind":"camera_bop","sim":0,"input_ms":0.0,"input_time_us":0.0,"intensity":1.0,"camera_bop_intensity":1.015,"hud_intensity":0.029999999999999805,"rate":4.0,"offset":0.0}"#
+    );
+    assert_eq!(
+        json[3],
+        r#"{"schema":"3","kind":"play_animation","sim":0,"input_ms":0.0,"input_time_us":0.0,"target":"boyfriend","anim":"idle","force":false,"resolved_kind":"bf","skipped_old":false}"#
+    );
+    assert_eq!(
+        json[4],
+        r#"{"schema":"3","kind":"scroll_speed","sim":0,"input_ms":0.0,"input_time_us":0.0,"strumline":"player","target":1.5,"absolute":false,"base_scroll":1.5,"duration":4.0,"ease":"linear","ease_dir":""}"#
+    );
+    assert_eq!(
+        json[5],
+        r#"{"schema":"3","kind":"scroll_speed","sim":0,"input_ms":0.0,"input_time_us":0.0,"strumline":"opponent","target":1.5,"absolute":false,"base_scroll":1.5,"duration":4.0,"ease":"linear","ease_dir":""}"#
+    );
+    assert_eq!(
+        json[6],
+        r#"{"schema":"3","kind":"health_icon","sim":0,"input_ms":0.0,"input_time_us":0.0,"char":0,"id":"face","should_bop":true,"scale":1.0,"flip_x":false,"is_pixel":false,"offsets":[0.0,0.0]}"#
+    );
+    assert_eq!(
+        json[7],
+        r#"{"schema":"3","kind":"unknown_event","sim":0,"input_ms":0.0,"input_time_us":0.0,"event_kind":"EnableMask","value":{}}"#
+    );
+}
+
+#[test]
+fn two_run_sha256_is_stable_for_a_synthetic_multi_event_chart() {
+    let fixture = with_stage_events(
+        r#"{"t":0,"e":"FocusCamera","v":{"char":"0","x":"0","y":"0"}},
+           {"t":0,"e":"ZoomCamera","v":{"zoom":2,"mode":"stage","duration":2,"ease":"quad","easeDir":"Out"}},
+           {"t":100,"e":"SetCameraBop","v":{"intensity":1.4,"rate":2}},
+           {"t":200,"e":"PlayAnimation","v":{"target":"dad","anim":"hey","force":true}},
+           {"t":300,"e":"ScrollSpeed","v":{"scroll":1.2,"absolute":false,"duration":4,"ease":"expoIn","strumline":"both"}},
+           {"t":400,"e":"SetHealthIcon","v":{"char":1,"id":"dad"}},
+           {"t":500,"e":"EnableMask","v":{}},
+           {"t":600,"e":"FocusCamera","v":{"char":-1,"x":100,"y":200,"ease":"bogus"}}"#,
+    );
+    let (first_sim, first_events) = run_chart_events(&fixture, "bopeebo", "easy", 1000, &[]);
+    let (second_sim, second_events) = run_chart_events(&fixture, "bopeebo", "easy", 1000, &[]);
+    assert_eq!(first_sim.record(), first_events);
+    assert_eq!(second_sim.record(), second_events);
+    assert_eq!(first_sim.record(), second_sim.record());
+
+    let first_bytes = serialize_trace(&first_events);
+    let second_bytes = serialize_trace(&second_events);
+    assert_eq!(first_bytes, second_bytes);
+    assert_eq!(sha256_hex(&first_bytes), sha256_hex(&second_bytes));
+    assert_eq!(
+        event_rows(&first_events, "scroll_speed").len(),
+        2,
+        "every event kind reaches the stream"
+    );
+}
+
+/// Real-asset two-run determinism for the frozen bopeebo-normal chart.
+#[test]
+#[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6C two-run digest"]
+fn bopeebo_normal_two_run_sha256_is_stable_with_event_rows() {
+    let root = std::env::var_os("OXIDE_ASSETS_ROOT")
+        .map(PathBuf::from)
+        .expect("set OXIDE_ASSETS_ROOT to the reference assets directory");
+    let mut runs = [Vec::new(), Vec::new()];
+    for bytes in &mut runs {
+        let mut sim = GameplaySimState::build_chart_events(&root, "bopeebo-default", "normal")
+            .expect("bopeebo normal event sim builds");
+        let mut trace = Vec::new();
+        for sim_ms in 0..=120_000 {
+            trace.extend(sim.step(sim_ms, &[]));
+        }
+        *bytes = serialize_trace(&trace);
+    }
+    assert_eq!(runs[0], runs[1], "two bopeebo-normal runs diverge");
+    assert_eq!(sha256_hex(&runs[0]), sha256_hex(&runs[1]));
 }
