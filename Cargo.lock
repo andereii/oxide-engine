@@ -4459,6 +4459,7 @@ dependencies = [
  "oxide-atlas",
  "oxide-audio",
  "oxide-data",
+ "oxide-font",
  "oxide-vfs",
  "serde",
  "serde_json",
