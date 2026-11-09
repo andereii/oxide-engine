@@ -1092,7 +1092,7 @@ limitation, reversible if later phase evidence requires).
 Analyst round read the installed `$HOME/Descargas/fnf/Funkin` checkout read-only
 (2026-11-09; native evidence first). The M5 playtest HUD (`crates/oxide-game/src/
 play/hud.rs`, ADR-0021 decision 4) already froze the health-bar PLACEMENT and the
-icon swap placement algebra; 6D freezes the remaining iterms and consumes the
+icon swap placement algebra; 6D freezes the remaining items and consumes the
 frozen §12.4.1 `health_icon` rows.
 
 ### 13.1 Observed facts (with native citations)
@@ -1151,7 +1151,7 @@ frozen §12.4.1 `health_icon` rows.
     `updatePosition()`.
   - `updatePosition` (L896-935): use health (p0: `health`; p1:
     `MAXIMUM_HEALTH - health` = `2 - health`) and the bar geometry X
-    per MPEGthe frozen M5 algebra + `POSITION_OFFSET = 26`;
+    and the frozen M5 algebra + `POSITION_OFFSET = 26`;
     `y = healthBar.y - height/2`.
   - `updateHealthIcon(health)` state machine (L951-1023): thresholds
     `WINNING = 1.6`, `LOSING = 0.4`; idle → toLosing(toWinning) →
@@ -1202,9 +1202,9 @@ frozen §12.4.1 `health_icon` rows.
    algebra, numDivisions 100 quantization), both health icons (legacy +
    new-style sparrow pipeline, state machine, configure, per-bop tween),
    camHUD zoom; score text CONTENT is frozen but rendering is DEFERRED
-   (font surface al-ready exists; the typography render is a named 6D
+   (font surface already exists; the typography render is a named 6D
    follow-up item so the pixel freeze of the HUD core stays reviewable).
-3. **S6 etHealthIcon row consumption:** rows apply `configure semantics`
+3. **`SetHealthIcon` row consumption:** rows apply `configure semantics`
    (id/isPixel/shouldBop/scale/flipX/offsets) to iconP1/iconP2 per the char
    mapping; `char` outside {0,1} = no-op; the icon state machine restarts on
    the configured id change (loadCharacter reload).
