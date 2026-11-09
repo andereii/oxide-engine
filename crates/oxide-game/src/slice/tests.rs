@@ -2867,3 +2867,19 @@ fn bopeebo_normal_two_run_sha256_is_stable_with_event_rows() {
     assert_eq!(runs[0], runs[1], "two bopeebo-normal runs diverge");
     assert_eq!(sha256_hex(&runs[0]), sha256_hex(&runs[1]));
 }
+
+/// Review finding 5 (2026-11-08): an unknown `strumline` value records
+/// NOTHING natively (the handler dereferences `<value>Strumline` and crashes);
+/// outside the corpus the sim records zero rows, so the corpus per-kind count
+/// assertion fails closed when such a chart is run (`--corpus` accounting).
+#[test]
+fn unknown_scroll_strumline_value_records_no_row() {
+    let fixture = with_stage_events(
+        r#"{"t":0,"e":"ScrollSpeed","v":{"scroll":2.6,"absolute":true,"ease":"linear","strumline":"banana"}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 10, &[]);
+    assert!(
+        event_rows(&events, "scroll_speed").is_empty(),
+        "an unknown strumline target must not invent a row: {events:?}"
+    );
+}

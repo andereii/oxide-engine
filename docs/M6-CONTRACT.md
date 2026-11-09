@@ -937,3 +937,31 @@ limitation, reversible if later phase evidence requires).
   a header-inclusive count); per-kind row totals across all 166 runs are
   recorded in the run output (PlayAnimation rows can NEVER fire more than
   once per event in normal playback — the age rule does not trigger).
+- Review-round resolutions (2026-11-08, @oxide-reviewer approve-with-comments):
+  1. row-consumer limitation (find 1): the `camera_focus` row alone cannot
+     distinguish a native null-character EARLY RETURN from a valid
+     character target (both record the kind and a `world_focus`); when the
+     6C scene consumption lands it must consult its own stage rigs
+     (a missing character = no retarget, per §12.2). Named here so no later
+     consumer infers the retarget from `world_focus` alone.
+  2. record-only divergence (find 2): `health_icon` rows coerce through the
+     observed getString/getInt path, so a string-valued `char: "1"` would
+     record an applicable char where the native SetHealthIcon switch
+     (direct field access, no coercion) would take the warning/no-op
+     branch. The CORPUS always uses int/bool typed fields (observed), so
+     the shipped accounting is exact; mod payloads outside the corpus can
+     differ (named limitation, not a behavior change).
+  3. deduplication note (find 3): the focus-point helpers in
+     slice/events.rs intentionally do not reformat render/load.rs yet; the
+     shared headless helpers must be factored during the 6C scene
+     consumption task (which owns render/) — abstracting now would touch a
+     file this task deliberately left alone.
+  4. ease transcription verified (validator check): all 37 rust functions
+     were diffed VERBATIM against the installed flixel 6.1.2
+     FlxEase.hx (quart/quint inOut, smooth/smootherStep, sine, bounce
+     constants B1-B6, circ, expo, back double-decrement, elastic
+     `t -= 1` / `t -= 0.5` phase with `asin(1/A)`); no deviation.
+  5. unknown ScrollSpeed strumline values record ZERO rows (the sim never
+     invents a target); regression test
+     `unknown_scroll_strumline_value_records_no_row` pins it and the
+     corpus per-kind count assertion fails closed on such a chart.
