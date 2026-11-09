@@ -1086,3 +1086,150 @@ limitation, reversible if later phase evidence requires).
   school normal/hard still share one run digest). The 2026-11-09 fixture
   freeze reasons are recorded in the manifest honesty line; in-crate tests
   pin both fixes (playAnimation sing-bypass + opponent hold reset).
+
+## 13. Phase 6D behavior freeze — play HUD core (health bar, health icons, camHUD)
+
+Analyst round read the installed `$HOME/Descargas/fnf/Funkin` checkout read-only
+(2026-11-09; native evidence first). The M5 playtest HUD (`crates/oxide-game/src/
+play/hud.rs`, ADR-0021 decision 4) already froze the health-bar PLACEMENT and the
+icon swap placement algebra; 6D freezes the remaining iterms and consumes the
+frozen §12.4.1 `health_icon` rows.
+
+### 13.1 Observed facts (with native citations)
+
+- **HUD camera** (`PlayState.hx` L1186-1228 + Observation §12.2): all HUD
+  elements (`healthBar`, `healthBarBG`, `scoreText`, `iconP1/2`, popups) use
+  `cameras = [camHUD]` (L2014-2016, L2160, L2195); `camHUD` is a separate
+  1280x720 (game-size) camera with `bgColor.alpha = 0`, initial zoom = 1.0
+  (`camHUD = new FlxCamera()` create; `defaultHUDCameraZoom =
+  FlxCamera.defaultZoom * 1.0` L337). The bump/decay algebra already frozen in
+  §12.2 applies to `camHUD.zoom` exactly; the 6D scene applies the REAL per-tick
+  `camHUD.zoom` to the HUD layer composition (the §12.7 virtual gate value
+  becomes the real zoom).
+- **Health bar** (PlayState.hx L810-811, L1452, L1990-2016, L2766-2772):
+  - `healthBarBG = FunkinSprite.create(0, 0, 'healthBar')` — asset
+    `shared/images/healthBar.png` (dimensions in the image file); placement per
+    frame in PlayState (not just init — L2000-2004 is inside the create call
+    block but `updatePosition` per-frame equivalents run at init; revisit: the
+    M5 hud.rs placement is FROZEN and carries this).
+  - `healthBar = FlxBar(0, 0, RIGHT_TO_LEFT, bg.width-8, bg.height-8, min 0,
+    max 2)`; `x = bg.x+4`, `y = bg.y+4`; `createFilledBar(COLOR_HEALTH_BAR_RED,
+    COLOR_HEALTH_BAR_GREEN)` (no border; Constants L?? red/green pair; the M5
+    placement tests froze the same colors); `zIndex` 801 vs bg 800.
+  - `healthLerp = FlxMath.lerp(healthLerp, health, 0.15)` (fixed factor 0.15,
+    L2772) and `healthBar.value = healthLerp` (L1452) every frame.
+  - Fill algebra (flixel 6.1.2 `FlxBar.hx` L757-830): fraction =
+    (value - min)/range; width = floor(fraction * barWidth / (barWidth/100))*barWidth/100
+    (= floor(fraction*100) percent slices at `numDivisions = 100` default L88),
+    Std.int quantization; RIGHT_TO_LEFT anchors the fill rect at
+    `x = barWidth - fillWidth` (so the FILLED (green) side grows leftward from
+    the right edge at initial 1.0 health the two sides split at the health
+    fraction).
+- **Health icons** (HealthIcon.hx full file + BaseCharacter.hx L174/L363-387 +
+  PlayState.hx L2155-2196):
+  - Built in create: `iconP2 = new HealthIcon('dad', 1)` then `dad.initHealthIcon(true)`;
+    `iconP1 = new HealthIcon('bf', 0)` then `boyfriend.initHealthIcon(false)`;
+    both zIndex 850, on camHUD, `y = healthBar.y - height/2` (recomputed
+    per-frame by `updatePosition` L896-935).
+  - `initHealthIcon(isOpponent)`: `iconP1.configure(_data?.healthIcon)` PLUS
+    `iconP1.flipX = !iconP1.flipX` (player faces the other way; L376);
+    `iconP2.configure(_data?.healthIcon)` with NO additional flip.
+  - `configure(data)` (null → 'face' default, isPixel false, size (1,1),
+    iconOffset (0,0), flipX false, updatePosition; data → id, isPixel,
+    shouldBop, loadCharacter, size = scale both axes, iconOffset = offsets or
+    (0,0), flipX = data.flipX ?? false, updatePosition).
+  - `loadCharacter`: missing `icons/icon-<id>` image → WARN + 'face';
+    `isLegacyStyle = !exists('icons/icon-<id>.xml')`; legacy =
+    loadGraphic 32/32-px frames (isPixel ? 32 : 150) with anims
+    Idle [0]/Losing [1]/(Winning [2] iff ≥3 frames) at fps 0; new =
+    loadSparrow + addByPrefix idle/winning/losing (24 fps looped) +
+    toWinning/toLosing/fromWinning/fromLosing (looped false); antialiasing =
+    !isPixel. `loadCharacter` RELOADS on every configure.
+  - Per-frame `update` (L896-935): `angle = smoothLerpPrecision(angle, 0,
+    elapsed, HEALTH_ICON_ANGLE_HALF_LIFE)` (bopAngle defaults 0, so the shipped
+    sprites never rotate [D] — the angle machinery is accepted and inert), then
+    `updatePosition()`.
+  - `updatePosition` (L896-935): use health (p0: `health`; p1:
+    `MAXIMUM_HEALTH - health` = `2 - health`) and the bar geometry X
+    per MPEGthe frozen M5 algebra + `POSITION_OFFSET = 26`;
+    `y = healthBar.y - height/2`.
+  - `updateHealthIcon(health)` state machine (L951-1023): thresholds
+    `WINNING = 1.6`, `LOSING = 0.4`; idle → toLosing(toWinning) →
+    losing/winning → fromLosing/fromWinning → idle; unknown/'' → idle always
+    (no restart when already valid: `playAnimation(name, fallback)` with the
+    same name is a no-op because animation.play requires no restart).
+  - `onStepHit(curStep)` (L941-970): `bopEvery = STEPS_PER_BEAT = 4`, step %
+    4 == 0 && shouldBop → cancel tween, `setGraphicSize(width + 150*size.x*0.2,
+    0)`, tween back to `150*size.x` over `min(stepLengthMs * 0.002, .175)`
+    seconds with `updateHitbox()` + `updatePosition()` on every tween tick
+    (FlxTween.num); `angle += bopAngle * (p0 ? +1 : -1)` (0 on the corpus).
+  - `snapToTargetSize` (L918-930): `width > height → setGraphicSize(150*size.x,
+    0) else (0, 150*size.y)`; `updateHitbox()` after each size change; `offset
+    += iconOffset` inside `updateHitbox` (L935).
+  - Player-icon XOR flip (PlayState init L2201 + hud.rs M5): the M5 frozen
+    sprite mirror (`flipX = !getDataFlipX()` for load.rs L931) already matches
+    this path for the STAGE sprites; the ICON mirror is separate (iconP1).
+- **SetHealthIcon rows** (event consumption; SetHealthIconSongEvent.hx L37-90):
+  `offsets = [offsetX ?? 0, offsetY ?? 0]`, id ?? 'face', shouldBop ?? true,
+  scale ?? 1.0, flipX ?? false, isPixel ?? false; `switch (data?.value?.char ??
+  0)`: 0 → iconP1.configure(healthIconData) (NO flip surgery — the event sets
+  flipX directly), 1 → iconP2.configure(healthIconData), other → warning
+  no-op. NOTE (matches the M6-CONTRACT §12.6 finding 2 direct-field access):
+  the native `char` uses DIRECT value access (no getInt coercion); the sim row
+  coerces — the corpus uses int-typed fields so the accounting is exact
+  (named limitation for mod payloads).
+- **Score text** (L2028-2038 init): `scoreText.x = healthBarBG.x + bg.width-190`,
+  `y = bg.y + 30`, RIGHT-aligned with black outline, `letterSpacing = -1`;
+  per-frame `updateScoreText` (L2748-2760): `'Score: ' + formatMoney(songScore,
+  false, true)` (comma-separated integer with NO decimals; bot play →
+  'Bot Play Enabled'). Exception: font typography (Angel VCR font stack) is
+  NOT frozen in 6D (engine decision — a bare font surface landed in M4; the
+  score text render consumes it in a follow-up, named below).
+- **Icon assets inventory (observed over the shipped corpus
+  `preload/images/icons/`)**: 23 PNG files, ALL legacy (no `icon-*.xml` files
+  shipped), including pixel icon PNGs (icon-bf-pixel, icon-pico-pixel with 32
+  px half-size frames? to verify at implementation from the actual file sizes)
+  and the sserafim set (chaewon/eunchae/kazuha/sakura/yunjin).
+
+### 13.2 Engine decisions (Oxide integration)
+
+1. **HUD composition:** the Scene gains screen-space HUD layers appended AFTER
+   all stage/strumline layers (scrollFactor (0,0) equivalent), with the REAL
+   camHUD zoom applied per tick (`camHUD.zoom` from the §12.7 state).
+   camHUD is 1280x720, so HUD geometry == game geometry (no window scale in
+   the slice).
+2. **HUD elements in the 6D slice:** health bar bg + filled bar (FlxBar
+   algebra, numDivisions 100 quantization), both health icons (legacy +
+   new-style sparrow pipeline, state machine, configure, per-bop tween),
+   camHUD zoom; score text CONTENT is frozen but rendering is DEFERRED
+   (font surface al-ready exists; the typography render is a named 6D
+   follow-up item so the pixel freeze of the HUD core stays reviewable).
+3. **S6 etHealthIcon row consumption:** rows apply `configure semantics`
+   (id/isPixel/shouldBop/scale/flipX/offsets) to iconP1/iconP2 per the char
+   mapping; `char` outside {0,1} = no-op; the icon state machine restarts on
+   the configured id change (loadCharacter reload).
+4. **healthLerp** drives the bar fill AND both icon X positions (native);
+   the play mode hud.rs consumes the same algebra from the sim's health.
+5. **Scope exclusions (named):** judgement pops, combo pops, note splashes,
+   hold covers, countdown display, ring date text — later slices; bf's
+   death icon variation is NOT part of the 6D icon (use the plain
+   configured icon; game-over HUD behavior is a death-SubState item).
+
+### 13.3 Validation obligations for 6D
+
+- In-crate tests: icon state-machine transition table (1.6/0.4 thresholds and
+  the winning/losing clamp at exactly the boundaries), configure defaults +
+  reload semantics, legacy vs new sparrow pipeline selection (xml existence),
+  pixel icon 32 px legacy + NEAREST, bop tween endpoint values
+  (min(stepLengthMs*0.002, 0.175)), updatePosition X for both players at
+  health 0/1/2 (POSITION_OFFSET 26), FlxBar fill quantization at 0/1/2 and
+  slice boundaries, healthLerp 0.15 update, camHUD zoom application to HUD
+  layer composition, SetHealthIcon row consumption incl. unknown char no-op.
+- Corpus: the M6 play-mode HUD (`play/hud.rs`) renders the SAME algebra; run
+  the bopeebo `play`-mode with SetHealthIcon active (visual HR arbiter).
+- Render-diff: HUD pixels enter the frozen frames — the render-slice-2
+  fixtures MUST be re-established a THIRD time on the ADR-0020 path with the
+  human approval recorded BEFORE any digest freeze (the existing approved
+  establishments covered the event-driven scene without HUD). Sample-plan
+  recipe unchanged (hud adds no classes).
+- Named pending: native rendered-output trace; score text typography.
