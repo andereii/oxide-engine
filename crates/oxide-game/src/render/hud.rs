@@ -131,6 +131,9 @@ pub(crate) struct IconAsset {
     pub(crate) pixel_page: usize,
     pub(crate) page_size: [f64; 2],
     pub(crate) image_size: [u32; 2],
+    /// New-style Sparrow sheet when `icon-<id>.xml` exists next to the PNG
+    /// (native `isNewSpritesheet`); legacy slicing otherwise.
+    pub(crate) new_style: Option<IconSheet>,
 }
 
 /// One legacy (or synthetic Sparrow) icon frame.
@@ -151,6 +154,7 @@ pub(crate) struct IconClip {
 }
 
 /// A loaded icon sheet: page rectangles plus the named animation map.
+#[derive(Debug, Clone)]
 pub(crate) struct IconSheet {
     pub(crate) page_size: [f64; 2],
     pub(crate) frames: Vec<IconFrame>,
@@ -160,7 +164,8 @@ pub(crate) struct IconSheet {
 impl IconSheet {
     /// Legacy `loadGraphic(..., true, isPixel ? 32 : 150, ...)` grid. Frames
     /// are laid out left-to-right/top-to-bottom (`FlxTileFrames.fromGraphic`).
-    /// The corpus has no `icon-*.xml`, so every preloaded icon uses this path.
+    /// The corpus has no `icon-*.xml`, so every preloaded icon uses this path
+    /// unless a sibling XML selects the new-style pipeline below.
     fn legacy(
         page_size: [f64; 2],
         image_size: [u32; 2],
@@ -234,6 +239,66 @@ impl IconSheet {
     fn first_size(&self) -> [f64; 2] {
         self.frames.first().map_or([0.0, 0.0], |frame| {
             [frame.size[0] as f64, frame.size[1] as f64]
+        })
+    }
+
+    /// New-style `loadAnimationNew` (`HealthIcon.hx` L1004-1020) over a parsed
+    /// Sparrow XML sheet. `addByPrefix` collects frame names that START WITH
+    /// the prefix in document order (flixel `indexOf(prefix) == 0`); the clip
+    /// name is the state key. idle/winning/losing loop at 24 fps; the
+    /// to*/from* one-shots do not. Rotated pages fail closed ([D] limit: no
+    /// shipped icon uses rotation or in-data trimming).
+    fn new_style(page_size: [f64; 2], atlas: &oxide_atlas::Atlas) -> Result<Self, RenderError> {
+        const NEW_STYLE_CLIPS: [(&str, bool); 7] = [
+            ("idle", true),
+            ("winning", true),
+            ("losing", true),
+            ("toWinning", false),
+            ("toLosing", false),
+            ("fromWinning", false),
+            ("fromLosing", false),
+        ];
+        let frames: Vec<IconFrame> = atlas
+            .subtextures
+            .iter()
+            .map(|texture| {
+                if texture.rotated {
+                    return Err(RenderError::Unsupported {
+                        detail: format!(
+                            "health icon atlas item {:?} is rotated; the icon pipeline \
+                             supports unrotated Sparrow frames only ([D])",
+                            texture.name
+                        ),
+                    });
+                }
+                Ok(IconFrame {
+                    rect: [texture.x, texture.y, texture.width, texture.height],
+                    size: [texture.width, texture.height],
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        let mut animations = BTreeMap::new();
+        for (clip_name, looped) in NEW_STYLE_CLIPS {
+            let indices: Vec<usize> = atlas
+                .subtextures
+                .iter()
+                .enumerate()
+                .filter(|(_, texture)| texture.name.starts_with(clip_name))
+                .map(|(index, _)| index)
+                .collect();
+            animations.insert(
+                clip_name.to_string(),
+                IconClip {
+                    frames: indices,
+                    fps: 24.0,
+                    looped,
+                },
+            );
+        }
+        Ok(Self {
+            page_size,
+            frames,
+            animations,
         })
     }
 }
@@ -378,6 +443,27 @@ pub(crate) fn load_hud(vfs: &Vfs, pages: &mut PageStore) -> Result<LoadedHud, Re
             });
         }
         let image_size = [page_size[0].round() as u32, page_size[1].round() as u32];
+        // Native `isNewSpritesheet(charId)`: `icon-<id>.xml` next to the PNG
+        // selects the new-style Sparrow pipeline (`loadSparrow` +
+        // `loadAnimationNew`). The loader cannot list directories (Vfs has no
+        // listing API), so sibling XMLs are checked for the measured
+        // inventory ids only; mod-only icon ids stay fail-closed ([D]).
+        let new_style = match vfs.resolve(&format!("preload/images/icons/icon-{id}.xml")) {
+            Some(_source) => {
+                let bytes = read_asset(vfs, &format!("preload/images/icons/icon-{id}.xml"))?;
+                let text = String::from_utf8(bytes).map_err(|error| RenderError::Decode {
+                    path: format!("preload/images/icons/icon-{id}.xml"),
+                    detail: error.to_string(),
+                })?;
+                let atlas = oxide_atlas::parse_sparrow(&text).map_err(|source| {
+                    RenderError::Unsupported {
+                        detail: format!("health icon XML for {id:?} failed to parse: {source}"),
+                    }
+                })?;
+                Some(IconSheet::new_style(page_size, &atlas)?)
+            }
+            None => None,
+        };
         icons.insert(
             id.to_string(),
             IconAsset {
@@ -385,6 +471,7 @@ pub(crate) fn load_hud(vfs: &Vfs, pages: &mut PageStore) -> Result<LoadedHud, Re
                 pixel_page,
                 page_size,
                 image_size,
+                new_style,
             },
         );
     }
@@ -620,7 +707,13 @@ impl HealthIconState {
                     })?
             }
         };
-        let sheet = IconSheet::legacy(asset.page_size, asset.image_size, config.is_pixel)?;
+        // Native `isLegacyStyle = !Assets.exists('icons/icon-<id>.xml')`
+        // (HealthIcon.hx L1037-1044): an XML sheet selects the new-style
+        // pipeline, every other id stays on the legacy grid.
+        let sheet = match &asset.new_style {
+            Some(sheet) => Clone::clone(sheet),
+            None => IconSheet::legacy(asset.page_size, asset.image_size, config.is_pixel)?,
+        };
 
         self.id = id;
         self.is_pixel = config.is_pixel;
@@ -689,9 +782,11 @@ impl HealthIconState {
         ];
     }
 
-    /// `HealthIcon.updatePosition` (L896-935): the state machine sees RAW
-    /// health (P2 inverted as `2 - health`), while the X position uses the
-    /// clamped `healthBar.value` (= `healthLerp`).
+    /// `HealthIcon.updatePosition` (L896-935): the state machine sees the
+    /// health CLAMPED at the native frame head (PlayState.hx L1208-1210 caps
+    /// health before any sprite update, so the clamped value IS the native
+    /// input; review finding 4), with P2 inverted as `2 - health`, while the
+    /// X position uses the clamped `healthBar.value` (= `healthLerp`).
     fn update_position(&mut self, health_lerp: f64, health: f64) {
         let value = health_lerp.clamp(0.0, HEALTH_MAX);
         let split = self.bar.left
@@ -914,6 +1009,12 @@ pub(crate) struct HudState {
     pub(crate) health: f64,
     pub(crate) health_lerp: f64,
     pub(crate) score: f64,
+    /// The score string the CURRENT frame shows: native `updateScoreText`
+    /// (PlayState.hx L1035-1038) runs at the head of `PlayState.update`
+    /// BEFORE `processSongEvents`/`processNotes`, so a same-tick row lags
+    /// one frame into the text. `begin_tick` snapshots the accumulated
+    /// score there; `compose` formats the snapshot.
+    pub(crate) score_snapshot: f64,
     pub(crate) terminal: bool,
     pub(crate) icons: [Option<HealthIconState>; 2],
 }
@@ -930,6 +1031,7 @@ impl HudState {
             health: HEALTH_STARTING,
             health_lerp: HEALTH_STARTING,
             score: 0.0,
+            score_snapshot: 0.0,
             terminal: false,
             icons: [None, None],
         };
@@ -965,12 +1067,15 @@ impl HudState {
         Ok(state)
     }
 
-    /// Per-tick update (M6-CONTRACT §13): clamp health, fixed 0.15 lerp,
-    /// advance bop tweens, then refresh both icons' state/position.
+    /// Per-tick update (M6-CONTRACT §13, native frame head): snapshot the
+    /// score string source FIRST (updateScoreText runs before the row
+    /// processing; review finding 2), then clamp health, fixed 0.15 lerp,
+    /// advance bop tweens, and refresh both icons' state/position.
     pub(crate) fn begin_tick(&mut self, now_ms: f64) {
         if self.terminal {
             return;
         }
+        self.score_snapshot = self.score;
         self.health = self.health.clamp(0.0, HEALTH_MAX);
         self.health_lerp = lerp(self.health_lerp, self.health, HEALTH_LERP);
         for icon in self.icons.iter_mut().flatten() {
@@ -991,10 +1096,15 @@ impl HudState {
         }
     }
 
-    /// Mirrors the sim rows exactly like `play::session::ScoreTracker::observe`
+    /// Mirrors the sim rows like `play::session::ScoreTracker::observe`
     /// (health clamp happens at the START of the next tick, so rows may leave
-    /// health outside the display range until then). `GameOver` freezes the
-    /// HUD at the last value, matching the scene's dead path.
+    /// health outside the display range until then). DOCUMENTED DIVERGENCE at
+    /// `GameOver` (review finding 3): the HUD freezes at the last DISPLAY
+    /// value (the dead scene keeps composing a frozen HUD) while the play
+    /// report sets health 0.0; on the true native death path health is 0.0
+    /// when death fires, so the two agree there. No shared accumulator: the
+    /// report tracking and the display freeze are separate consumers; keep
+    /// both rule sets aligned when editing (a differential test pins them).
     pub(crate) fn observe_event(
         &mut self,
         event: &TraceEvent,
@@ -1128,7 +1238,7 @@ impl HudState {
             ));
         }
 
-        let text = format!("Score: {}", format_money(self.score));
+        let text = format!("Score: {}", format_money(self.score_snapshot));
         let (outline, fill_quads) = score_quads(assets, geometry, &text, projection);
         out[layers.score_outline] = outline;
         out[layers.score_fill] = fill_quads;
@@ -1335,6 +1445,7 @@ mod tests {
                     pixel_page: index * 2 + 1,
                     page_size: [image_size[0] as f64, image_size[1] as f64],
                     image_size,
+                    new_style: None,
                 },
             );
         }
@@ -1365,6 +1476,7 @@ mod tests {
             health: HEALTH_STARTING,
             health_lerp: HEALTH_STARTING,
             score: 0.0,
+            score_snapshot: 0.0,
             terminal: false,
             icons: [None, None],
         };
@@ -1916,11 +2028,173 @@ mod tests {
         // no-op; the field grows to the right).
         let mut longer = test_state(&assets);
         longer.score = 1_234_567.0;
+        // The compose string comes from the pre-row snapshot (native frame
+        // head ordering); the test pins the composed text source.
+        longer.score_snapshot = longer.score;
         let longer_quads = longer.compose(&assets, &layers, 1.0);
         close(
             quad_game_corner(&longer_quads[layers.score_fill][0])[0],
             750.5,
         );
+    }
+
+    /// Native frame-head ordering (review finding 2): the score text shows
+    /// the PREVIOUS tick's accumulated value; a same-tick row becomes
+    /// visible only at the next begin_tick.
+    #[test]
+    fn score_text_uses_the_pre_row_snapshot() {
+        let assets = test_hud(&["bf", "dad"], [300, 150]);
+        let mut state = test_state(&assets);
+        let hit = TraceEvent::Hit {
+            schema: "3",
+            kind: "hit",
+            sim: 0,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "sick",
+            raw_note_diff: 0.0,
+            note_diff_int: 350,
+            score_delta: 350,
+            health_before: 1.0,
+            health_after: 1.0,
+            combo_before: 0,
+            combo_after: 1,
+            combo_max: 1,
+            tallies: Default::default(),
+        };
+        state.observe_event(&hit, &assets).expect("hit row");
+        assert_eq!(state.score, 350.0);
+        assert_eq!(state.score_snapshot, 0.0, "the frame text lags the row");
+        state.begin_tick(1.0);
+        assert_eq!(
+            state.score_snapshot, 350.0,
+            "the next frame head sees the row"
+        );
+    }
+
+    /// Review finding 3: the HUD mirrors the play ScoreTracker rule set
+    /// exactly until GameOver, where the HUD FREEZES the last display value
+    /// while the report records 0.0 (on the true native death path health
+    /// is already 0.0, so the two agree there). The differential test pins
+    /// both rule sets so a future edit cannot drift one side silently.
+    #[test]
+    fn hud_state_mirrors_score_tracker_and_documents_the_game_over_divergence() {
+        let assets = test_hud(&["bf", "dad"], [300, 150]);
+        let mut state = test_state(&assets);
+        let mut tracker = crate::play::ScoreTracker::new();
+        let events = [
+            TraceEvent::HoldTick {
+                schema: "3",
+                kind: "hold_tick",
+                sim: 0,
+                input_ms: 0.0,
+                input_time_us: 0.0,
+                note_id: 0,
+                note_direction: 0,
+                judgement: "sick",
+                raw_note_diff: 0.0,
+                note_diff_int: 0,
+                health_delta: 0.02,
+                score_delta: 3.0,
+                hold_remaining_ms: 100.0,
+                hold_elapsed_ms: 40.0,
+            },
+            TraceEvent::HoldDrop {
+                schema: "3",
+                kind: "hold_drop",
+                sim: 0,
+                input_ms: 0.0,
+                input_time_us: 0.0,
+                note_id: 0,
+                note_direction: 0,
+                judgement: "miss",
+                raw_note_diff: 0.0,
+                note_diff_int: 0,
+                score_penalty: -10.0,
+                health_change: -0.09,
+                combo_before: 0,
+                combo_after: 0,
+                is_combo_break: true,
+            },
+        ];
+        for event in &events {
+            state.observe_event(event, &assets).expect("hud observe");
+            tracker.observe(std::slice::from_ref(event));
+        }
+        close(state.health, tracker.health);
+        close(state.score, tracker.score);
+        let game_over = TraceEvent::GameOver {
+            schema: "3",
+            kind: "game_over",
+            sim: 1,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "miss",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            death_count: 1,
+        };
+        state.observe_event(&game_over, &assets).expect("game over");
+        tracker.observe(std::slice::from_ref(&game_over));
+        assert!(tracker.terminal);
+        close(tracker.health, 0.0);
+        // The documented divergence: the HUD froze at the last display value
+        // (0.93 = 1.0 + 0.02 - 0.09) while the report carries 0.0. On the
+        // true native death path health is already exactly 0.0.
+        close(state.health, 0.93);
+    }
+
+    /// The new-style Sparrow pipeline (review finding 1): the IconSheet built
+    /// from a parsed XML sheet must carry the seven native clips with
+    /// addByPrefix startswith semantics, and configure must select it over the
+    /// legacy grid when the loader found a sibling XML.
+    #[test]
+    fn new_style_sheet_selection_uses_the_sparrow_clips() {
+        let atlas = r#"<TextureAtlas imagePath="icon-myth.png">
+<SubTexture name="idle0000" x="0" y="0" width="10" height="10"/>
+<SubTexture name="idle0001" x="10" y="0" width="10" height="10"/>
+<SubTexture name="toWinning0000" x="0" y="10" width="10" height="10"/>
+<SubTexture name="fromWinning0000" x="10" y="10" width="10" height="10"/>
+</TextureAtlas>"#;
+        let parsed = oxide_atlas::parse_sparrow(atlas).expect("synthetic atlas parses");
+        let sheet = IconSheet::new_style([300.0, 150.0], &parsed).expect("new style builds");
+        let idle = &sheet.animations["idle"];
+        assert_eq!(idle.frames, vec![0, 1]);
+        assert!(idle.looped);
+        close(idle.fps, 24.0);
+        assert!(!sheet.animations["toWinning"].looped);
+        assert_eq!(sheet.animations["fromWinning"].frames, vec![3]);
+        assert_eq!(sheet.animations["losing"].frames, Vec::<usize>::new());
+
+        // configure selects the new-style sheet when the loader found an XML.
+        let mut icons = BTreeMap::new();
+        icons.insert(
+            "myth".to_string(),
+            IconAsset {
+                linear_page: 0,
+                pixel_page: 1,
+                page_size: [300.0, 150.0],
+                image_size: [300, 150],
+                new_style: Some(sheet),
+            },
+        );
+        let font = AngelFont::parse(&test_font_xml()).expect("test font parses");
+        let assets = LoadedHud {
+            bar_page: 100,
+            bar_size: [601.0, 19.0],
+            font_page: 101,
+            font_page_size: [300.0, 100.0],
+            font: HudFont::new(font),
+            icons,
+        };
+        let mut icon = HealthIconState::new(0);
+        icon.configure(&assets, &test_config("myth", false), false, 1.0, 1.0)
+            .expect("new-style configure");
+        assert_eq!(icon.current_anim.as_deref(), Some("idle"));
     }
 
     #[test]

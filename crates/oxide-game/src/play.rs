@@ -42,6 +42,11 @@ mod session;
 mod window;
 
 #[cfg(test)]
+// Re-exported for the render HUD's differential test (review finding 3: the
+// two rule sets are pinned against each other in-crate).
+pub(crate) use session::ScoreTracker;
+
+#[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;

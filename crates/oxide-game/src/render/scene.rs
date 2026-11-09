@@ -3732,6 +3732,69 @@ mod tests {
     /// Asset-gated 6D integration: the real bopeebo scene carries the HUD
     /// after every stage/overlay layer, the character healthIcon data drives
     /// both icons, and `Scene::draw` emits the HUD quads.
+    /// Review requested check: a synthetic SetHealthIcon row through the
+    /// REAL loaded Scene re-configures the icon in place (car 1 id reload
+    /// with the corpus icon inventory), unknown chars are no-ops, and an
+    /// unknown corpus id fails closed at the row.
+    #[test]
+    fn set_health_icon_row_reconfigures_the_loaded_scene_icon() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let loaded = super::super::load::load_slice_for_song(
+            std::path::Path::new(&root),
+            "bopeebo",
+            "normal",
+        )
+        .expect("bopeebo loads");
+        let (mut scene, _pages) = Scene::new(loaded).expect("scene builds");
+        assert!(scene.hud.is_some(), "the real load path carries the HUD");
+        let row = |tick: u64, char: i64, id: &str| TraceEvent::HealthIcon {
+            schema: "3",
+            kind: "health_icon",
+            sim: tick,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            char,
+            id: id.to_string(),
+            should_bop: true,
+            scale: 1.0,
+            flip_x: true,
+            is_pixel: false,
+            offsets: [0.0, 0.0],
+        };
+        scene
+            .step(0, &[row(0, 1, "tankman-bloody")], &[])
+            .expect("row applies");
+        let icon = scene
+            .hud
+            .as_ref()
+            .and_then(|hud| hud.state.icons[1].as_ref())
+            .expect("opponent icon");
+        assert_eq!(icon.id, "tankman-bloody");
+        assert!(icon.flip_x, "the row's flipX applies directly (no XOR)");
+        // Unknown char: native warning branch, no state change.
+        let before = scene
+            .hud
+            .as_ref()
+            .and_then(|hud| hud.state.icons[1].as_ref())
+            .map(|icon| (icon.id.clone(), icon.flip_x));
+        scene
+            .step(1, &[row(1, 5, "bf")], &[])
+            .expect("unknown char is a no-op row");
+        let after = scene
+            .hud
+            .as_ref()
+            .and_then(|hud| hud.state.icons[1].as_ref())
+            .map(|icon| (icon.id.clone(), icon.flip_x));
+        assert_eq!(before, after);
+        // Unknown id outside the icon inventory fails closed ([D] mod surface).
+        let error = scene
+            .step(2, &[row(2, 1, "mod-only-icon")], &[])
+            .unwrap_err();
+        assert!(error.to_string().contains("mod-only-icon"));
+    }
+
     #[test]
     fn shipped_hud_composes_after_the_scene_layers() {
         let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
