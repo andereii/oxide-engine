@@ -965,3 +965,80 @@ limitation, reversible if later phase evidence requires).
      invents a target); regression test
      `unknown_scroll_strumline_value_records_no_row` pins it and the
      corpus per-kind count assertion fails closed on such a chart.
+
+### 12.7 Amendment (2026-11-08, 6C scene consumption): world_focus correction, bop defaults, fixture plan
+
+- **`world_focus` row correction (sim-side fix, resolved before the scene
+  integration froze digests):** FocusCameraSongEvent.hx L113-134 adds the
+  literal `x`/`y` fields ON TOP of the character focus point
+  (`targetX += bfPoint.x`); the §12.4.1 frozen row instead recorded
+  "the character focus point when it exists, otherwise the literal (x, y)",
+  silently dropping nonzero offsets. Corpus scan: 317 FocusCamera events carry
+  nonzero literal x/y (e.g. blammed-chart-pico `{char:1,x:80,y:0}`,
+  2hot `{char:2,x:100,y:105}`; senpai/bopeebo use 0 defaults), so the
+  corrected row is: `world_focus` = for `target_kind` bf/dad/gf WITH a
+  resolvable character `[x + point.0, y + point.1]`, otherwise the literal
+  `[x, y]` (also when the character is missing — the native early return
+  never computes a target). Row VALUES change; no fixture digests depend on
+  schema-3 row content (the gameplay-sim corpus pass asserts per-kind COUNTS
+  only, and its three-run sha256 equality compares the sim against itself).
+  The sim's camera/zoom/bop rows stay DERIVED-only (§12.5); the scene applies
+  rig-computed targets per the §12.6 finding-1 rule and never trusts
+  `world_focus` numerically.
+- **Scene camera consumption (integration decision under the frozen §12.2
+  semantics):** the scene owns a private `CameraEventState`: follow point
+  (initialized to the opponent focus; retargeted per row), follow tween +
+  follow-enabled flag (native `camera.target = null` while a follow tween is
+  active), zoom tween on `currentCameraZoom`, mutable bop config
+  `(intensity, rate, offset)` + virtual HUD zoom (starts
+  `defaultHUDCameraZoom = FlxCamera.defaultZoom * 1.0`; the native decay block
+  `camHUD.zoom = lerp(default, hud, 0.95^dt)` feeds ONLY the gate
+  `Preferences.zoomCamera && hud < 1.35 * default`), and per-strumline
+  scrollSpeed tweens with the native `prevScrollTargets` snap order. Per tick
+  the state advances in native order: tweens (super.update position) →
+  conductor (bop gate may pulse) → decay/zoom-assign block gated
+  `cameraZoomRate > 0` → rows (processSongEvents position) → follow lerp at
+  end-of-step. FocusCamera target resolution CONSULTS THE SCENE'S OWN RIGS
+  (§12.6 finding 1): a bf/dad/gf row without that character applies NOTHING;
+  the target is `rig.focus + (x, y)`; 'position'/'unknown' rows target the
+  literal `(x, y)`. CLASSIC = cancel follow tween + follow active, retarget,
+  no snap; INSTANT = snap scroll to `target - (640, 360)` + follow active;
+  named ease with a valid resolution = follow disabled + eased scroll tween
+  to `target - (640, 360)` with onComplete = follow active + snap to the same
+  point; an unresolved ease row (`ease = null` fields) applies NOTHING.
+  ZoomCamera consumes `resolved_target_zoom` (INSTANT sets `currentCameraZoom`
+  directly; a valid ease tweens it; an unresolved ease applies nothing);
+  scroll_speed rows reproduce the sim's cancel/snap order and the scene
+  pre-assignment value must match the row's `base_scroll` (fail closed);
+  `play_animation` rows consult the scene rigs via `resolved_kind` and apply
+  `playAnimation(anim, force, force)` semantics — restart = force, and
+  `ignoreOther` = force locks the character against other animations (native
+  `Bopper.canPlayOtherAnims`, reopened by onAnimationFinished) until the
+  fired animation finishes; `skipped_old: true` rows, prop targets resolving
+  to nothing, and health_icon/unknown rows apply nothing (record-only,
+  §12.4.5).
+- **Bop-state defaults become the OBSERVED native constants this phase
+  (approved change, §12.2 contradiction resolution now active):** with the
+  fixture establishments below human-approved, the scene camera bop config
+  defaults ARE the on-disk source values (`Constants.DEFAULT_BOP_INTENSITY =
+  1.015`, `DEFAULT_ZOOM_RATE = 4`, `DEFAULT_ZOOM_OFFSET = 0` — zero beats,
+  on-beat, Constants.hx L246/L251): `geometry.rs` `CAMERA_ZOOM_RATE_OFFSET`
+  moves 1 → 0 and the bop gate/decay block adopt the mutable config. The
+  rowless render-slice digests are re-established together with the schema-3
+  establishments in this same approved step; in-crate bop tests update with
+  the observed-source comments. `Preferences.zoomCamera` defaults true ([A]
+  default save options).
+- **Fixture establishments (human-approved 2026-11-08; ADR-0020 path):** the
+  render-diff gate is generalized per chart-id family: (1) the bopeebo
+  easy/normal/hard entries are RE-ESTABLISHED on the schema-3 event-driven
+  canonical stream (event rows consumed by the scene; the old rowless
+  `render-slice-1` digests are superseded — git history keeps the old
+  record), and (2) a NEW `school` family on the `senpai` chart id exercises
+  the pixel note style + school stage + repeated CLASSIC focus rows (26
+  FocusCamera events with alternating char 1/0). Same gate rules: two-run
+  sha256 equality, the frozen sample-plan recipe per family, fail-closed
+  manifest comparison, never regenerated during verification. The manifest
+  schema token moves to `render-slice-2` for both families (rows enabled).
+  The honesty wall stands: engine fixtures on the pinned llvmpipe adapter,
+  NOT native pixel parity; the native rendered-output trace remains the
+  separate pending obligation.

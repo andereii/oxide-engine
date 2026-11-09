@@ -850,3 +850,28 @@ fail-closed (no auto-repair).
   on NVIDIA AnyHardware). The provider of the finding was the reviewer;
   verified by the orchestrator's own grep + reading StrumlineNote.hx:60-130
   (update()/playAnimation/setup) and 183-198 (dead definition).
+
+## 2026-11-08 — 6C scene consumption contract corrections (M6-CONTRACT §12.7)
+
+- The 6C sim's `camera_focus.world_focus` row was a transcription error against
+  FocusCameraSongEvent.hx L113-134: the native handler ADDS the literal
+  `x`/`y` fields on top of the character focus point
+  (`targetX += bfPoint.x`); the frozen row dropped them whenever a character
+  focus point resolved. Corpus evidence: 317 FocusCamera events carry nonzero
+  literal x/y (blammed-chart-pico, 2hot, …); the shipped Fixtures only assert
+  per-kind row COUNTS, so no digest path depends on the row values. The row
+  definition in `crates/oxide-game/src/slice/events.rs` is corrected to the
+  handler algebra before any scene-side digest freezes; scene-side focus
+  application consults the scene's own character rigs (§12.6 finding 1).
+- With the two human-approved ADR-0020 fixture establishments (event-driven
+  bopeebo re-freeze + new school/senpai pixel family), the §12.2
+  DEFAULT-ZOOM-OFFSET contradiction resolution becomes active:
+  `Constants.DEFAULT_ZOOM_OFFSET = 0` (Constants.hx L251, "Zero beats
+  (on-beat)") replaces the frozen `1` in the render scene's bop-gate default;
+  `geometry.rs CAMERA_ZOOM_RATE_OFFSET` moves 1 → 0, and both fixture
+  families freeze digests that embed the observed on-disk default.
+- PlayAnimation scene handoff implements the observed
+  `Bopper.playAnimation` failure surface: `ignoreOther = force` re-locks
+  `canPlayOtherAnims` until the fired animation finishes
+  (Bopper.hx:250/291/110-117), so forced chart animations suppress
+  sing/dance until they end; restart = force.
