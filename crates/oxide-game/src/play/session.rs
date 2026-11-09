@@ -14,10 +14,8 @@ use bevy::ecs::message::MessageWriter;
 use bevy::prelude::Resource;
 
 use oxide_audio::playback::SongPlayback;
-use oxide_vfs::Vfs;
 
 use super::audio;
-use super::hud::Hud;
 use super::input::{
     InputRouter, TickPlanner, advance_ticks, should_queue_lane_event, toggle_paused_state,
 };
@@ -110,18 +108,12 @@ pub(crate) fn run(config: PlayConfig, frame_limit: Option<u64>) -> Result<PlayRe
     let player_vocals = loaded.player_vocals.clone();
     let opponent_vocals = loaded.opponent_vocals.clone();
 
-    let (scene, mut pages) = Scene::new(loaded)?;
-    let vfs = Vfs::new(config.assets_root.clone());
-    let (hud, hud_pages) = match Hud::load(&vfs, pages.len()) {
-        Some((hud, hud_pages)) => (Some(hud), hud_pages),
-        None => (None, Vec::new()),
-    };
-    pages.extend(hud_pages);
+    let (scene, pages) = Scene::new(loaded)?;
 
-    let mut specs = scene.layer_specs().to_vec();
-    if let Some(hud) = &hud {
-        specs.extend_from_slice(hud.layer_specs());
-    }
+    // M6-CONTRACT §13: the scene owns the shared HUD core (health bar, icons,
+    // score text and camHUD zoom), so the play window composes exactly the
+    // same layers as the deterministic render path.
+    let specs = scene.layer_specs().to_vec();
 
     // The play scene consumes the schema-3 chart-event rows (M6-CONTRACT
     // §12.7): the sim walks bopeebo's FocusCamera/ZoomCamera/SetCameraBop/
@@ -136,7 +128,6 @@ pub(crate) fn run(config: PlayConfig, frame_limit: Option<u64>) -> Result<PlayRe
     let runtime = PlayRuntime::new(
         sim,
         scene,
-        hud,
         player_vocals.clone(),
         song_end_tick,
         frame_limit,
@@ -317,7 +308,6 @@ impl VoiceMuteState {
 #[derive(Resource)]
 pub(crate) struct PlayRuntime {
     scene: Scene,
-    hud: Option<Hud>,
     planner: TickPlanner,
     input: InputRouter,
     sim: GameplaySimState,
@@ -344,7 +334,6 @@ impl PlayRuntime {
     fn new(
         sim: GameplaySimState,
         scene: Scene,
-        hud: Option<Hud>,
         player_vocals: Vec<String>,
         song_end_tick: u64,
         frame_limit: Option<u64>,
@@ -352,7 +341,6 @@ impl PlayRuntime {
     ) -> Self {
         Self {
             scene,
-            hud,
             planner: TickPlanner::new(),
             input: InputRouter::new(),
             sim,
@@ -534,13 +522,9 @@ impl PlayRuntime {
         )
     }
 
-    /// Draws the frozen scene plus the optional HUD layer.
+    /// Draws the frozen scene, including the shared HUD layer group.
     pub(crate) fn draw_layers(&self) -> Result<Vec<Vec<Quad>>, PlayError> {
-        let mut layers = self.scene.draw()?;
-        if let Some(hud) = &self.hud {
-            layers.extend(hud.draw(self.tracker.health));
-        }
-        Ok(layers)
+        Ok(self.scene.draw()?)
     }
 
     pub(crate) fn publish_provisional(&self) {

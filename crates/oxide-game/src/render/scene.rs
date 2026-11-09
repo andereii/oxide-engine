@@ -17,6 +17,7 @@ use super::geometry::{
     hold_column_uv_for, hold_columns, note_top_left, note_y_offset, receptor_top_left,
     render_distance_ms, sustain_height, sustain_held_top, sustain_top_left_x,
 };
+use super::hud::{HudLayers, HudState, LoadedHud};
 use super::load::{
     LoadedCharacter, LoadedNote, LoadedNoteStyle, LoadedSlice, LoadedStageProp, PageImage,
     PropVisual, Role, Sheet, SpriteFrame,
@@ -628,6 +629,18 @@ pub(crate) struct Scene {
     opponent_holds: [Option<OpponentHold>; 4],
     /// Follow/zoom/bop/scroll event state (M6-CONTRACT §12.7).
     camera_events: CameraEventState,
+    /// Screen-space play HUD (M6-CONTRACT §13), appended after every
+    /// stage/overlay layer. `None` only for hermetic synthetic scenes.
+    hud: Option<Hud>,
+    /// Index of the first HUD layer in `layer_specs`.
+    hud_start: usize,
+}
+
+/// One scene-owned HUD: loaded assets + runtime state + layer registry.
+struct Hud {
+    assets: LoadedHud,
+    state: HudState,
+    layers: HudLayers,
 }
 
 impl Scene {
@@ -646,7 +659,14 @@ impl Scene {
             // Play-session-only metadata; the visual scene does not consume it.
             player_vocals: _,
             opponent_vocals: _,
+            hud,
         } = loaded;
+        // The HUD state is built before the character rigs consume the loaded
+        // characters (it needs their normalized `healthIcon` data).
+        let hud_state = match &hud {
+            Some(assets) => Some(HudState::new(assets, &loaded_characters)?),
+            None => None,
+        };
         let mut characters = Vec::with_capacity(3);
         for character in loaded_characters {
             characters.push(CharacterRig::from_loaded(character));
@@ -716,6 +736,22 @@ impl Scene {
             color: [1.0, 1.0, 1.0, 1.0],
         });
 
+        // M6-CONTRACT §13: HUD layers are appended AFTER every stage/overlay
+        // layer (the scrollFactor (0,0) equivalent). zIndex order inside the
+        // group: bar bg 800, bar fill 801, score 802, icons 850.
+        let hud_start = layer_specs.len();
+        let hud = match (hud, hud_state) {
+            (Some(assets), Some(state)) => {
+                let layers = HudLayers::build(&assets, &mut layer_specs);
+                Some(Hud {
+                    assets,
+                    state,
+                    layers,
+                })
+            }
+            _ => None,
+        };
+
         let mut player_note_indices = vec![usize::MAX; notes.len()];
         let mut opponent_note_indices = vec![usize::MAX; notes.len()];
         for (index, note) in notes.iter().enumerate() {
@@ -770,6 +806,8 @@ impl Scene {
                 // sanctioned change is the M6-CONTRACT §12.7 bop default
                 // (cameraZoomRateOffset 1 -> 0), which lives in `BopConfig`.
                 camera_events: CameraEventState::new(follow_focus, scroll_speed),
+                hud,
+                hud_start,
             },
             pages,
         ))
@@ -833,6 +871,14 @@ impl Scene {
             // a rate-gated M5 variant).
             return Ok(());
         }
+        // HUD per-tick update (M6-CONTRACT §13): health clamp + fixed 0.15
+        // lerp, bop-tween advance and icon state/position refresh. It runs
+        // before the row pass so a same-tick `SetHealthIcon` configure keeps
+        // the native one-frame idle restart.
+        if let Some(hud) = &mut self.hud {
+            hud.state.begin_tick(self.sim_ms);
+        }
+        let step_length_ms = self.conductor.step_length_ms();
         for dispatch in dispatches {
             if let Dispatch::Step(step) = dispatch {
                 if self
@@ -843,6 +889,9 @@ impl Scene {
                     // defaultHUDCameraZoom` (`PlayState.hx` L1858-1859).
                     self.camera_events.hud_zoom +=
                         self.camera_events.bop.hud_intensity * DEFAULT_HUD_CAMERA_ZOOM;
+                }
+                if let Some(hud) = &mut self.hud {
+                    hud.state.on_step(step, step_length_ms, self.sim_ms);
                 }
                 for character in &mut self.characters {
                     character.scheduler.on_step(step);
@@ -902,7 +951,6 @@ impl Scene {
         if opponent_holding && let Some(dad) = self.character_mut(Role::Opponent) {
             dad.scheduler.reset_hold_timer_under_opponent_hold();
         }
-        let step_length_ms = self.conductor.step_length_ms();
         for character in &mut self.characters {
             character.scheduler.update(TICK_SECONDS, step_length_ms);
         }
@@ -1204,6 +1252,11 @@ impl Scene {
     }
 
     fn process_event(&mut self, event: &TraceEvent) -> Result<(), RenderError> {
+        // The HUD mirrors the player health/score rows and consumes
+        // SetHealthIcon at the native processSongEvents position.
+        if let Some(hud) = &mut self.hud {
+            hud.state.observe_event(event, &hud.assets)?;
+        }
         match event {
             TraceEvent::Hit {
                 note_id,
@@ -1375,8 +1428,7 @@ impl Scene {
             // Batched by `process_events` (one native tweenScrollSpeed call
             // can cover two strumlines).
             TraceEvent::ScrollSpeed { .. } => {}
-            // Record-only ([D] M6-CONTRACT §12.4.5): the HUD health icon
-            // sprite/configure semantics are the 6D deliverable.
+            // Consumed by the shared HUD observer above (M6-CONTRACT §13).
             TraceEvent::HealthIcon { .. } => {}
             // EnableMask / sserafim / any no-handler kind: record-only
             // (M6-CONTRACT §12.2).
@@ -1500,6 +1552,14 @@ impl Scene {
         layers[self.overlay_start + 1] = self.draw_receptors();
         layers[self.overlay_start + 2] = self.draw_holds();
         layers[self.overlay_start + 3] = self.draw_notes();
+        if let Some(hud) = &self.hud {
+            let hud_quads =
+                hud.state
+                    .compose(&hud.assets, &hud.layers, self.camera_events.hud_zoom);
+            for (index, quads) in hud_quads.into_iter().enumerate() {
+                layers[self.hud_start + index] = quads;
+            }
+        }
         Ok(layers)
     }
 
@@ -2258,7 +2318,7 @@ fn sprite_frame_quad(
     )
 }
 
-fn quad_uv(rect: [i32; 4], page_size: [f64; 2]) -> [[f64; 2]; 4] {
+pub(crate) fn quad_uv(rect: [i32; 4], page_size: [f64; 2]) -> [[f64; 2]; 4] {
     let x0 = rect[0] as f64 / page_size[0];
     let y0 = rect[1] as f64 / page_size[1];
     let x1 = (rect[0] + rect[2]) as f64 / page_size[0];
@@ -2272,7 +2332,7 @@ fn visible(top: f64, height: f64) -> bool {
 
 /// `parent ∘ local` in the atlas matrix convention:
 /// `[a,b,c,d,tx,ty]` maps `(x,y) -> (a*x + c*y + tx, b*x + d*y + ty)`.
-fn concat(parent: [f64; 6], local: [f64; 6]) -> [f64; 6] {
+pub(crate) fn concat(parent: [f64; 6], local: [f64; 6]) -> [f64; 6] {
     [
         parent[0] * local[0] + parent[2] * local[1],
         parent[1] * local[0] + parent[3] * local[1],
@@ -2776,6 +2836,14 @@ mod tests {
                 camera_offsets: (0.0, 0.0),
                 scroll: (1.0, 1.0),
             },
+            health_icon: crate::render::hud::IconConfig {
+                id: role.label().to_string(),
+                is_pixel: false,
+                should_bop: true,
+                scale: 1.0,
+                flip_x: false,
+                offsets: [0.0, 0.0],
+            },
         }
     }
 
@@ -2848,6 +2916,7 @@ mod tests {
             }],
             player_vocals: Vec::new(),
             opponent_vocals: Vec::new(),
+            hud: None,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
     }
@@ -3430,7 +3499,9 @@ mod tests {
     }
 
     #[test]
-    fn health_icon_and_unknown_rows_are_record_only_noops() {
+    fn health_icon_and_unknown_rows_do_not_touch_camera_state_without_hud() {
+        // Synthetic scenes pass `hud: None`; the real load path consumes the
+        // health_icon row through the shared HUD observer (M6-CONTRACT §13).
         let mut scene = default_scene();
         let before = (
             scene.camera.scroll,
@@ -3657,5 +3728,51 @@ mod tests {
                 "{chart_id}: expected at least one resolvable camera_focus row"
             );
         }
+    }
+    /// Asset-gated 6D integration: the real bopeebo scene carries the HUD
+    /// after every stage/overlay layer, the character healthIcon data drives
+    /// both icons, and `Scene::draw` emits the HUD quads.
+    #[test]
+    fn shipped_hud_composes_after_the_scene_layers() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let loaded = super::super::load::load_slice_for_song(
+            std::path::Path::new(&root),
+            "bopeebo",
+            "normal",
+        )
+        .expect("bopeebo loads");
+        let (mut scene, _pages) = Scene::new(loaded).expect("scene builds");
+        let hud_start = scene.hud_start;
+        let specs_len = scene.layer_specs().len();
+        assert!(specs_len > hud_start + 5, "HUD layer group appended");
+        let hud = scene.hud.as_ref().expect("HUD payload");
+        let player = hud.state.icons[0].as_ref().expect("player icon");
+        let opponent = hud.state.icons[1].as_ref().expect("opponent icon");
+        assert_eq!(player.id, "bf");
+        assert_eq!(opponent.id, "dad");
+        // `initHealthIcon(false)` XOR-flips the player icon.
+        assert!(player.flip_x);
+        assert!(!opponent.flip_x);
+
+        for tick in 0..10 {
+            scene.step(tick, &[], &[]).expect("scene tick");
+        }
+        let layers = scene.draw().expect("scene draws");
+        assert_eq!(layers.len(), specs_len);
+        let hud = scene.hud.as_ref().expect("HUD payload");
+        assert_eq!(layers[hud_start + hud.layers.bar_bg].len(), 1);
+        assert_eq!(layers[hud_start + hud.layers.bar_empty].len(), 1);
+        assert_eq!(layers[hud_start + hud.layers.bar_fill].len(), 1);
+        // "Score: 0" is seven vcr-bmp glyphs: one white fill each and the
+        // eight-outline border pass (7 * 8) in the layer before it.
+        assert_eq!(layers[hud_start + hud.layers.score_fill].len(), 7);
+        assert_eq!(layers[hud_start + hud.layers.score_outline].len(), 56);
+        let non_empty = layers[hud_start..]
+            .iter()
+            .filter(|layer| !layer.is_empty())
+            .count();
+        assert!(non_empty >= 7, "bar/score/icons contribute quads");
     }
 }

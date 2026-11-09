@@ -164,6 +164,9 @@ pub(crate) struct LoadedCharacter {
     pub(crate) flip_x: bool,
     pub(crate) starting_animation: Option<String>,
     pub(crate) slot: LoadedSlot,
+    /// Character `healthIcon` data normalized with the native defaults
+    /// (`CharacterData.hx` L531-586).
+    pub(crate) health_icon: super::hud::IconConfig,
 }
 
 /// One static or animated stage prop.
@@ -289,6 +292,9 @@ pub(crate) struct LoadedSlice {
     pub(crate) player_vocals: Vec<String>,
     /// Metadata `playData.characters.opponentVocals` (voice track ids).
     pub(crate) opponent_vocals: Vec<String>,
+    /// Loaded HUD core (M6-CONTRACT §13). Synthetic scene tests pass `None`;
+    /// the real load path always carries it (missing assets fail closed).
+    pub(crate) hud: Option<super::hud::LoadedHud>,
 }
 
 /// Observed character renderType dispatch (M6-CONTRACT §11.1).
@@ -643,6 +649,11 @@ pub(crate) fn load_slice_from_paths(
         .transpose()?
         .unwrap_or_default();
 
+    // M6-CONTRACT §13: the deterministic scene composes the play HUD core, so
+    // the HUD pages/font join the same page store. Missing HUD assets fail
+    // closed (a partial HUD would silently change frozen frame pixels).
+    let hud = super::hud::load_hud(&vfs, &mut pages)?;
+
     Ok(LoadedSlice {
         pages: pages.pages,
         stage_zoom,
@@ -654,6 +665,7 @@ pub(crate) fn load_slice_from_paths(
         conductor_changes,
         player_vocals,
         opponent_vocals,
+        hud: Some(hud),
     })
 }
 
@@ -665,7 +677,7 @@ fn read_data_document(vfs: &Vfs, path: &str) -> Result<oxide_data::ParsedDocumen
     })
 }
 
-fn read_asset(vfs: &Vfs, path: &str) -> Result<Vec<u8>, RenderError> {
+pub(crate) fn read_asset(vfs: &Vfs, path: &str) -> Result<Vec<u8>, RenderError> {
     let source = vfs.resolve(path).ok_or_else(|| RenderError::MissingAsset {
         path: path.to_string(),
     })?;
@@ -759,7 +771,7 @@ fn sampler_for(is_pixel: bool) -> ImageSampler {
 }
 
 #[derive(Default)]
-struct PageStore {
+pub(crate) struct PageStore {
     pages: Vec<PageImage>,
     indices: HashMap<String, usize>,
 }
@@ -801,7 +813,7 @@ impl PageStore {
         self.add_png(path, bytes, is_pixel)
     }
 
-    fn load_png_file(
+    pub(crate) fn load_png_file(
         &mut self,
         vfs: &Vfs,
         path: &str,
@@ -869,16 +881,6 @@ pub(crate) fn decode_png_page(
         });
     }
     Ok(PageImage { image })
-}
-
-/// Reads and decodes one PNG asset from the VFS. Used by the interactive HUD.
-pub(crate) fn load_png_page(
-    vfs: &Vfs,
-    path: &str,
-    sampler: ImageSampler,
-) -> Result<PageImage, RenderError> {
-    let bytes = read_asset(vfs, path)?;
-    decode_png_page(path.to_string(), bytes, sampler)
 }
 
 /// Extracts a two-number JSON array without naming `serde_json::Value`
@@ -1265,6 +1267,43 @@ fn load_character(
     let camera_offsets = character.camera_offsets.unwrap_or((0.0, 0.0));
     let flip_x = resolved_flip_x(role, character.flip_x);
 
+    // Native `CharacterDataParser` normalization (`CharacterData.hx`
+    // L531-586): id defaults to the character id, shouldBop true, scale 1,
+    // flipX false, offsets [0,0], isPixel inherits the character flag.
+    let health_icon_value = character.health_icon.as_ref();
+    let health_icon = super::hud::IconConfig {
+        id: health_icon_value
+            .and_then(|value| value.get("id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or(id)
+            .to_string(),
+        is_pixel: health_icon_value
+            .and_then(|value| value.get("isPixel"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(is_pixel),
+        should_bop: health_icon_value
+            .and_then(|value| value.get("shouldBop"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true),
+        scale: health_icon_value
+            .and_then(|value| value.get("scale"))
+            .and_then(|value| value.as_f64())
+            .unwrap_or(1.0),
+        flip_x: health_icon_value
+            .and_then(|value| value.get("flipX"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        offsets: health_icon_value
+            .and_then(|value| value.get("offsets"))
+            .and_then(|value| value.as_array())
+            .and_then(|values| {
+                let x = values.first()?.as_f64()?;
+                let y = values.get(1)?.as_f64()?;
+                Some([x, y])
+            })
+            .unwrap_or([0.0, 0.0]),
+    };
+
     Ok(LoadedCharacter {
         role,
         id: id.to_string(),
@@ -1280,6 +1319,7 @@ fn load_character(
         flip_x,
         starting_animation: character.starting_animation.clone(),
         slot,
+        health_icon,
     })
 }
 

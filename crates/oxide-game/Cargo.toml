@@ -10,6 +10,7 @@ bevy = { version = "=0.20.1", default-features = false, features = ["2d", "multi
 oxide-atlas = { path = "../oxide-atlas" }
 oxide-audio = { path = "../oxide-audio" }
 oxide-data = { path = "../oxide-data" }
+oxide-font = { path = "../oxide-font" }
 oxide-vfs = { path = "../oxide-vfs" }
 serde = { workspace = true }
 thiserror = { workspace = true }

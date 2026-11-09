@@ -24,6 +24,7 @@ mod anim;
 // headless renderer. These stay crate-private; only `play` consumes them.
 pub(crate) mod geometry;
 pub(crate) mod harness;
+pub(crate) mod hud;
 pub(crate) mod load;
 pub(crate) mod scene;
 

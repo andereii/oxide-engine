@@ -23,10 +23,9 @@
 //!
 //! Engine decisions recorded in the module:
 //!
-//! - The HUD geometry has no approved observed-position spec. The health bar
-//!   background/fill and bf/dad icons use the shipped asset paths with
-//!   documented engine-decided placement (`play::hud`); missing HUD assets
-//!   skip the whole HUD layer with one printed deviation.
+//! - The HUD geometry is the 6D behavior freeze (M6-CONTRACT §13): the scene
+//!   owns the shared health bar, icon and score-text algebra, so the play
+//!   window and the deterministic render slice compose the same layers.
 //! - Controls are keyboard-only: WASD/arrows for lanes, ESC pause/resume, Q
 //!   quit; the window close button also ends the session. The gamepad is not
 //!   wired. WASD and arrows are alternate bindings per lane: releasing one
@@ -38,7 +37,6 @@
 //!   timing/latency or native-parity measurement.
 
 mod audio;
-mod hud;
 mod input;
 mod session;
 mod window;
