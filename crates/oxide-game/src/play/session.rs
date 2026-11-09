@@ -123,7 +123,15 @@ pub(crate) fn run(config: PlayConfig, frame_limit: Option<u64>) -> Result<PlayRe
         specs.extend_from_slice(hud.layer_specs());
     }
 
-    let sim = GameplaySimState::build(&config.assets_root, config.difficulty.as_str())?;
+    // The play scene consumes the schema-3 chart-event rows (M6-CONTRACT
+    // §12.7): the sim walks bopeebo's FocusCamera/ZoomCamera/SetCameraBop/
+    // PlayAnimation/ScrollSpeed rows so the scene camera/animations/scroll
+    // follow the same stream as the deterministic render path.
+    let sim = GameplaySimState::build_chart_events(
+        &config.assets_root,
+        "bopeebo",
+        config.difficulty.as_str(),
+    )?;
     let sink = ReportSink::new();
     let runtime = PlayRuntime::new(
         sim,

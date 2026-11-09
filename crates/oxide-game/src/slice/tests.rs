@@ -2297,7 +2297,47 @@ fn camera_focus_defaults_string_coercion_and_character_world_focus() {
     assert_eq!(*target_kind, "dad");
     assert_eq!(*x, 5.0);
     assert_eq!(*y, 7.0);
-    assert_eq!(*world_focus, [190.0, 180.0]);
+    // FocusCameraSongEvent.hx L113-134 adds the literal x/y on top of the
+    // character focus point (M6-CONTRACT §12.7): dad focus [190, 180] + (5, 7).
+    assert_eq!(*world_focus, [195.0, 187.0]);
+}
+
+/// M6-CONTRACT §12.7 world_focus correction: a resolvable character records
+/// `[x + focus.x, y + focus.y]`; every other target records the literal pair.
+#[test]
+fn camera_focus_world_focus_adds_the_literal_offsets_on_top() {
+    let fixture = with_stage_events(
+        r#"{"t":0,"e":"FocusCamera","v":{"char":1,"x":5,"y":7}},
+           {"t":0,"e":"FocusCamera","v":{"char":-1,"x":30,"y":40}},
+           {"t":0,"e":"FocusCamera","v":{"char":3,"x":10,"y":20}},
+           {"t":0,"e":"FocusCamera","v":0},
+           {"t":0,"e":"FocusCamera","v":{"char":2,"x":2.5,"y":-4.5}}"#,
+    );
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 0, &[]);
+    let rows = event_rows(&events, "camera_focus");
+    assert_eq!(rows.len(), 5);
+
+    let focus = |row: &TraceEvent| -> ([f64; 2], &'static str, f64, f64) {
+        let TraceEvent::CameraFocus {
+            world_focus,
+            target_kind,
+            x,
+            y,
+            ..
+        } = row
+        else {
+            unreachable!("event_rows returns camera-focus rows");
+        };
+        (*world_focus, *target_kind, *x, *y)
+    };
+
+    assert_eq!(focus(rows[0]), ([195.0, 187.0], "dad", 5.0, 7.0));
+    assert_eq!(focus(rows[1]), ([30.0, 40.0], "position", 30.0, 40.0));
+    assert_eq!(focus(rows[2]), ([10.0, 20.0], "unknown", 10.0, 20.0));
+    // Scalar `v: 0` coerces to char 0 (bf focus [110, 220]).
+    assert_eq!(focus(rows[3]), ([110.0, 220.0], "bf", 0.0, 0.0));
+    // Girlfriend focus [301, 451] + (2.5, -4.5).
+    assert_eq!(focus(rows[4]), ([303.5, 446.5], "gf", 2.5, -4.5));
 }
 
 #[test]

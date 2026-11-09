@@ -74,12 +74,21 @@ pub(crate) const SUSTAIN_HELD_HIDE_REMAINING: f64 = 10.0;
 pub(crate) const DEFAULT_CAMERA_ZOOM: f64 = 1.0;
 /// `cameraZoom ?? FlxCamera.defaultZoom * 1.05` (RENDER-BEHAVIOR §2).
 pub(crate) const DEFAULT_STAGE_ZOOM: f64 = DEFAULT_CAMERA_ZOOM * 1.05;
-/// `Constants.DEFAULT_BOP_INTENSITY` (RENDER-BEHAVIOR §2).
+/// `Constants.DEFAULT_BOP_INTENSITY` (`Constants.hx` L246; M6-CONTRACT §12.7
+/// adopted the on-disk defaults this phase).
 pub(crate) const CAMERA_BOP_INTENSITY: f64 = 1.015;
-/// `Constants.DEFAULT_ZOOM_RATE` (RENDER-BEHAVIOR §2).
-pub(crate) const CAMERA_ZOOM_RATE: i32 = 4;
-/// `cameraZoomRateOffset` default (RENDER-BEHAVIOR §2).
-pub(crate) const CAMERA_ZOOM_RATE_OFFSET: i32 = 1;
+/// `Constants.DEFAULT_ZOOM_RATE` (`Constants.hx` L246; M6-CONTRACT §12.7).
+pub(crate) const CAMERA_ZOOM_RATE: f64 = 4.0;
+/// `Constants.DEFAULT_ZOOM_OFFSET` (`Constants.hx` L251, "Zero beats
+/// (on-beat)"). The frozen RENDER-BEHAVIOR §2 value 1 was the contradiction
+/// resolved by M6-CONTRACT §12.7: the observed on-disk default is 0.
+pub(crate) const CAMERA_ZOOM_RATE_OFFSET: f64 = 0.0;
+/// `defaultHUDCameraZoom = FlxCamera.defaultZoom * 1.0` (flixel 6.1.2;
+/// `FlxCamera.defaultZoom = 1.0`).
+pub(crate) const DEFAULT_HUD_CAMERA_ZOOM: f64 = 1.0;
+/// `MAX_RELATIVE_CAM_ZOOM` in `PlayState.stepHit` (`PlayState.hx` L1846-1859):
+/// the HUD zoom gate stops pulsing above 135% of the default.
+pub(crate) const MAX_RELATIVE_CAM_ZOOM: f64 = 1.35;
 /// `Constants.DEFAULT_CAMERA_FOLLOW_RATE` (RENDER-BEHAVIOR §2).
 pub(crate) const CAMERA_FOLLOW_LERP: f64 = 0.04;
 /// `Constants.STEPS_PER_BEAT`/`STEPS_PER_BEAT` (M4 conductor, RENDER §5).
@@ -98,9 +107,51 @@ pub(crate) fn lerp(from: f64, to: f64, factor: f64) -> f64 {
     from + (to - from) * factor
 }
 
-/// `(step + cameraZoomRateOffset * 4) % (cameraZoomRate * 4) == 0`.
-pub(crate) fn zoom_pulse_step(step: i32) -> bool {
-    (step + CAMERA_ZOOM_RATE_OFFSET * 4) % (CAMERA_ZOOM_RATE * 4) == 0
+/// Mutable `SetCameraBop` state (`PlayState.hx` L1213-1228/L1846-1859,
+/// M6-CONTRACT §12.7): intensity is the resolved `cameraBopIntensity`,
+/// `hud_intensity` the resolved `hudCameraZoomIntensity`, and `rate`/`offset`
+/// the `cameraZoomRate`/`cameraZoomRateOffset` fields.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BopConfig {
+    pub(crate) intensity: f64,
+    pub(crate) hud_intensity: f64,
+    pub(crate) rate: f64,
+    pub(crate) offset: f64,
+}
+
+impl Default for BopConfig {
+    fn default() -> Self {
+        Self {
+            intensity: CAMERA_BOP_INTENSITY,
+            hud_intensity: (CAMERA_BOP_INTENSITY - 1.0) * 2.0,
+            rate: CAMERA_ZOOM_RATE,
+            offset: CAMERA_ZOOM_RATE_OFFSET,
+        }
+    }
+}
+
+impl BopConfig {
+    /// `Preferences.zoomCamera && camHUD.zoom < 1.35 * defaultHUDCameraZoom
+    /// && cameraZoomRate > 0 && (step + offset*4) % (rate*4) == 0`
+    /// (`PlayState.hx` L1846-1859). `Preferences.zoomCamera` defaults true
+    /// ([A] default save options).
+    pub(crate) fn pulse(&self, step: i32, hud_zoom: f64) -> bool {
+        self.rate > 0.0
+            && hud_zoom < MAX_RELATIVE_CAM_ZOOM * DEFAULT_HUD_CAMERA_ZOOM
+            && (step as f64 + self.offset * DANCE_STEPS_PER_BEAT)
+                % (self.rate * DANCE_STEPS_PER_BEAT)
+                == 0.0
+    }
+}
+
+/// `camHUD.zoom = lerp(defaultHUDCameraZoom, camHUD.zoom, 0.95^dt)`
+/// (`PlayState.hx` L1217-1228).
+pub(crate) fn hud_zoom_decay(hud_zoom: f64, elapsed_seconds: f64) -> f64 {
+    lerp(
+        DEFAULT_HUD_CAMERA_ZOOM,
+        hud_zoom,
+        0.95_f64.powf(elapsed_seconds * 60.0),
+    )
 }
 
 /// Camera state and the observed projection/follow formulas from
@@ -129,10 +180,15 @@ impl Camera {
     }
 
     /// A conductor step boundary: apply the zoom pulse when the observed gate
-    /// matches (RENDER-BEHAVIOR §2).
-    pub(crate) fn on_step(&mut self, step: i32) {
-        if zoom_pulse_step(step) {
-            self.bop_multiplier = CAMERA_BOP_INTENSITY;
+    /// matches (RENDER-BEHAVIOR §2, mutable `SetCameraBop` config from
+    /// M6-CONTRACT §12.7). Returns whether the HUD zoom bump fired so the
+    /// caller can update its virtual HUD camera.
+    pub(crate) fn on_step(&mut self, step: i32, bop: &BopConfig, hud_zoom: f64) -> bool {
+        if bop.pulse(step, hud_zoom) {
+            self.bop_multiplier = bop.intensity;
+            true
+        } else {
+            false
         }
     }
 
@@ -388,20 +444,51 @@ mod tests {
         close(fixed[1], -36.0);
     }
 
+    /// M6-CONTRACT §12.7 approved correction: `Constants.hx` L251
+    /// `DEFAULT_ZOOM_OFFSET = 0` ("Zero beats (on-beat)"), not the frozen
+    /// RENDER-BEHAVIOR §2 value 1. The default gate pulses on steps 0, 16,
+    /// 32, … — the old offset-1 pulses at 12, 28, … are gone.
     #[test]
-    fn camera_pulse_gate_and_decay() {
-        assert!(zoom_pulse_step(12));
-        assert!(zoom_pulse_step(28));
-        assert!(zoom_pulse_step(-4));
-        assert!(!zoom_pulse_step(0));
-        assert!(!zoom_pulse_step(11));
-        assert!(!zoom_pulse_step(13));
-        assert!(!zoom_pulse_step(16));
+    fn camera_pulse_gate_uses_the_observed_zero_beat_offset() {
+        let bop = BopConfig::default();
+        assert_eq!(bop.offset, 0.0);
+        assert!(bop.pulse(0, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(bop.pulse(16, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(bop.pulse(32, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(!bop.pulse(12, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(!bop.pulse(28, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(!bop.pulse(11, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(!bop.pulse(15, DEFAULT_HUD_CAMERA_ZOOM));
+        // `camHUD.zoom < 1.35 * defaultHUDCameraZoom` disables the gate at
+        // the threshold (strict `<`).
+        assert!(!bop.pulse(16, MAX_RELATIVE_CAM_ZOOM * DEFAULT_HUD_CAMERA_ZOOM));
+        // `cameraZoomRate > 0` is required; rate 0 never pulses.
+        let frozen = BopConfig { rate: 0.0, ..bop };
+        assert!(!frozen.pulse(0, DEFAULT_HUD_CAMERA_ZOOM));
+    }
 
+    #[test]
+    fn camera_pulse_gate_consumes_the_mutable_rate_and_offset() {
+        // SetCameraBop rate 2 / offset 1: `(step + 4) % 8 == 0` pulses at
+        // steps 4, 12, 20, … (native float modulo).
+        let bop = BopConfig {
+            rate: 2.0,
+            offset: 1.0,
+            ..BopConfig::default()
+        };
+        assert!(bop.pulse(4, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(bop.pulse(12, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(!bop.pulse(8, DEFAULT_HUD_CAMERA_ZOOM));
+        assert!(!bop.pulse(0, DEFAULT_HUD_CAMERA_ZOOM));
+    }
+
+    #[test]
+    fn camera_pulse_decay_and_hud_zoom_decay_feed_each_other() {
         let mut camera = Camera::new(1.1);
-        camera.on_step(0);
+        let bop = BopConfig::default();
+        assert!(!camera.on_step(12, &bop, DEFAULT_HUD_CAMERA_ZOOM));
         close(camera.bop_multiplier, 1.0);
-        camera.on_step(12);
+        assert!(camera.on_step(16, &bop, DEFAULT_HUD_CAMERA_ZOOM));
         close(camera.bop_multiplier, 1.015);
         camera.decay(TICK_SECONDS);
         let expected = 1.0 + (1.015 - 1.0) * 0.95_f64.powf(0.06);
@@ -416,6 +503,15 @@ mod tests {
             1.0 + (1.015 - 1.0) * 0.95_f64.powf(0.96),
         );
         close(camera.zoom, 1.1 * camera.bop_multiplier);
+
+        // HUD zoom: a pulse bumps it, the decay block lerps it back toward
+        // the default. Both feed the `1.35 * default` gate.
+        let mut hud = DEFAULT_HUD_CAMERA_ZOOM;
+        hud += bop.hud_intensity * DEFAULT_HUD_CAMERA_ZOOM;
+        close(hud, 1.03);
+        let decayed = hud_zoom_decay(hud, TICK_SECONDS);
+        let factor = 0.95_f64.powf(0.06);
+        close(decayed, 1.0 + (1.03 - 1.0) * factor);
     }
 
     #[test]

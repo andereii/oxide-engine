@@ -107,6 +107,15 @@ pub enum RenderError {
     UnknownOpponentNote { tick_ms: u64, note_id: u32 },
     #[error("duplicate opponent hit for note id {note_id} at tick {tick_ms} ms")]
     DuplicateOpponentNote { tick_ms: u64, note_id: u32 },
+    #[error(
+        "scroll_speed row at {tick_ms} ms for {strumline} expects base_scroll {expected}, scene has {actual}"
+    )]
+    ScrollBaseMismatch {
+        tick_ms: u64,
+        strumline: &'static str,
+        expected: f64,
+        actual: f64,
+    },
     #[error("render adapter is {name:?}, not the pinned llvmpipe software raster")]
     AdapterNotPinned { name: String },
     #[error(

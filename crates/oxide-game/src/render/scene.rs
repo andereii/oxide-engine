@@ -11,16 +11,17 @@ use oxide_audio::conductor::{Conductor, Dispatch};
 use super::RenderError;
 use super::anim::CharacterScheduler;
 use super::geometry::{
-    self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, Camera, GAME_HEIGHT, HALF_HEIGHT, HALF_WIDTH,
-    OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y, SUSTAIN_CAP_BOTTOM_CLIP,
-    SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP, TICK_SECONDS, Vec2, hold_column_uv_for,
-    hold_columns, note_top_left, note_y_offset, receptor_top_left, render_distance_ms,
-    sustain_height, sustain_held_top, sustain_top_left_x,
+    self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, BopConfig, Camera, DEFAULT_HUD_CAMERA_ZOOM,
+    GAME_HEIGHT, HALF_HEIGHT, HALF_WIDTH, OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y,
+    SUSTAIN_CAP_BOTTOM_CLIP, SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP, TICK_SECONDS, Vec2,
+    hold_column_uv_for, hold_columns, note_top_left, note_y_offset, receptor_top_left,
+    render_distance_ms, sustain_height, sustain_held_top, sustain_top_left_x,
 };
 use super::load::{
     LoadedCharacter, LoadedNote, LoadedNoteStyle, LoadedSlice, LoadedStageProp, PageImage,
     PropVisual, Role, Sheet, SpriteFrame,
 };
+use crate::eases::{EaseFn, resolve_ease};
 use crate::slice::{InputEvent, TraceEvent};
 
 /// Default note-style animation rate; the funkin note style has no per-animation
@@ -304,6 +305,258 @@ struct OpponentHold {
     end_ms: f64,
 }
 
+/// Strumline index in the native `playerStrumline`/`opponentStrumline` order.
+const LINE_PLAYER: usize = 0;
+const LINE_OPPONENT: usize = 1;
+
+#[derive(Debug, Clone, Copy)]
+struct FollowTween {
+    from: Vec2,
+    to: Vec2,
+    start_ms: f64,
+    duration_ms: f64,
+    ease: EaseFn,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ZoomTween {
+    from: f64,
+    to: f64,
+    start_ms: f64,
+    duration_ms: f64,
+    ease: EaseFn,
+}
+
+/// One per-strumline scroll-speed channel, matching
+/// `slice::events::ScrollState`'s advance/percent convention exactly.
+#[derive(Debug, Clone, Copy)]
+struct ScrollTween {
+    from: f64,
+    to: f64,
+    start_ms: f64,
+    duration_ms: f64,
+    ease: EaseFn,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScrollLine {
+    value: f64,
+    tween: Option<ScrollTween>,
+}
+
+/// Native `tweenScrollSpeed`/`cancelScrollSpeedTweens`/`prevScrollTargets`
+/// state (`PlayState.hx` L4039-4104) for the scene's own strumlines.
+#[derive(Debug, Clone)]
+struct ScrollState {
+    lines: [ScrollLine; 2],
+    /// Targets pushed by the immediately previous native call; a later event
+    /// cancels all tweens and snaps these lines back before applying.
+    prev_targets: Vec<(usize, f64)>,
+}
+
+impl ScrollState {
+    fn new(chart_scroll: f64) -> Self {
+        let line = ScrollLine {
+            value: chart_scroll,
+            tween: None,
+        };
+        Self {
+            lines: [line; 2],
+            prev_targets: Vec::new(),
+        }
+    }
+
+    /// Advances in-flight tweens to `now_ms` (native `super.update` runs
+    /// before the event dispatch in the same frame).
+    fn advance(&mut self, now_ms: f64) {
+        for line in &mut self.lines {
+            let Some(tween) = line.tween else {
+                continue;
+            };
+            if now_ms - tween.start_ms >= tween.duration_ms {
+                line.value = tween.to;
+                line.tween = None;
+            } else if now_ms > tween.start_ms {
+                let t = (now_ms - tween.start_ms) / tween.duration_ms;
+                line.value = tween.from + (tween.to - tween.from) * (tween.ease)(t);
+            }
+        }
+    }
+
+    fn value(&self, line: usize) -> f64 {
+        self.lines[line].value
+    }
+
+    /// `cancelScrollSpeedTweens()` + the `prevScrollTargets` snap loop.
+    fn cancel_and_snap(&mut self) {
+        for line in &mut self.lines {
+            line.tween = None;
+        }
+        let previous = std::mem::take(&mut self.prev_targets);
+        for (line, value) in previous {
+            self.lines[line].value = value;
+        }
+    }
+
+    fn set_value(&mut self, line: usize, value: f64) {
+        self.lines[line].value = value;
+        self.lines[line].tween = None;
+    }
+
+    fn start_tween(
+        &mut self,
+        line: usize,
+        now_ms: f64,
+        target: f64,
+        duration_ms: f64,
+        ease: EaseFn,
+    ) {
+        let base = self.lines[line].value;
+        self.lines[line].tween = Some(ScrollTween {
+            from: base,
+            to: target,
+            start_ms: now_ms,
+            duration_ms,
+            ease,
+        });
+    }
+
+    fn push_previous(&mut self, line: usize, target: f64) {
+        self.prev_targets.push((line, target));
+    }
+}
+
+/// One parsed `scroll_speed` row (M6-CONTRACT §12.4.1).
+struct ScrollRow {
+    strumline: &'static str,
+    line: usize,
+    target: f64,
+    base_scroll: f64,
+    duration: f64,
+    ease: Option<String>,
+}
+
+impl ScrollRow {
+    fn from_event(event: &TraceEvent) -> Result<Self, RenderError> {
+        let TraceEvent::ScrollSpeed {
+            strumline,
+            target,
+            base_scroll,
+            duration,
+            ease,
+            ..
+        } = event
+        else {
+            return Err(RenderError::Unsupported {
+                detail: "scroll row parser received a non-scroll event".to_string(),
+            });
+        };
+        let line = match *strumline {
+            "player" => LINE_PLAYER,
+            "opponent" => LINE_OPPONENT,
+            other => {
+                return Err(RenderError::Unsupported {
+                    detail: format!("scroll_speed row has unknown strumline {other:?}"),
+                });
+            }
+        };
+        if !target.is_finite()
+            || !base_scroll.is_finite()
+            || !duration.is_finite()
+            || *duration < 0.0
+        {
+            return Err(RenderError::Unsupported {
+                detail: format!(
+                    "scroll_speed row has invalid target/base/duration ({target}, {base_scroll}, {duration})"
+                ),
+            });
+        }
+        Ok(Self {
+            strumline,
+            line,
+            target: *target,
+            base_scroll: *base_scroll,
+            duration: *duration,
+            ease: ease.clone(),
+        })
+    }
+}
+
+enum ScrollEase {
+    Instant,
+    Named(EaseFn),
+}
+
+fn resolve_scroll_ease(ease: Option<&str>) -> Option<ScrollEase> {
+    let name = ease?;
+    if name == "INSTANT" {
+        Some(ScrollEase::Instant)
+    } else {
+        resolve_ease(name).map(|(_, function)| ScrollEase::Named(function))
+    }
+}
+
+/// Private camera event state (`docs/M6-CONTRACT.md` §12.7): follow point,
+/// follow tween + follow-enabled flag, zoom tween, mutable bop config, the
+/// virtual HUD zoom and the per-strumline scroll state.
+struct CameraEventState {
+    follow_focus: Vec2,
+    follow_enabled: bool,
+    follow_tween: Option<FollowTween>,
+    zoom_tween: Option<ZoomTween>,
+    bop: BopConfig,
+    hud_zoom: f64,
+    scroll: ScrollState,
+}
+
+impl CameraEventState {
+    fn new(follow_focus: Vec2, chart_scroll: f64) -> Self {
+        Self {
+            follow_focus,
+            follow_enabled: true,
+            follow_tween: None,
+            zoom_tween: None,
+            bop: BopConfig::default(),
+            hud_zoom: DEFAULT_HUD_CAMERA_ZOOM,
+            scroll: ScrollState::new(chart_scroll),
+        }
+    }
+
+    /// Native `super.update` position: follow/zoom/scroll tweens advance
+    /// BEFORE the conductor update and the event dispatch.
+    fn advance_tweens(&mut self, camera: &mut Camera, now_ms: f64) {
+        if let Some(tween) = self.follow_tween {
+            if now_ms - tween.start_ms >= tween.duration_ms {
+                camera.scroll = tween.to;
+                self.follow_tween = None;
+                // onComplete -> resetCamera(false, false): re-enable follow.
+                self.follow_enabled = true;
+            } else if now_ms > tween.start_ms {
+                let t = (now_ms - tween.start_ms) / tween.duration_ms;
+                let eased = (tween.ease)(t);
+                camera.scroll = [
+                    tween.from[0] + (tween.to[0] - tween.from[0]) * eased,
+                    tween.from[1] + (tween.to[1] - tween.from[1]) * eased,
+                ];
+            }
+        }
+        if let Some(tween) = self.zoom_tween {
+            if now_ms - tween.start_ms >= tween.duration_ms {
+                camera.current_zoom = tween.to;
+                self.zoom_tween = None;
+            } else if now_ms > tween.start_ms {
+                let t = (now_ms - tween.start_ms) / tween.duration_ms;
+                camera.current_zoom = tween.from + (tween.to - tween.from) * (tween.ease)(t);
+            }
+        }
+        self.scroll.advance(now_ms);
+    }
+
+    fn decay_hud(&mut self, elapsed_seconds: f64) {
+        self.hud_zoom = geometry::hud_zoom_decay(self.hud_zoom, elapsed_seconds);
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct LineState {
     pressed: [bool; 4],
@@ -366,7 +619,6 @@ pub(crate) struct Scene {
     /// Opponent note ids (compacted opponent-only, matching the sim's
     /// per-strumline convention) mapped to `notes` indexes.
     opponent_note_indices: Vec<usize>,
-    scroll_speed: f64,
     sim_ms: f64,
     last_tick: Option<u64>,
     dead: bool,
@@ -374,7 +626,8 @@ pub(crate) struct Scene {
     opponent_line: LineState,
     player_holds: [Option<PlayerHold>; 4],
     opponent_holds: [Option<OpponentHold>; 4],
-    follow_focus: Vec2,
+    /// Follow/zoom/bop/scroll event state (M6-CONTRACT §12.7).
+    camera_events: CameraEventState,
 }
 
 impl Scene {
@@ -506,7 +759,6 @@ impl Scene {
                     .collect(),
                 player_note_indices,
                 opponent_note_indices,
-                scroll_speed,
                 sim_ms: 0.0,
                 last_tick: None,
                 dead: false,
@@ -514,7 +766,10 @@ impl Scene {
                 opponent_line: LineState::default(),
                 player_holds: [None, None, None, None],
                 opponent_holds: [None, None, None, None],
-                follow_focus,
+                // Rowless streams keep the frozen M5 initialization; the only
+                // sanctioned change is the M6-CONTRACT §12.7 bop default
+                // (cameraZoomRateOffset 1 -> 0), which lives in `BopConfig`.
+                camera_events: CameraEventState::new(follow_focus, scroll_speed),
             },
             pages,
         ))
@@ -561,14 +816,36 @@ impl Scene {
 
         self.last_tick = Some(sim_ms);
         self.sim_ms = sim_ms as f64;
+
+        // Native per-tick order (M6-CONTRACT §12.7): `super.update` advances
+        // the follow/zoom/scroll tweens FIRST, then the conductor update runs
+        // the bop gate, then the decay/zoom-assign block, then the event rows
+        // (processSongEvents), then the follow lerp at end-of-step.
+        self.camera_events
+            .advance_tweens(&mut self.camera, self.sim_ms);
+
         let dispatches = self.conductor.update(Some(self.sim_ms), false, false, 0.0);
         if self.dead {
-            self.camera.decay(TICK_SECONDS);
+            // GameOverSubState freezes the native camera updates; keep the
+            // frozen M5 decay only when the bop rate is active (native
+            // `subState == null && cameraZoomRate > 0.0`).
+            if self.camera_events.bop.rate > 0.0 {
+                self.camera.decay(TICK_SECONDS);
+                self.camera_events.decay_hud(TICK_SECONDS);
+            }
             return Ok(());
         }
         for dispatch in dispatches {
             if let Dispatch::Step(step) = dispatch {
-                self.camera.on_step(step);
+                if self
+                    .camera
+                    .on_step(step, &self.camera_events.bop, self.camera_events.hud_zoom)
+                {
+                    // `camHUD.zoom += hudCameraZoomIntensity *
+                    // defaultHUDCameraZoom` (`PlayState.hx` L1858-1859).
+                    self.camera_events.hud_zoom +=
+                        self.camera_events.bop.hud_intensity * DEFAULT_HUD_CAMERA_ZOOM;
+                }
                 for character in &mut self.characters {
                     character.scheduler.on_step(step);
                 }
@@ -580,9 +857,13 @@ impl Scene {
             }
         }
 
-        // Per-frame order from RENDER-BEHAVIOR §6: camera decay right after
-        // the conductor update, then strumline/input, then processNotes.
-        self.camera.decay(TICK_SECONDS);
+        // Decay/zoom-assign block (`PlayState.hx` L1213-1228): gated by
+        // `cameraZoomRate > 0.0`; when the rate is zero neither the camera
+        // bop nor the virtual HUD zoom decays and the gate never pulses.
+        if self.camera_events.bop.rate > 0.0 {
+            self.camera.decay(TICK_SECONDS);
+            self.camera_events.decay_hud(TICK_SECONDS);
+        }
 
         for input in inputs {
             match input {
@@ -603,9 +884,7 @@ impl Scene {
             }
         }
 
-        for event in events {
-            self.process_event(event)?;
-        }
+        self.process_events(events)?;
 
         self.trigger_opponent_notes();
         // Strumline.hx:653-669: an opponent hold that reached its end no
@@ -626,8 +905,296 @@ impl Scene {
                 scheduler.update(TICK_SECONDS, step_length_ms);
             }
         }
-        self.camera.follow(self.follow_focus, TICK_SECONDS);
+        // The follow lerp runs only while the native camera target is set; a
+        // follow tween disables it (`camera.target = null`,
+        // `tweenCameraToFollowPoint`).
+        if self.camera_events.follow_enabled {
+            self.camera
+                .follow(self.camera_events.follow_focus, TICK_SECONDS);
+        }
         Ok(())
+    }
+
+    /// Applies one tick's chart-event rows in dispatch order. Consecutive
+    /// `scroll_speed` rows belong to one native `tweenScrollSpeed` call (a
+    /// 'both' event emits player then opponent), so they are batched.
+    fn process_events(&mut self, events: &[TraceEvent]) -> Result<(), RenderError> {
+        let mut index = 0;
+        while index < events.len() {
+            if matches!(events[index], TraceEvent::ScrollSpeed { .. }) {
+                let mut rows = Vec::new();
+                while let Some(event) = events.get(index) {
+                    if !matches!(event, TraceEvent::ScrollSpeed { .. }) {
+                        break;
+                    }
+                    rows.push(ScrollRow::from_event(event)?);
+                    index += 1;
+                }
+                self.apply_scroll_rows(&rows)?;
+            } else {
+                self.process_event(&events[index])?;
+                index += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// `FocusCameraSongEvent.hx` L65-158 with the M6-CONTRACT §12.6 finding-1
+    /// rule: the target is resolved from the scene's OWN rigs, never from the
+    /// row's `world_focus`; a bf/dad/gf row whose character is absent applies
+    /// nothing (native null-character early return).
+    fn apply_camera_focus(
+        &mut self,
+        target_kind: &str,
+        x: f64,
+        y: f64,
+        duration: f64,
+        ease_kind: &str,
+        ease: Option<&str>,
+    ) -> Result<(), RenderError> {
+        let focus = match target_kind {
+            "bf" => self.character(Role::Player).map(|rig| rig.camera_focus),
+            "dad" => self.character(Role::Opponent).map(|rig| rig.camera_focus),
+            "gf" => self.character(Role::Girlfriend).map(|rig| rig.camera_focus),
+            // Unknown char ids fall through to the literal position in the
+            // native switch (the observed quirk).
+            "position" | "unknown" => Some([0.0, 0.0]),
+            other => {
+                return Err(RenderError::Unsupported {
+                    detail: format!("camera_focus row has unknown target_kind {other:?}"),
+                });
+            }
+        };
+        let Some(focus) = focus else {
+            return Ok(());
+        };
+        let target = [x + focus[0], y + focus[1]];
+        if !target[0].is_finite() || !target[1].is_finite() {
+            return Err(RenderError::Unsupported {
+                detail: format!("camera_focus target {target:?} is not finite"),
+            });
+        }
+
+        match ease_kind {
+            "classic" => {
+                // resetCamera(false, false, false) + cancelCameraFollowTween +
+                // followPoint.setPosition(target): re-follow, retarget, no snap.
+                self.camera_events.follow_tween = None;
+                self.camera_events.follow_enabled = true;
+                self.camera_events.follow_focus = target;
+            }
+            "instant" => {
+                // tweenCameraToPosition(target, 0) -> resetCamera(false,false):
+                // cancel tween, re-follow and snap.
+                self.camera_events.follow_tween = None;
+                self.camera_events.follow_enabled = true;
+                self.camera_events.follow_focus = target;
+                self.camera.focus_on(target);
+            }
+            "named" => {
+                let Some(name) = ease else {
+                    // Invalid ease: native early return, no state change.
+                    return Ok(());
+                };
+                let Some((_, function)) = resolve_ease(name) else {
+                    return Ok(());
+                };
+                let duration_ms = self.conductor.step_length_ms() * duration;
+                self.start_follow_tween(target, duration_ms, function)?;
+            }
+            other => {
+                return Err(RenderError::Unsupported {
+                    detail: format!("camera_focus row has unknown ease_kind {other:?}"),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn start_follow_tween(
+        &mut self,
+        target: Vec2,
+        duration_ms: f64,
+        ease: EaseFn,
+    ) -> Result<(), RenderError> {
+        if !duration_ms.is_finite() || duration_ms < 0.0 {
+            return Err(RenderError::Unsupported {
+                detail: format!("camera_focus duration {duration_ms} ms is invalid"),
+            });
+        }
+        self.camera_events.follow_focus = target;
+        self.camera_events.follow_tween = None;
+        if duration_ms <= 0.0 {
+            // `tweenCameraToFollowPoint(0)` -> resetCamera(false, false).
+            self.camera_events.follow_enabled = true;
+            self.camera.focus_on(target);
+        } else {
+            self.camera_events.follow_enabled = false;
+            self.camera_events.follow_tween = Some(FollowTween {
+                from: self.camera.scroll,
+                to: [target[0] - HALF_WIDTH, target[1] - HALF_HEIGHT],
+                start_ms: self.sim_ms,
+                duration_ms,
+                ease,
+            });
+        }
+        Ok(())
+    }
+
+    /// `ZoomCameraSongEvent.hx` L37-79 / `tweenCameraZoom`
+    /// (`PlayState.hx` L3999-4014).
+    fn apply_camera_zoom(
+        &mut self,
+        target: f64,
+        duration: f64,
+        ease: Option<&str>,
+    ) -> Result<(), RenderError> {
+        let Some(name) = ease else {
+            // Invalid ease: native early return, no cancel/state change.
+            return Ok(());
+        };
+        if !target.is_finite() || !duration.is_finite() || duration < 0.0 {
+            return Err(RenderError::Unsupported {
+                detail: format!("camera_zoom target/duration ({target}, {duration}) is invalid"),
+            });
+        }
+        if name == "INSTANT" {
+            // tweenCameraZoom(target, 0): cancel the tween, set instantly.
+            self.camera_events.zoom_tween = None;
+            self.camera.current_zoom = target;
+            return Ok(());
+        }
+        let Some((_, function)) = resolve_ease(name) else {
+            return Ok(());
+        };
+        self.camera_events.zoom_tween = None;
+        let duration_ms = self.conductor.step_length_ms() * duration;
+        if duration_ms <= 0.0 {
+            self.camera.current_zoom = target;
+        } else {
+            self.camera_events.zoom_tween = Some(ZoomTween {
+                from: self.camera.current_zoom,
+                to: target,
+                start_ms: self.sim_ms,
+                duration_ms,
+                ease: function,
+            });
+        }
+        Ok(())
+    }
+
+    /// `PlayAnimationSongEvent.hx` L25-76: character targets use
+    /// `playAnimation(anim, force, force)` (restart = force, ignoreOther =
+    /// force); prop targets use the plain `animation.play(anim, force)`.
+    fn apply_play_animation(
+        &mut self,
+        anim: &str,
+        force: bool,
+        resolved_kind: &str,
+        skipped_old: bool,
+    ) {
+        if skipped_old {
+            return;
+        }
+        match resolved_kind {
+            "bf" => {
+                if let Some(rig) = self.character_mut(Role::Player) {
+                    rig.scheduler.play_with_ignore_other(anim, force, force);
+                }
+            }
+            "dad" => {
+                if let Some(rig) = self.character_mut(Role::Opponent) {
+                    rig.scheduler.play_with_ignore_other(anim, force, force);
+                }
+            }
+            "gf" => {
+                if let Some(rig) = self.character_mut(Role::Girlfriend) {
+                    rig.scheduler.play_with_ignore_other(anim, force, force);
+                }
+            }
+            kind => {
+                let Some(name) = kind.strip_prefix("prop:") else {
+                    // 'none' and any unresolved target apply nothing.
+                    return;
+                };
+                let Some(prop) = self.props.iter_mut().find(|prop| prop.prop.name == name) else {
+                    return;
+                };
+                if let Some(scheduler) = &mut prop.scheduler {
+                    // StageProp is not a Bopper: exact name, no suffix
+                    // stripping and no animation lock.
+                    scheduler.play_exact(anim, force);
+                }
+            }
+        }
+    }
+
+    /// Native `tweenScrollSpeed` batches the target strumlines of one event;
+    /// the sim emits one row per strumline. A player row immediately followed
+    /// by an opponent row is that same native call; any other adjacent pair is
+    /// a separate event.
+    fn apply_scroll_rows(&mut self, rows: &[ScrollRow]) -> Result<(), RenderError> {
+        let mut start = 0;
+        while start < rows.len() {
+            let end = if start + 1 < rows.len()
+                && rows[start].line == LINE_PLAYER
+                && rows[start + 1].line == LINE_OPPONENT
+            {
+                start + 2
+            } else {
+                start + 1
+            };
+            self.apply_scroll_event(&rows[start..end])?;
+            start = end;
+        }
+        Ok(())
+    }
+
+    fn apply_scroll_event(&mut self, rows: &[ScrollRow]) -> Result<(), RenderError> {
+        let resolved: Vec<Option<ScrollEase>> = rows
+            .iter()
+            .map(|row| resolve_scroll_ease(row.ease.as_deref()))
+            .collect();
+        // Native `tweenScrollSpeed` cancels + snaps previous targets once for
+        // the whole strumline list. An unresolved ease early-returns before
+        // that call, so it must not cancel/snap.
+        if resolved.iter().any(Option::is_some) {
+            self.camera_events.scroll.cancel_and_snap();
+        }
+        for (row, ease) in rows.iter().zip(resolved) {
+            let actual = self.camera_events.scroll.value(row.line);
+            if actual != row.base_scroll {
+                return Err(RenderError::ScrollBaseMismatch {
+                    tick_ms: self.last_tick.unwrap_or(0),
+                    strumline: row.strumline,
+                    expected: row.base_scroll,
+                    actual,
+                });
+            }
+            let Some(ease) = ease else {
+                // Unresolved ease: native early return, no state change.
+                continue;
+            };
+            let duration_ms = self.conductor.step_length_ms() * row.duration;
+            match ease {
+                ScrollEase::Instant => self.camera_events.scroll.set_value(row.line, row.target),
+                ScrollEase::Named(function) if duration_ms > 0.0 => self
+                    .camera_events
+                    .scroll
+                    .start_tween(row.line, self.sim_ms, row.target, duration_ms, function),
+                ScrollEase::Named(_) => self.camera_events.scroll.set_value(row.line, row.target),
+            }
+            self.camera_events
+                .scroll
+                .push_previous(row.line, row.target);
+        }
+        Ok(())
+    }
+
+    fn scroll_speed_for(&self, opponent: bool) -> f64 {
+        self.camera_events
+            .scroll
+            .value(if opponent { LINE_OPPONENT } else { LINE_PLAYER })
     }
 
     fn process_event(&mut self, event: &TraceEvent) -> Result<(), RenderError> {
@@ -748,15 +1315,66 @@ impl Scene {
                 // scene at the substate boundary; the sim stops dispatching.
                 self.dead = true;
             }
-            // Schema-3 chart-event rows are consumed by the 6C scene
-            // integration task; the phase-2b/6A scene ignores them for now.
-            TraceEvent::CameraFocus { .. }
-            | TraceEvent::CameraZoom { .. }
-            | TraceEvent::CameraBop { .. }
-            | TraceEvent::PlayAnimation { .. }
-            | TraceEvent::ScrollSpeed { .. }
-            | TraceEvent::HealthIcon { .. }
-            | TraceEvent::UnknownEvent { .. } => {}
+            TraceEvent::CameraFocus {
+                target_kind,
+                x,
+                y,
+                duration,
+                ease_kind,
+                ease,
+                ..
+            } => {
+                self.apply_camera_focus(
+                    target_kind,
+                    *x,
+                    *y,
+                    *duration,
+                    ease_kind,
+                    ease.as_deref(),
+                )?;
+            }
+            TraceEvent::CameraZoom {
+                resolved_target_zoom,
+                duration,
+                ease,
+                ..
+            } => {
+                self.apply_camera_zoom(*resolved_target_zoom, *duration, ease.as_deref())?;
+            }
+            TraceEvent::CameraBop {
+                camera_bop_intensity,
+                hud_intensity,
+                rate,
+                offset,
+                ..
+            } => {
+                // SetCameraBopSongEvent.hx L40-53 replaces the mutable
+                // config; the HUD bump itself happens at the next step gate.
+                self.camera_events.bop = BopConfig {
+                    intensity: *camera_bop_intensity,
+                    hud_intensity: *hud_intensity,
+                    rate: *rate,
+                    offset: *offset,
+                };
+            }
+            TraceEvent::PlayAnimation {
+                anim,
+                force,
+                resolved_kind,
+                skipped_old,
+                ..
+            } => {
+                self.apply_play_animation(anim, *force, resolved_kind, *skipped_old);
+            }
+            // Batched by `process_events` (one native tweenScrollSpeed call
+            // can cover two strumlines).
+            TraceEvent::ScrollSpeed { .. } => {}
+            // Record-only ([D] M6-CONTRACT §12.4.5): the HUD health icon
+            // sprite/configure semantics are the 6D deliverable.
+            TraceEvent::HealthIcon { .. } => {}
+            // EnableMask / sserafim / any no-handler kind: record-only
+            // (M6-CONTRACT §12.2).
+            TraceEvent::UnknownEvent { .. } => {}
             TraceEvent::OpponentHit {
                 note_id,
                 note_direction,
@@ -840,6 +1458,12 @@ impl Scene {
 
     /// Loaded characters keep their role; the girlfriend role is absent when
     /// the metadata selects none.
+    fn character(&self, role: Role) -> Option<&CharacterRig> {
+        self.characters
+            .iter()
+            .find(|character| character.role == role)
+    }
+
     fn character_mut(&mut self, role: Role) -> Option<&mut CharacterRig> {
         self.characters
             .iter_mut()
@@ -1114,7 +1738,8 @@ impl Scene {
 
     fn draw_holds(&self) -> Vec<Quad> {
         let mut quads = Vec::new();
-        let speed = self.scroll_speed;
+        let player_speed = self.scroll_speed_for(false);
+        let opponent_speed = self.scroll_speed_for(true);
         let held_top = sustain_held_top(STRUMLINE_Y);
         // Player: held trails anchor at the fixed line and are consumed from
         // the top; remaining <= 10 ms hides the trail (Strumline.hx:729-733).
@@ -1127,7 +1752,7 @@ impl Scene {
                     PLAYER_STRUMLINE_X,
                     direction,
                     held_top,
-                    sustain_height(hold.remaining_ms, speed),
+                    sustain_height(hold.remaining_ms, player_speed),
                 );
             }
             if let Some(hold) = &self.opponent_holds[direction] {
@@ -1140,7 +1765,7 @@ impl Scene {
                     OPPONENT_STRUMLINE_X,
                     direction,
                     held_top,
-                    sustain_height(remaining, speed),
+                    sustain_height(remaining, opponent_speed),
                 );
             }
         }
@@ -1148,9 +1773,14 @@ impl Scene {
         // anchor moved by the note scroll (`Strumline.hx:764-769`: `this.y -
         // INITIAL_OFFSET + getNoteY(...) + STRUMLINE_SIZE / 2`); using the
         // note sprite's bottom instead made the trail ~58 px low and jump
-        // into place at the hit.
-        let render_distance = render_distance_ms(speed);
+        // into place at the hit. Each line uses its own scrollSpeed value.
         for note in &self.notes {
+            let speed = if note.note.opponent {
+                opponent_speed
+            } else {
+                player_speed
+            };
+            let render_distance = render_distance_ms(speed);
             if note.hit
                 || note.note.sustain_ms <= 0.0
                 || note.note.time > self.sim_ms + render_distance
@@ -1261,8 +1891,9 @@ impl Scene {
     fn draw_notes(&self) -> Vec<Quad> {
         let mut quads = Vec::new();
         let scale = self.note_style.note_scale;
-        let render_distance = render_distance_ms(self.scroll_speed);
         for note in &self.notes {
+            let speed = self.scroll_speed_for(note.note.opponent);
+            let render_distance = render_distance_ms(speed);
             if note.hit || note.note.time > self.sim_ms + render_distance {
                 continue;
             }
@@ -1280,7 +1911,7 @@ impl Scene {
                 width,
                 self.sim_ms,
                 note.note.time,
-                self.scroll_speed,
+                speed,
             );
             if !visible(top[1], height) {
                 continue;
@@ -2098,5 +2729,725 @@ mod tests {
             opponent.confirm_until_ms[0],
             100.0 + super::super::geometry::RECEPTOR_CONFIRM_MS
         );
+    }
+
+    // --- M6-CONTRACT §12.7 scene event consumption -------------------------
+
+    use std::collections::BTreeMap;
+
+    use crate::render::anim::AnimationDef;
+    use crate::render::load::ReceptorFrames;
+    use oxide_audio::conductor::TimeChange;
+
+    fn animation(frames: &[usize], looped: bool) -> AnimationDef {
+        AnimationDef::test(frames, 24.0, looped)
+    }
+
+    fn test_character(
+        role: Role,
+        position: (f64, f64),
+        animations: BTreeMap<String, AnimationDef>,
+        starting_animation: Option<&str>,
+    ) -> LoadedCharacter {
+        LoadedCharacter {
+            role,
+            id: role.label().to_string(),
+            sheets: Vec::new(),
+            bounds: [0.0, 0.0, 100.0, 200.0],
+            sprite_hitbox: None,
+            animations,
+            data_offsets: (0.0, 0.0),
+            camera_offsets: (0.0, 0.0),
+            sing_time_steps: 8.0,
+            dance_every: 1.0,
+            scale: 1.0,
+            flip_x: false,
+            starting_animation: starting_animation.map(str::to_owned),
+            slot: super::super::load::LoadedSlot {
+                z_index: 0.0,
+                position,
+                scale: 1.0,
+                camera_offsets: (0.0, 0.0),
+                scroll: (1.0, 1.0),
+            },
+        }
+    }
+
+    fn test_note_style() -> LoadedNoteStyle {
+        let frame = SpriteFrame {
+            page: 0,
+            rect: [0, 0, 10, 10],
+            dest_offset: [0, 0],
+            dest_size: [10, 10],
+            rotated: false,
+        };
+        let receptors = ReceptorFrames {
+            static_frames: vec![frame],
+            press_frames: vec![frame],
+            confirm_frames: vec![frame],
+            confirm_hold_frames: vec![frame],
+        };
+        LoadedNoteStyle {
+            note_scale: 1.0,
+            note_frames: [frame; 4],
+            note_page_size: [100.0, 100.0],
+            note_hitbox_dest: [10.0, 10.0],
+            receptor_scale: 1.0,
+            receptor_offsets: (0.0, 0.0),
+            receptors: [
+                receptors.clone(),
+                receptors.clone(),
+                receptors.clone(),
+                receptors,
+            ],
+            receptor_page: 0,
+            receptor_page_size: [100.0, 100.0],
+            receptor_hitbox_dest: [10.0, 10.0],
+            hold_page: 0,
+            hold_page_size: [80.0, 10.0],
+            hold_scale: 1.0,
+            hold_offsets: (0.0, 0.0),
+            hold_width: 10.0,
+        }
+    }
+
+    fn test_scene_with(
+        characters: Vec<LoadedCharacter>,
+        props: Vec<LoadedStageProp>,
+        chart_scroll: f64,
+    ) -> Scene {
+        let loaded = LoadedSlice {
+            pages: Vec::new(),
+            stage_zoom: 1.1,
+            props,
+            characters,
+            note_style: test_note_style(),
+            notes: Vec::new(),
+            scroll_speed: chart_scroll,
+            conductor_changes: vec![TimeChange {
+                time_stamp: 0.0,
+                beat_time: 0.0,
+                bpm: 100.0,
+                time_signature_num: 4,
+                time_signature_den: 4,
+            }],
+            player_vocals: Vec::new(),
+            opponent_vocals: Vec::new(),
+        };
+        Scene::new(loaded).expect("synthetic scene builds").0
+    }
+
+    fn bf_animations() -> BTreeMap<String, AnimationDef> {
+        let mut animations = BTreeMap::new();
+        animations.insert("idle".to_string(), animation(&[0, 1], true));
+        animations.insert("hey".to_string(), animation(&[5, 6], false));
+        animations.insert("singLEFT".to_string(), animation(&[1], false));
+        animations
+    }
+
+    fn default_scene() -> Scene {
+        test_scene_with(
+            vec![
+                test_character(Role::Player, (100.0, 200.0), bf_animations(), Some("idle")),
+                test_character(Role::Opponent, (300.0, 400.0), BTreeMap::new(), None),
+                test_character(Role::Girlfriend, (500.0, 600.0), BTreeMap::new(), None),
+            ],
+            Vec::new(),
+            1.5,
+        )
+    }
+
+    fn step_empty(scene: &mut Scene, from: u64, to: u64) {
+        for tick in from..=to {
+            scene.step(tick, &[], &[]).expect("scene step");
+        }
+    }
+
+    fn camera_focus_row(
+        sim: u64,
+        target_kind: &'static str,
+        x: f64,
+        y: f64,
+        duration: f64,
+        ease_kind: &'static str,
+        ease: Option<&str>,
+    ) -> TraceEvent {
+        TraceEvent::CameraFocus {
+            schema: "3",
+            kind: "camera_focus",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            target_char: 0,
+            target_kind,
+            x,
+            y,
+            world_focus: [0.0, 0.0],
+            duration,
+            ease_kind,
+            ease: ease.map(str::to_owned),
+            ease_dir: None,
+        }
+    }
+
+    fn camera_zoom_row(
+        sim: u64,
+        resolved_target_zoom: f64,
+        duration: f64,
+        ease: Option<&str>,
+    ) -> TraceEvent {
+        TraceEvent::CameraZoom {
+            schema: "3",
+            kind: "camera_zoom",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            zoom: resolved_target_zoom,
+            mode: "direct",
+            resolved_target_zoom,
+            duration,
+            ease: ease.map(str::to_owned),
+            ease_dir: None,
+        }
+    }
+
+    fn camera_bop_row(
+        sim: u64,
+        intensity: f64,
+        hud_intensity: f64,
+        rate: f64,
+        offset: f64,
+    ) -> TraceEvent {
+        TraceEvent::CameraBop {
+            schema: "3",
+            kind: "camera_bop",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            intensity: 1.0,
+            camera_bop_intensity: intensity,
+            hud_intensity,
+            rate,
+            offset,
+        }
+    }
+
+    fn scroll_row(
+        sim: u64,
+        strumline: &'static str,
+        target: f64,
+        base_scroll: f64,
+        duration: f64,
+        ease: Option<&str>,
+    ) -> TraceEvent {
+        TraceEvent::ScrollSpeed {
+            schema: "3",
+            kind: "scroll_speed",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            strumline,
+            target,
+            absolute: true,
+            base_scroll,
+            duration,
+            ease: ease.map(str::to_owned),
+            ease_dir: None,
+        }
+    }
+
+    fn play_animation_row(
+        sim: u64,
+        anim: &str,
+        force: bool,
+        resolved_kind: &str,
+        skipped_old: bool,
+    ) -> TraceEvent {
+        TraceEvent::PlayAnimation {
+            schema: "3",
+            kind: "play_animation",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            target: "bf".to_string(),
+            anim: anim.to_string(),
+            force,
+            resolved_kind: resolved_kind.to_string(),
+            skipped_old,
+        }
+    }
+
+    /// Named-ease FocusCamera: the follow tween advances from the CURRENT
+    /// scroll, disables following while active, then on completion re-enables
+    /// following and snaps to `target - (640, 360)`.
+    #[test]
+    fn camera_focus_named_tween_advances_and_snaps_on_completion() {
+        let mut scene = default_scene();
+        scene
+            .step(
+                0,
+                &[camera_focus_row(
+                    0,
+                    "bf",
+                    0.0,
+                    0.0,
+                    4.0,
+                    "named",
+                    Some("linear"),
+                )],
+                &[],
+            )
+            .expect("focus row applies");
+        // 4 steps at 100 bpm = 600 ms. Follow is disabled during the tween.
+        assert!(!scene.camera_events.follow_enabled);
+        assert_eq!(scene.camera_events.follow_focus, [100.0, 100.0]);
+        close(scene.camera.scroll[0], -340.0);
+        close(scene.camera.scroll[1], -60.0);
+
+        step_empty(&mut scene, 1, 300);
+        close(scene.camera.scroll[0], -440.0);
+        close(scene.camera.scroll[1], -160.0);
+        assert!(!scene.camera_events.follow_enabled);
+
+        step_empty(&mut scene, 301, 600);
+        close(scene.camera.scroll[0], -540.0);
+        close(scene.camera.scroll[1], -260.0);
+        assert!(scene.camera_events.follow_enabled);
+        assert!(scene.camera_events.follow_tween.is_none());
+    }
+
+    #[test]
+    fn camera_focus_instant_snaps_and_classic_retargets_without_snap() {
+        let mut scene = default_scene();
+        scene
+            .step(
+                0,
+                &[camera_focus_row(0, "dad", 10.0, 20.0, 4.0, "instant", None)],
+                &[],
+            )
+            .expect("instant focus row applies");
+        assert!(scene.camera_events.follow_enabled);
+        assert_eq!(scene.camera_events.follow_focus, [310.0, 320.0]);
+        close(scene.camera.scroll[0], -330.0);
+        close(scene.camera.scroll[1], -40.0);
+
+        // CLASSIC cancels an active tween, re-follows and retargets without a
+        // snap; the end-of-step follow lerp starts converging.
+        let mut scene = default_scene();
+        scene
+            .step(
+                0,
+                &[camera_focus_row(
+                    0,
+                    "bf",
+                    0.0,
+                    0.0,
+                    4.0,
+                    "named",
+                    Some("linear"),
+                )],
+                &[],
+            )
+            .expect("named focus row applies");
+        step_empty(&mut scene, 1, 101);
+        scene
+            .step(
+                102,
+                &[camera_focus_row(102, "gf", 0.0, 0.0, 4.0, "classic", None)],
+                &[],
+            )
+            .expect("classic focus row applies");
+        assert!(scene.camera_events.follow_enabled);
+        assert!(scene.camera_events.follow_tween.is_none());
+        assert_eq!(scene.camera_events.follow_focus, [500.0, 500.0]);
+        let factor = 1.0 - (1.0 - super::super::geometry::CAMERA_FOLLOW_LERP).powf(0.06);
+        let target = [500.0 - HALF_WIDTH, 500.0 - HALF_HEIGHT];
+        // The classic row runs AFTER the tick's tween advance: at 102 ms the
+        // linear tween from [-340, -60] to [-540, -260] is at t = 0.17.
+        let t = 102.0 / 600.0;
+        let before = [-340.0 - 200.0 * t, -60.0 - 200.0 * t];
+        close(
+            scene.camera.scroll[0],
+            before[0] + (target[0] - before[0]) * factor,
+        );
+        close(
+            scene.camera.scroll[1],
+            before[1] + (target[1] - before[1]) * factor,
+        );
+    }
+
+    /// §12.6 finding 1: the scene consults its own rigs; a bf/dad/gf row for
+    /// an absent role applies nothing, while 'position'/'unknown' target the
+    /// literal pair.
+    #[test]
+    fn camera_focus_missing_character_is_a_noop_and_position_uses_the_literal() {
+        let mut scene = test_scene_with(
+            vec![
+                test_character(Role::Player, (100.0, 200.0), BTreeMap::new(), None),
+                test_character(Role::Opponent, (300.0, 400.0), BTreeMap::new(), None),
+            ],
+            Vec::new(),
+            1.5,
+        );
+        let scroll = scene.camera.scroll;
+        scene
+            .step(
+                0,
+                &[camera_focus_row(0, "gf", 7.0, 8.0, 4.0, "instant", None)],
+                &[],
+            )
+            .expect("missing-gf row is a no-op");
+        assert_eq!(scene.camera_events.follow_focus, [300.0, 300.0]);
+        assert_eq!(scene.camera.scroll, scroll);
+
+        scene
+            .step(
+                1,
+                &[camera_focus_row(
+                    1, "position", 100.0, 200.0, 4.0, "instant", None,
+                )],
+                &[],
+            )
+            .expect("position row applies");
+        assert_eq!(scene.camera_events.follow_focus, [100.0, 200.0]);
+        close(scene.camera.scroll[0], -540.0);
+        close(scene.camera.scroll[1], -160.0);
+
+        scene
+            .step(
+                2,
+                &[camera_focus_row(
+                    2, "unknown", 30.0, 40.0, 4.0, "instant", None,
+                )],
+                &[],
+            )
+            .expect("unknown row applies the literal target");
+        assert_eq!(scene.camera_events.follow_focus, [30.0, 40.0]);
+        close(scene.camera.scroll[0], -610.0);
+        close(scene.camera.scroll[1], -320.0);
+    }
+
+    #[test]
+    fn camera_focus_unresolved_ease_applies_nothing() {
+        let mut scene = default_scene();
+        let scroll = scene.camera.scroll;
+        scene
+            .step(
+                0,
+                &[camera_focus_row(0, "bf", 10.0, 20.0, 4.0, "named", None)],
+                &[],
+            )
+            .expect("unresolved ease row is a no-op");
+        assert_eq!(scene.camera_events.follow_focus, [300.0, 300.0]);
+        assert_eq!(scene.camera.scroll, scroll);
+        assert!(scene.camera_events.follow_enabled);
+    }
+
+    #[test]
+    fn camera_zoom_instant_tween_and_unresolved_ease() {
+        // INSTANT sets currentCameraZoom; the rendered zoom is assigned in
+        // the NEXT tick's decay block.
+        let mut scene = default_scene();
+        scene
+            .step(0, &[camera_zoom_row(0, 1.5, 4.0, Some("INSTANT"))], &[])
+            .expect("instant zoom applies");
+        close(scene.camera.current_zoom, 1.5);
+        close(scene.camera.zoom, 1.1);
+        step_empty(&mut scene, 1, 1);
+        close(scene.camera.zoom, 1.5);
+
+        // Named linear tween over 4 steps (600 ms).
+        let mut scene = default_scene();
+        scene
+            .step(0, &[camera_zoom_row(0, 2.0, 4.0, Some("linear"))], &[])
+            .expect("zoom tween starts");
+        step_empty(&mut scene, 1, 300);
+        close(scene.camera.current_zoom, 1.55);
+        step_empty(&mut scene, 301, 600);
+        close(scene.camera.current_zoom, 2.0);
+        step_empty(&mut scene, 601, 601);
+        close(scene.camera.zoom, 2.0);
+
+        // Unresolved ease (null) is a native early return: no cancel/state.
+        let mut scene = default_scene();
+        scene
+            .step(0, &[camera_zoom_row(0, 3.0, 4.0, None)], &[])
+            .expect("unresolved zoom row is a no-op");
+        close(scene.camera.current_zoom, 1.1);
+        assert!(scene.camera_events.zoom_tween.is_none());
+    }
+
+    /// Mutable `SetCameraBop`: the gate pulses on the configured rate/offset,
+    /// the HUD zoom bump feeds the 1.35 gate, and rate <= 0 freezes both the
+    /// bop decay and the HUD zoom.
+    #[test]
+    fn camera_bop_gate_hud_decay_and_rate_zero_freeze() {
+        let mut scene = default_scene();
+        scene
+            .step(0, &[camera_bop_row(0, 1.03, 0.06, 1.0, 0.0)], &[])
+            .expect("bop row applies");
+        // rate 1 / offset 0 pulses at steps 4, 8, ... (600 ms, 1200 ms, ...).
+        step_empty(&mut scene, 1, 599);
+        close(scene.camera.bop_multiplier, 1.0);
+        step_empty(&mut scene, 600, 600);
+        let factor = 0.95_f64.powf(0.06);
+        close(scene.camera.bop_multiplier, 1.0 + 0.03 * factor);
+        close(scene.camera_events.hud_zoom, 1.0 + 0.06 * factor);
+
+        // rate 0 after the pulse: nothing decays, the HUD zoom freezes and the
+        // gate never pulses again.
+        scene
+            .step(601, &[camera_bop_row(601, 1.0, 0.0, 0.0, 0.0)], &[])
+            .expect("rate-zero row applies");
+        let frozen_bop = scene.camera.bop_multiplier;
+        let frozen_hud = scene.camera_events.hud_zoom;
+        let frozen_zoom = scene.camera.zoom;
+        step_empty(&mut scene, 602, 1200);
+        assert_eq!(scene.camera.bop_multiplier, frozen_bop);
+        assert_eq!(scene.camera_events.hud_zoom, frozen_hud);
+        assert_eq!(scene.camera.zoom, frozen_zoom);
+    }
+
+    #[test]
+    fn scroll_rows_tween_per_line_and_snap_to_previous_targets() {
+        let mut scene = default_scene();
+        scene
+            .step(
+                0,
+                &[
+                    scroll_row(0, "player", 2.0, 1.5, 8.0, Some("linear")),
+                    scroll_row(0, "opponent", 2.0, 1.5, 8.0, Some("linear")),
+                ],
+                &[],
+            )
+            .expect("scroll pair applies");
+        close(scene.scroll_speed_for(false), 1.5);
+        close(scene.scroll_speed_for(true), 1.5);
+        step_empty(&mut scene, 1, 300);
+        close(scene.scroll_speed_for(false), 1.625);
+        close(scene.scroll_speed_for(true), 1.625);
+        step_empty(&mut scene, 301, 599);
+
+        // The next event cancels the in-flight tween, snaps every line in
+        // prevScrollTargets to 2.0, then applies the instant target.
+        scene
+            .step(
+                600,
+                &[
+                    scroll_row(600, "player", 3.0, 2.0, 4.0, Some("INSTANT")),
+                    scroll_row(600, "opponent", 3.0, 2.0, 4.0, Some("INSTANT")),
+                ],
+                &[],
+            )
+            .expect("snap + instant pair applies");
+        close(scene.scroll_speed_for(false), 3.0);
+        close(scene.scroll_speed_for(true), 3.0);
+    }
+
+    #[test]
+    fn scroll_row_base_mismatch_fails_closed() {
+        let mut scene = default_scene();
+        let error = scene
+            .step(
+                0,
+                &[scroll_row(0, "player", 2.0, 9.9, 4.0, Some("linear"))],
+                &[],
+            )
+            .expect_err("base_scroll drift must fail closed");
+        assert!(matches!(
+            error,
+            RenderError::ScrollBaseMismatch {
+                tick_ms: 0,
+                strumline: "player",
+                expected,
+                actual,
+            } if (expected - 9.9).abs() < 1e-12 && (actual - 1.5).abs() < 1e-12
+        ));
+    }
+
+    #[test]
+    fn scroll_row_unresolved_ease_applies_nothing() {
+        let mut scene = default_scene();
+        scene
+            .step(0, &[scroll_row(0, "player", 2.0, 1.5, 4.0, None)], &[])
+            .expect("unresolved scroll row is a no-op");
+        step_empty(&mut scene, 1, 100);
+        close(scene.scroll_speed_for(false), 1.5);
+        close(scene.scroll_speed_for(true), 1.5);
+    }
+
+    #[test]
+    fn scroll_rows_are_per_line() {
+        let mut scene = default_scene();
+        scene
+            .step(
+                0,
+                &[scroll_row(0, "player", 2.5, 1.5, 4.0, Some("INSTANT"))],
+                &[],
+            )
+            .expect("player-only row applies");
+        close(scene.scroll_speed_for(false), 2.5);
+        close(scene.scroll_speed_for(true), 1.5);
+    }
+
+    /// `playAnimation(anim, force, force)`: force locks the character against
+    /// derived callers (sing/dance) until the animation finishes; a
+    /// `skipped_old` row applies nothing.
+    #[test]
+    fn play_animation_force_lock_suppresses_sing_and_dance() {
+        let mut scene = default_scene();
+        scene
+            .step(0, &[play_animation_row(0, "hey", true, "bf", false)], &[])
+            .expect("play_animation row applies");
+        let player = scene.character_mut(Role::Player).expect("bf rig");
+        assert_eq!(player.scheduler.current_name(), Some("hey"));
+        assert!(player.scheduler.locked());
+        assert!(!player.scheduler.play("idle", true));
+        assert!(!player.scheduler.on_sing(0, false));
+        assert!(!player.scheduler.dance(true));
+        assert_eq!(player.scheduler.current_name(), Some("hey"));
+
+        // `hey` is two frames at 24 fps (83.3 ms): the lock reopens lazily and
+        // a later unforced row plays.
+        step_empty(&mut scene, 1, 84);
+        assert!(
+            !scene
+                .character_mut(Role::Player)
+                .expect("bf rig")
+                .scheduler
+                .locked()
+        );
+        scene
+            .step(
+                85,
+                &[play_animation_row(85, "idle", false, "bf", false)],
+                &[],
+            )
+            .expect("post-finish row applies");
+        assert_eq!(
+            scene
+                .character_mut(Role::Player)
+                .expect("bf rig")
+                .scheduler
+                .current_name(),
+            Some("idle")
+        );
+    }
+
+    #[test]
+    fn play_animation_skipped_old_applies_nothing() {
+        let mut scene = default_scene();
+        scene
+            .step(0, &[play_animation_row(0, "hey", true, "bf", true)], &[])
+            .expect("skipped_old row is a no-op");
+        let player = scene.character_mut(Role::Player).expect("bf rig");
+        assert_eq!(player.scheduler.current_name(), Some("idle"));
+        assert!(!player.scheduler.locked());
+    }
+
+    #[test]
+    fn play_animation_prop_target_uses_the_exact_animation_name() {
+        let mut animations = BTreeMap::new();
+        animations.insert("wave".to_string(), animation(&[0, 1], true));
+        let prop = LoadedStageProp {
+            name: "speaker".to_string(),
+            z_index: 0.0,
+            position: (0.0, 0.0),
+            scale: (1.0, 1.0),
+            scroll: (1.0, 1.0),
+            alpha: 1.0,
+            angle: 0.0,
+            flip_x: false,
+            flip_y: false,
+            visual: PropVisual::Solid {
+                size: [1, 1],
+                color: [0.0, 0.0, 0.0, 1.0],
+            },
+            animations,
+            dance_every: 1.0,
+            starting_animation: None,
+            bopper: true,
+        };
+        let mut scene = test_scene_with(
+            vec![
+                test_character(Role::Player, (100.0, 200.0), bf_animations(), Some("idle")),
+                test_character(Role::Opponent, (300.0, 400.0), BTreeMap::new(), None),
+            ],
+            vec![prop],
+            1.5,
+        );
+        scene
+            .step(
+                0,
+                &[play_animation_row(0, "wave", true, "prop:speaker", false)],
+                &[],
+            )
+            .expect("prop row applies");
+        assert_eq!(
+            scene.props[0]
+                .scheduler
+                .as_ref()
+                .expect("bopper scheduler")
+                .current_name(),
+            Some("wave")
+        );
+        // No suffix stripping on the StageProp path: `wave-alt` fails softly.
+        scene
+            .step(
+                1,
+                &[play_animation_row(
+                    1,
+                    "wave-alt",
+                    true,
+                    "prop:speaker",
+                    false,
+                )],
+                &[],
+            )
+            .expect("missing prop animation is soft");
+        let scheduler = scene.props[0].scheduler.as_ref().expect("bopper scheduler");
+        assert_eq!(scheduler.current_name(), Some("wave"));
+        assert!(scheduler.missing_animations().contains("wave-alt"));
+    }
+
+    #[test]
+    fn health_icon_and_unknown_rows_are_record_only_noops() {
+        let mut scene = default_scene();
+        let before = (
+            scene.camera.scroll,
+            scene.camera.current_zoom,
+            scene.camera_events.follow_focus,
+            scene.camera_events.bop,
+        );
+        let health = TraceEvent::HealthIcon {
+            schema: "3",
+            kind: "health_icon",
+            sim: 0,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            char: 1,
+            id: "dad".to_string(),
+            should_bop: true,
+            scale: 1.0,
+            flip_x: false,
+            is_pixel: false,
+            offsets: [0.0, 0.0],
+        };
+        let unknown = TraceEvent::UnknownEvent {
+            schema: "3",
+            kind: "unknown_event",
+            sim: 0,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event_kind: "EnableMask".to_string(),
+            value: None,
+        };
+        scene
+            .step(0, &[health, unknown], &[])
+            .expect("record-only rows are no-ops");
+        assert_eq!(scene.camera.scroll, before.0);
+        assert_eq!(scene.camera.current_zoom, before.1);
+        assert_eq!(scene.camera_events.follow_focus, before.2);
+        assert_eq!(scene.camera_events.bop.rate, before.3.rate);
     }
 }

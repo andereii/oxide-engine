@@ -124,6 +124,10 @@ pub(crate) struct CharacterScheduler {
     requires_hold_release: bool,
     holding: bool,
     hold_timer_seconds: f64,
+    /// `Bopper.canPlayOtherAnims`: set false by a forced `playAnimation` and
+    /// reopened by the native `onAnimationFinished` when the fired animation
+    /// ends (Bopper.hx L250/L261-292, L110-117).
+    locked: bool,
     missing_requests: BTreeSet<String>,
 }
 
@@ -143,6 +147,7 @@ impl CharacterScheduler {
             requires_hold_release,
             holding: false,
             hold_timer_seconds: 0.0,
+            locked: false,
             missing_requests: BTreeSet::new(),
         }
     }
@@ -175,27 +180,92 @@ impl CharacterScheduler {
     /// not exist, strip one trailing `-<suffix>` and retry recursively (e.g.
     /// `danceLeft-scared` -> `danceLeft`). `restart=false` keeps the current
     /// playhead only when the same animation is already current.
+    ///
+    /// Also honors `Bopper.canPlayOtherAnims`: while a forced animation is
+    /// locked in, only a restart of the CURRENT animation name is allowed.
     pub(crate) fn play(&mut self, name: &str, restart: bool) -> bool {
+        self.play_internal(name, restart, false)
+    }
+
+    /// `Bopper.playAnimation(name, restart, ignoreOther)` with
+    /// `ignoreOther = true`: the played animation locks other requests until
+    /// it finishes (`canPlayOtherAnims = false`).
+    pub(crate) fn play_with_ignore_other(
+        &mut self,
+        name: &str,
+        restart: bool,
+        ignore_other: bool,
+    ) -> bool {
+        self.play_internal(name, restart, ignore_other)
+    }
+
+    /// Plain `FlxSprite.animation.play(name, restart)` for stage props:
+    /// exact-name lookup with NO Bopper suffix stripping and NO lock
+    /// (StageProp is not a Bopper).
+    pub(crate) fn play_exact(&mut self, name: &str, restart: bool) -> bool {
+        let Some(animation) = self.animations.get(name) else {
+            self.missing_requests.insert(name.to_string());
+            return false;
+        };
+        let empty_frames = animation.frames.is_empty();
+        self.select_current(name, empty_frames, restart);
+        true
+    }
+
+    fn play_internal(&mut self, name: &str, restart: bool, ignore_other: bool) -> bool {
+        self.release_finished_lock();
+        if self.locked
+            && !self
+                .current_name()
+                .is_some_and(|current| current == name && restart)
+        {
+            // Native `playAnimation`: a locked Bopper ignores every request
+            // that is not a restart of the current animation.
+            return false;
+        }
         let Some(animation) = self.animations.get(name) else {
             if let Some((base, _suffix)) = name.rsplit_once('-') {
-                return self.play(base, restart);
+                return self.play_internal(base, restart, ignore_other);
             }
             self.missing_requests.insert(name.to_string());
             return false;
         };
-        if !animation.frames.is_empty() {
-            let same = self
-                .current
-                .as_ref()
-                .is_some_and(|playing| playing.name == name);
-            if !same || restart {
-                self.current = Some(Playing {
-                    name: name.to_string(),
-                    elapsed_seconds: 0.0,
-                });
-            }
+        let empty_frames = animation.frames.is_empty();
+        self.select_current(name, empty_frames, restart);
+        if ignore_other {
+            self.locked = true;
         }
         true
+    }
+
+    fn select_current(&mut self, name: &str, empty_frames: bool, restart: bool) {
+        if empty_frames {
+            return;
+        }
+        let same = self
+            .current
+            .as_ref()
+            .is_some_and(|playing| playing.name == name);
+        if !same || restart {
+            self.current = Some(Playing {
+                name: name.to_string(),
+                elapsed_seconds: 0.0,
+            });
+        }
+    }
+
+    /// Native `onAnimationFinished`: reopen the lock once the fired
+    /// (non-looped) animation has finished. Checked lazily at the next request
+    /// and at the end of [`Self::update`].
+    fn release_finished_lock(&mut self) {
+        if self.locked && self.current_finished() {
+            self.locked = false;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn locked(&self) -> bool {
+        self.locked
     }
 
     fn record_missing(&mut self, name: &str) {
@@ -329,6 +399,9 @@ impl CharacterScheduler {
         if let Some(playing) = &mut self.current {
             playing.elapsed_seconds += elapsed_seconds;
         }
+        // Native `onAnimationFinished` reopens `canPlayOtherAnims` when the
+        // forced animation finishes.
+        self.release_finished_lock();
 
         // 1. finished sing/idle animations continue through their `-hold`
         //    form when the data provides one.
@@ -609,6 +682,55 @@ mod tests {
         assert!(!sched.on_sing(3, true));
         assert!(sched.missing_animations().contains("singRIGHTmiss"));
         assert_eq!(sched.current_name(), None);
+    }
+
+    /// `Bopper.playAnimation(anim, force, force)` (`PlayAnimationSongEvent`
+    /// L59-66): the forced animation locks other requests until it finishes;
+    /// a restart of the current name is still allowed.
+    #[test]
+    fn forced_animation_locks_other_requests_until_it_finishes() {
+        let mut sched = scheduler(
+            &[
+                ("idle", animation(&[0, 1], true)),
+                ("hey", animation(&[5, 6], false)),
+                ("singLEFT", animation(&[1], false)),
+            ],
+            4.0,
+        );
+        sched.play("idle", true);
+        assert!(sched.play_with_ignore_other("hey", true, true));
+        assert_eq!(sched.current_name(), Some("hey"));
+        assert!(sched.locked());
+
+        // A different animation (including the dance/sing derived callers) is
+        // ignored while the forced animation runs.
+        assert!(!sched.play("idle", true));
+        assert!(!sched.on_sing(0, false));
+        assert_eq!(sched.current_name(), Some("hey"));
+        // Restarting the CURRENT animation is allowed while locked.
+        assert!(sched.play_with_ignore_other("hey", true, true));
+        assert_eq!(sched.current_name(), Some("hey"));
+
+        // `hey` has two frames at 24 fps -> 83.3 ms; the lock reopens after
+        // the animation finishes (lazily at the next request).
+        sched.update(0.084, 150.0);
+        assert!(!sched.locked());
+        assert!(sched.play("idle", true));
+        assert_eq!(sched.current_name(), Some("idle"));
+    }
+
+    /// StageProp uses `animation.play(anim, force)` directly: no suffix
+    /// stripping and no Bopper lock.
+    #[test]
+    fn prop_exact_play_does_not_strip_suffixes() {
+        let mut sched = scheduler(&[("wave", animation(&[0, 1], true))], 4.0);
+        assert!(sched.play_exact("wave", true));
+        assert_eq!(sched.current_name(), Some("wave"));
+        // The character path would strip `-alt` to `wave`; the prop path must
+        // keep the exact name and fail softly.
+        assert!(!sched.play_exact("wave-alt", true));
+        assert_eq!(sched.current_name(), Some("wave"));
+        assert!(sched.missing_animations().contains("wave-alt"));
     }
 
     #[test]
