@@ -1,8 +1,9 @@
 # Product goal — Oxide Engine
 
 Reimplement Friday Night Funkin' V-Slice as a Rust + Bevy engine with content parity,
-optimized bundled assets and a new Ruby/mruby modding API. This is the active product
-scope; `WORKFLOW.md` defines execution, not a different product.
+optimized bundled assets and a pure-Rust Rhai modding API (Ruby/mruby is reserved for a
+separate Oxide flavor/fork and is not implemented in the base branch). This is the active
+product scope; `WORKFLOW.md` defines execution, not a different product.
 
 ## Required release behavior
 
@@ -14,7 +15,7 @@ scope; `WORKFLOW.md` defines execution, not a different product.
   rendering, performance and hardware input require their own evidence.
 - Freeplay/albums, Story/10 levels, Options, Credits, Codex, compatible saves, week-6
   dialogue, video/subtitles and censorship variants.
-- Own mod format (`mod.toml`), layered assets, Ruby registration/events, hot reload and
+- Own mod format (`mod.toml`), layered assets, Rhai script registration/events, hot reload and
   `oxide new/check/pack/dev`. No promise of V-Slice/HScript mod compatibility.
 - Windows and Linux; 1280x720 base rendering with the agreed scaling modes.
 - Release binary plus `assets.pak` within the approved 350 MB budget, self-contained on
@@ -23,7 +24,8 @@ scope; `WORKFLOW.md` defines execution, not a different product.
 - Offline Opus/WebP/AV1 conversion; runtime decoding only. Preserve no-file-growth,
   stem-alignment and fidelity criteria in the accepted media contract. Do not silently
   reinterpret MB/MiB or adjust limits while changing report labels.
-- Approved stack: Bevy `=0.20` when required, Kira, serde and mruby; exact dependencies
+- Approved stack: Bevy `=0.20` when required, Kira, serde and Rhai (`rhai` in M8 exclusively
+  on the base branch; `mruby` is reserved for a separate flavor/fork); exact dependencies
   are governed by manifests/lockfile and ADRs, not an unverified future-version list.
 - Required acceptance on both platforms, with traceable reference/fixture provenance.
 
