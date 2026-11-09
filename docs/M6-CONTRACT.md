@@ -1233,3 +1233,33 @@ frozen §12.4.1 `health_icon` rows.
   establishments covered the event-driven scene without HUD). Sample-plan
   recipe unchanged (hud adds no classes).
 - Named pending: native rendered-output trace; score text typography.
+
+### 13.4 Amendment (2026-11-09, 6D integration review round)
+
+- **Score text is KEPT in the 6D slice (human directive resolved the
+  deferral):** the implementation includes the vcr-bmp Angel-font score text
+  with the 8-offset OUTLINE border. The native frame-head ordering is
+  preserved: `updateScoreText` runs before `processSongEvents`
+  (PlayState.hx L1035-1038), so the visible string is the PRE-ROW snapshot
+  (HudState.score_snapshot at begin_tick; a same-tick row becomes visible
+  one frame later). The auto-sized single-line field makes RIGHT alignment
+  a no-op (frozen; FlxBitmapText L1005-1160).
+- **The icon state machine consumes the native frame-head-clamped health**
+  (PlayState.hx L1208-1210 clamps before any sprite update, so clamped ==
+  native input; the earlier "raw health" comment was wrong and is amended).
+- **New-style Sparrow icon pipeline (review finding 1):** `icon-<id>.xml`
+  sibling selection (native `isNewSpritesheet`) selects the Sparrow sheet
+  with the seven `loadAnimationNew` clips (addByPrefix startswith, 24 fps,
+  looped idle/winning/losing + one-shot to*/from*); rotated pages fail
+  closed ([D]). The loader cannot list directories (Vfs has no listing
+  API), so sibling XMLs are probed for the measured corpus inventory ids
+  only; mod-only icon ids fail closed with the recorded limitation.
+- **GameOver divergence documented (review finding 3):** the HUD freezes the
+  last display value while `ScoreTracker` reports 0.0 at death; on the true
+  native death path health is already exactly 0.0 so the two agree; a
+  differential test pins both rule sets.
+- **Fixtures:** the third human-approved establishment pass was refreshed a
+  FOURTH time after these fixes (same ADR-0020 authority; sample lists,
+  trace digests and geometry unchanged; all frame/run digests refreshed on
+  the pinned llvmpipe adapter; school normal/hard still share one run
+  digest with distinct trace digests).
