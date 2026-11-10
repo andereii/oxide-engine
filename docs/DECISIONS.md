@@ -901,3 +901,26 @@ fail-closed (no auto-repair).
   same human-approved ADR-0020 establishment; sample lists unchanged (the sample plan does not derive from animation state); school normal/hard
   still share one run digest with distinct trace digests. No tolerance or
   coverage semantics changed.
+
+## 2026-11-09 — 6E behavior freeze (M6-CONTRACT §14): shipped .hxc scripts are content
+
+- The week-6 dialogue + weekend-1 choreography surface is driven by shipped
+  content scripts (`preload/scripts/{songs,characters,stages,dialogue}/*.hxc`)
+  that the native loader attaches at runtime. Per the Rhai-only base-branch
+  policy, 6E re-implements their OBSERVED per-song behavior as Rust content
+  modules (the M8 Rhai surface will expose the same engine hooks; nothing in
+  the engine interprets Haxe scripts at runtime).
+- Dialogue engine surface: conversations/boxes/speakers JSON observed
+  inventory (9 conversations, 3 boxes, 9 speakers) with the Conversation
+  state machine, FlxTypeText cadence (0.05 s/char default, `Std.int(_timer
+  / delay)` batch advance), CUTSCENE_ADVANCE [Z, ENTER], restart-dialogue
+  pause path, and the pixel.otf (`Pixel Arial 11 Bold`) text raster as an
+  explicit dependency approval item before implementation.
+- Weekend-1: the first-entry video branches (darnellCutscene/2hotCutscene)
+  are DEFERRED to the media/video phase; 6E implements the story retry
+  in-game paths (darnell can-cutscene timer chain with the 6C camera
+  algebra, the 2hot note-kind can/gun choreography with the -0.5 health
+  can miss and the picoFade/can/bf-dad-gf exclusion lists).
+- New engine capability named: per-prop static color multiply (the
+  darkenStageProps/blackenStageProps passes) — extends the 6B scene
+  without touching the frozen camera algebra.
