@@ -1093,6 +1093,9 @@ impl HudState {
         self.score_snapshot = self.score;
         self.health = self.health.clamp(0.0, HEALTH_MAX);
         self.health_lerp = lerp(self.health_lerp, self.health, HEALTH_LERP);
+        if (self.health - self.health_lerp).abs() < 1e-4 {
+            self.health_lerp = self.health;
+        }
         for icon in self.icons.iter_mut().flatten() {
             // The scene grid advances exactly one millisecond per tick.
             icon.advance_animation(1.0);
@@ -1296,7 +1299,14 @@ pub(crate) fn hud_projection(zoom: f64) -> [f64; 6] {
 /// toward zero and `Math.round` is `floor(v + 0.5)` for non-negative values.
 pub(crate) fn flx_bar_fill_width(value: f64, bar_width: f64) -> f64 {
     let value = value.clamp(0.0, HEALTH_MAX);
-    let fraction = value / HEALTH_MAX;
+    // Floating-point precision guard: if value is within float rounding error
+    // of HEALTH_MAX (such as asymptotic lerp 1.9999999999999993), fraction must
+    // be 1.0 so truncation does not drop 99.99999999999997 down to 99 slices.
+    let fraction = if (HEALTH_MAX - value).abs() < 1e-7 {
+        1.0
+    } else {
+        value / HEALTH_MAX
+    };
     let scale_interval = bar_width / 100.0;
     let stepped = (fraction * bar_width / scale_interval).trunc();
     let interval = (stepped * scale_interval + 0.5).trunc();
@@ -1628,6 +1638,8 @@ mod tests {
         assert_eq!(flx_bar_fill_width(1.98, 593.0), 587.0);
         // Truncation boundary: 0.9995 health is still 99 slices.
         assert_eq!(flx_bar_fill_width(1.999, 593.0), 587.0);
+        // Floating point asymptotic lerp limit (1.9999999999999993) reaches 100 slices.
+        assert_eq!(flx_bar_fill_width(1.9999999999999993, 593.0), 593.0);
         // Clamping happens in FlxBar.set_value.
         assert_eq!(flx_bar_fill_width(-1.0, 593.0), 0.0);
         assert_eq!(flx_bar_fill_width(3.0, 593.0), 593.0);
@@ -1839,6 +1851,14 @@ mod tests {
             state.health_lerp,
             (1.0 + (0.5 - 1.0) * HEALTH_LERP) * (1.0 - HEALTH_LERP),
         );
+
+        // Health lerp to max health settles cleanly at 2.0 and fills 100% of the bar.
+        state.health = 2.0;
+        for tick in 2..100 {
+            state.begin_tick(tick as f64);
+        }
+        assert_eq!(state.health_lerp, 2.0);
+        assert_eq!(flx_bar_fill_width(state.health_lerp, 593.0), 593.0);
     }
 
     #[test]
