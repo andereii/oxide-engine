@@ -1282,3 +1282,197 @@ frozen §12.4.1 `health_icon` rows.
 - **Fixtures:** the approved render-slice-2 establishment was refreshed
   (same ADR-0020 authority; sample lists/trace digests/geometry unchanged;
   frame/run digests updated). `render-diff` PASS, quick `verify` exit 0.
+
+## 14. Phase 6E behavior freeze — week-6 in-game dialogue + weekend-1 choreography + school presentation
+
+Analyst round read the installed `$HOME/Descargas/fnf/Funkin` source + assets
+read-only (2026-11-09). SCOPE BOUNDARY (per the human phase directive): the
+in-game dialogue box flow and gameplay choreography are 6E deliverables; the
+meta/UI/save side of dialogue replay and the video cutscene PLAYER belong to
+the meta/media phases (GOAL keeps "video/subtitles" as a release item —
+separately scheduled); freeplay/story difficulty filtering and the save
+mechanics the scripts consult are M7 surfaces.
+
+### 14.1 OBSERVED facts (native; labels OBS/DER where hybrid)
+
+- **Trigger chain (OBS).** The shipped content scripts
+  `preload/scripts/songs/{senpai,roses,thorns,senpai-pico,roses-pico,…}.hxc`
+  (Polymod-loaded Haxe script classes, DATA for this engine) hook
+  `onCountdownStart`: on the story-mode FIRST entry
+  (`PlayStatePlaylist.isStoryMode` + `hasPlayedCutscene == false`) they
+  `event.cancel()` — native `Countdown.performCountdown` returns false
+  immediately when the first event propagates cancelled
+  (Countdown.hx L44-54), so NO countdown runs — then launch the dialogue:
+  senpai: black solid (1.5x viewport, `camCutscene`, zIndex 1000000) for
+  0.25 s + 2.0 s linear `FlxTween.num(0..1)` (stepped-composite tween body)
+  before `startConversation('senpai')`; roses/thorns: immediate
+  `startConversation(target)` with `target += "-censored"` when
+  `Preferences.naughtyness` is false (default TRUE, Preferences.hx L74-82)
+  preceded by `ANGRY_TEXT_BOX` SFX. Weekend-1 darnell (first entry): VIDEO
+  branch `VideoCutscene.play('darnellCutscene[-censored]')` at camera zoom
+  1.3 direct (CENSOR_EXPLETIVES compile flag default false,
+  Constants.hx L660); SECOND story entry (`hasPlayedCutscene &&
+  !hasPlayedInGameCutscene`): the in-game can choreography below; freeplay:
+  neither. `onSongRetry` sets both flags true (no repeats per session);
+  `onCreate` resets them.
+- **In-game dialogue pipeline (OBS, Conversation.hx full state machine).**
+  `PlayState.startConversation(id)`: `isInCutscene = true`; the
+  `Conversation` (registry entry `data/dialogue/conversations/<id>.json`) is
+  put on a dedicated `camCutscene` camera (translucent bg over the game,
+  PlayState.hx L1961/L1971) at zIndex 1000. State machine
+  Start → (DIALOGUE_START) Opening → (box anim finished) Speaking → (typing
+  complete) Idle → (advance) DIALOGUE_LINE → next entry/line, … →
+  (count exhausted) DIALOGUE_END → Ending → (outro tween complete) destroy +
+  `completeCallback` → `onConversationComplete` (isInCutscene = false).
+  `advanceConversation()` on `controls.CUTSCENE_ADVANCE` — default keyboard
+  binding `[Z, ENTER]` (Controls.hx L1014 area) — dispatched under
+  `isInCutscene && !disableKeys` (PlayState.hx L1329: during dialogue the
+  scripts set `disableKeys` false/true around it); cancellation surfaces
+  (`eventCanceled`) skip the transition. Playback per entry: speaker swap
+  (`showCurrentSpeaker`, skip when same id; kill/revive), box swap
+  similarly; `setText` (first line of an entry) vs `appendText` (subsequent
+  lines of the SAME entry; the prefix is the already-typed text); per-entry
+  `boxAnimation`/`speakerAnimation` play through the observed `correct
+  AnimationName` suffix-strip→'idle' fallbacks (DialogueBox/Speaker
+  classes). Outro: data `outro: {type: fade, fadeTime}` → episode alpha
+  tween with `EaseUtil.stepped(8)` + music volume fade; `PauseSubState`
+  offers "Restart Dialogue" (`resetConversation`) while cutscene-paused.
+- **Dialogue data (OBS inventory).** conversations: senpai 3 entries/3
+  lines, roses (+censored 4/4, pico 7/7, pico-censored 7/7), thorns 4/6,
+  senpai-pico 17/19 (the nene "bwuh" gag switches music off/on per speaker —
+  senpai-pico scripted override). boxes: default (speech_bubble_talking,
+  isPixel, scale 5.4, offsets [-660,-340], text width 900, color #3F2021,
+  shadow #D89494 w2), roses (dialogueBox-new, width 800, anims
+  enter/speaking/sentenceEnd/idle/click/exit/angrySenpai), thorns
+  (dialogueBox-evilNew, width 900, WHITE text, transparent shadow, width 0).
+  speakers: 9 files, ALL `weeb/portrait-*`, scale 5.4, isPixel TRUE,
+  flipX false, each `talkEnter`/`talk`. Text font family is
+  `Pixel Arial 11 Bold` = the embedded `assets/fonts/pixel.otf`
+  (family "Pixel Arial 11"/Bold — PIL-verified), box text at
+  `(offsets[0],offsets[1])`, fontSize 32, LEFT-aligned with the SHADOW
+  border style at `shadowWidth` (FunkinTypeText writes per flixel-added
+  shadow pass). Typing sound `FunkinSound.load('pixelText', 0.6)` per typed
+  char batch. Typewriter cadence (OBS, FlxTypeText.hx: `delay` default
+  0.05 s/char = 20 cps; per frame `_timer += elapsed`; when `_timer >=
+  delay`: `_length += Std.int(_timer/delay)` then `_timer %= delay`;
+  `skip()` completes instantly; complete callback → `Idle` state).
+  The scripts override box animations: roses box plays `sentenceEnd` on
+  typing complete, `click→speaking` on lines (its scripted subclass),
+  `exit` reversed on dialogue end.
+- **Weekend-1 in-game choreography (OBS; darnell.hxc introCutscene + 2hot.hxc
+  note-kind systems).** darnell second-entry chain (cutsceneDelay = 2.0 s,
+  timers truncated to exact values; camera tweens = the frozen 6C algebra
+  `tweenCameraToPosition/tweenCameraZoom`, direct mode): 0.1 s camera to
+  pico focus +250 x / zoom 1.3 (direct) quadInOut; 0.7 s cutscene music
+  `darnellCanCutscene/darnellCanCutscene` starts + 2 s alpha fade of the
+  black overlay (startDelay 0.3); 2.0 s camera to darnell focus +100 x /
+  zoom 0.66 over 2.5 s; 5.0 s dad `lightCan` + Darnell_Lighter SFX;
+  6.0 s player `cock` + Gun_Prep + camera +180 x over 0.4 s backOut;
+  6.4 s dad `kickCan` + Kick_Can_UP + the can prop plays `up` (can sprite
+  created at `spraycanPile.x+30, y-320`, zIndex pile-1, `wked1_cutscene_1_
+  can` sparrow with `can kick quick0`/`can kicked up0` prefixes);
+  6.9 s dad `kneeCan` + Kick_Can_FORWARD + can `forward`; 7.1 s player
+  `intro2` (force restart + ignoreOther semantics — the 6C scheduler
+  semantics) + random-shot SFX + camera +100 x over 1 s + the SpraycanAtlas
+  prop at pile.x-10, y-550 plays `Can Shot` (its frame callback spawns a
+  `SpraypaintExplosion` `Explosion 1 movie0` sprite at +150/-250 px and the
+  1/24 s later `darkenStageProps()` pass — every stage prop EXCEPT
+  bf/dad/gf and the picoFade zIndex term gets `color = 0xFF111111`, then
+  0xFF222222 + `FlxTween.color` back to 0xFFFFFFFF over 1.4 s [the engine
+  currently renders no prop TINT — an engine addition]); 7.9 s dad
+  `laughCutscene`; 8.2 s gf `laughCutscene`; 10.0 s camera zoom 0.77 +
+  camera +180 x over 2 s sineInOut, `startCountdown()`, music stop, pause
+  unlocks. A dedicated cutscene Conductor (own metadata
+  `darnellCanCutscene/-metadata.json`) drives a per-beat dance-if-finished
+  rule on dad/gf (dance(true) whenever the animation finished, never while
+  `lightCan` current for the dad).
+- **2hot note kinds (OBS).** The chart notes carry data kinds
+  `weekend-1-lightcan/kickcan/kneecan/cockgun/firegun[/firegun-hip/
+  firegun-far]` (hard: 18 each). Engine decision downstream: kinds must
+  reach gameplay; behavior — kickcan spawns a `SpraycanAtlasSprite` (own
+  animate-prop state machine ARCING 2/SHOT 3/IMPACTED 4, `Can Start` →
+  `Hit Pico` → explosion EZ at `+750/-100`; `Can Shot` → kill at the
+  explosion spawn 150/-250 note frame 3) at pile.x-10/y-550 zIndex pile-1;
+  firegun with `gunCocked` (set by cockgun for 1 s) fires the ARcing can
+  (STATE_SHOT + darken pass again); un-acked firegun notes are CANCELED
+  (event.cancelEvent — no score/health side effects); MISS of
+  firegun/hip/far: sets `gunCocked=false`, no base health loss
+  (event.healthChange = 0.0), decrement can → `takeCanDamage()`:
+  `health -= 0.25*2 = 0.5` (!) — a missed can costs half a health bar and
+  kills at <= 0 with the pico-explode variant suffixes (game-over
+  variations are a GOAL-covered later slice). Cockgun MISS also zeroes the
+  health change. 2hot story flow: first entry plays the ENDING video
+  cutscene (`2hotCutscene.mp4` — video PLAYER [deferred]) after the song;
+  retry path re-enables a NORMAL song end; nene `danceEvery = 0` during
+  the cutscene + `hasDanced=false; dance(true)` resync; camera tweens to
+  (1539, 833.5) zoom 0.69 after the end. lit-up ships no choreography.
+- **School/pixel presentation (OBS).** The dialogue reused the week-6
+  pixel rules (6B): isPixel sheets → NEAREST pages at scale 5.4;
+  speaker/box sprites sit fullscreen (screenCenter + offsets); the pixel
+  text uses the embedded pixel.otf design at 32 px with the SHADOW style.
+  No pixel-arial bitmap pre-page ships — text glyphs raster at runtime.
+
+### 14.2 Engine decisions (Oxide integration; [D])
+
+1. **The shipped `.hxc` song/character/stage scripts are CONTENT, not
+   engine surface:** their observed per-song behavior is reimplemented as
+   Rust content modules keyed by song id (a private
+   `play/choreography/` table consulted at the song-start/countdown/note
+   boundaries). The Rhai script surface (M8) will call the same
+   engine-internal hooks; nothing in the engine interprets Haxe/C
+   scripts at runtime.
+2. **Dialogue engine:** a private conversation module consuming the
+   observed JSON surface (conversations + boxes + speakers via the M1
+   data registry pattern, fail-closed); the typewriter/state machine/
+   advance rules transcribed 1:1 from the cited classes; the input uses
+   the existing ADR-0021 action surface (CUTSCENE_ADVANCE [Z, ENTER]) and
+   the PauseSubState 'Restart Dialogue' path.
+3. **Text raster:** a runtime glyph rasterizer for pixel.otf (and later
+   shared font families) is required — dependency approval item (pure
+   Rust, MIT/Apache, e.g. `ab_glyph` or `fontdue`) BEFORE 6E
+   implementation; the engine bakes glyphs per (font,size,shadow) into
+   pages at load. No other new dependency is anticipated.
+4. **Prop tint chain** (darken/blacken passes): scene stage items gain a
+   static color-multiply quad parameter (the frozen M6 frozen algebra
+   otherwise unchanged).
+5. **Video cutscenes (darnell first-entry video, 2hot ending video, and
+   the weekly story videos) are DEFERRED to the media encoder phase** with
+   the engine decision recorded there (the 6E choreography implements the
+   story RETRY in-game paths where the video would not run and in-game
+   branches; the video branch is named in the code and treated as
+   played-on-first-entry for accounting).
+6. **Cutscene camera:** the camCutscene compositional layer renders above
+   the HUD (viewport equivalent, bgColor transparent over the game);
+   disableKeys + isInCutscene gate inputs just like native
+   (PlayState.hx L1238/L1328-1332 order pinned).
+
+### 14.3 Validation obligations for 6E (before implementation)
+
+- In-crate tests: conversation state-machine walk-through (entry/line
+  transitions incl. appendText vs setText boundaries), typewriter cadence
+  (20 cps batch accumulation `_timer %= delay` and skip-consistency),
+  advance/skip/restart paths (advance while Opening/Speaking/Idle; the
+  censored variantalkers), speaker/box swap logic (same id skips), the
+  suffix-strip→idle animation fallbacks, darnell timer-chain camera
+  targets with the 6C tween algebra, the darnell per-beat dance-if-finished
+  custom-conductor rule, 2hot kind table (kickcan spawn geometry, gunCocked
+  1 s window, firegun cancel path, takeCanDamage -0.5 + death gate),
+  and the prop-tint pass (affected exclude lists: bf/dad/gf, picoFade
+  zIndex, cans).
+- Corpus/artifact checks: the shipped 9 conversations parse with per-entry
+  speaker/box/animation resolution counts (senpai-pico's 17 entries and
+  the 9 speaker files); 2hot kinds inventory (18x5 on hard + per-difficulty
+  counts from the real charts); the darnellCanCutscene metadata conducts
+  on the native beat boundary.
+- Visual/reference: dialogue render snapshots (llvmpipe) freeze per-line
+  frames of the three shipped conversations under a NEW render fixture
+  family (ADR-0020 path; separate approval item) — the conversational
+  frames include the pixel.otf raster so the fixture lock pins the text
+  raster pipeline.
+- Explicit NON-goals for 6E: video playback itself (player owned by the
+  media phase), save-progress gating (`Save.hasBeaten*` filters), any
+  Chart Editor debug path; game-over scripted suffix variants.
+- Approval items: (a) the glyph rasterizer dependency; (b) the new
+  dialogue render fixture family third/fourth pass approval (like the 6D
+  HUD establishment); (c) D5-gameover explosion-suffix variants stay out
+  of 6E (game-over surface is its own slice).
