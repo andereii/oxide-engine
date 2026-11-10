@@ -211,14 +211,23 @@ impl IconSheet {
                 looped: false,
             },
         );
-        animations.insert(
-            "losing".to_string(),
-            IconClip {
-                frames: vec![1],
-                fps: 0.0,
-                looped: false,
-            },
-        );
+        // `loadAnimationOld` + the flixel `add(..., indices, ...)` rule
+        // (FlxAnimationController.hx L247-270): indices >= numFrames are
+        // DISCARDED, so a 1-frame icon (icon-dad/gf/parents 150x150) never
+        // gets a `losing` animation; native `playAnimation(toLosing,
+        // losing)` then finds NEITHER clip and the icon stays on `idle`
+        // (frame 0). Registering `losing` on such an icon made the icon
+        // draw a None frame and disappear.
+        if frames.len() >= 2 {
+            animations.insert(
+                "losing".to_string(),
+                IconClip {
+                    frames: vec![1],
+                    fps: 0.0,
+                    looped: false,
+                },
+            );
+        }
         if frames.len() >= 3 {
             animations.insert(
                 "winning".to_string(),
@@ -979,10 +988,16 @@ impl HealthIconState {
     }
 
     fn quad(&self, projection: [f64; 6]) -> Option<Quad> {
+        // Defensive frame resolution: the native controller never selects an
+        // out-of-range index (indices >= numFrames are discarded at add
+        // time), but a hypothetical bad clip must degrade to frame 0 rather
+        // than making an icon vanish from the screen.
+        let index = self.current_frame_index().unwrap_or(0);
         let frame = self
             .sheet
             .frames
-            .get(self.current_frame_index()?)
+            .get(index)
+            .or_else(|| self.sheet.frames.first())
             .copied()?;
         let left = self.x - self.offset[0];
         let top = self.y - self.offset[1];
@@ -2146,6 +2161,35 @@ mod tests {
         // (0.93 = 1.0 + 0.02 - 0.09) while the report carries 0.0. On the
         // true native death path health is already exactly 0.0.
         close(state.health, 0.93);
+    }
+
+    /// Native `add` discards indices >= numFrames
+    /// (FlxAnimationController.hx L247-270): a 1-frame legacy icon
+    /// (icon-dad/gf/parents, 150x150) never registers `losing`, so a
+    /// health drop below LOSING_THRESHOLD keeps the icon on `idle`
+    /// (frame 0) WITH a rendered quad instead of making it vanish.
+    #[test]
+    fn single_frame_icon_stays_idle_and_is_drawn_under_losing_health() {
+        let assets = test_hud(&["dad"], [150, 150]);
+        let mut icon = HealthIconState::new(1);
+        icon.configure(&assets, &test_config("dad", false), false, 1.0, 1.0)
+            .expect("dad configures");
+        assert_eq!(icon.sheet.frames.len(), 1, "icon-dad is one 150x150 frame");
+        assert!(
+            !icon.sheet.animations.contains_key("losing"),
+            "the flixel add() rule drops the out-of-range losing index"
+        );
+        // The losing path: player health high (2 - health < 0.4 for the dad).
+        icon.update_position(1.8, 2.0);
+        assert_eq!(icon.current_anim.as_deref(), Some("idle"));
+        assert!(
+            icon.quad(hud_projection(1.0)).is_some(),
+            "a 1-frame icon must never disappear into thin air"
+        );
+        // The same guarantee at the exact threshold and beyond.
+        icon.update_position(1.6, 2.0);
+        assert!(icon.quad(hud_projection(1.0)).is_some());
+        assert_eq!(icon.current_anim.as_deref(), Some("idle"));
     }
 
     /// The new-style Sparrow pipeline (review finding 1): the IconSheet built
