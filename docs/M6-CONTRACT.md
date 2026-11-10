@@ -104,7 +104,7 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
    rows), serialized with the same field-order/serde discipline and two-run
    sha256 gates. `GameplaySimState::build` becomes song-parameterized; the
    bopeebo fixture paths move from constants to explicit parameters.
-4. **Phasing:** six phases below; at most three workers; one heavy queue job;
+4. **Phasing:** seven phases below (6A–6G); at most three workers; one heavy queue job;
    xtask/gates ownership stays with the orchestrator per phase, contract
    amendments are written by the phase's analysis round.
 5. **Fixture growth:** render-diff fixtures beyond bopeebo follow the ADR-0020
@@ -180,6 +180,29 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
 - Write set: `xtask/` only (orchestrator-assigned tooling task); fixture
   manifests stay ADR-protected.
 
+### 6G — Native visual shaders & stage/camera post-processing effects (APPROVED 2026-11-09)
+- Objective: reimplement the native V-Slice gameplay shaders and visual effects
+  in Bevy/WGSL (`funkin/graphics/shaders/*` + stage/character script bindings):
+  - Per-sprite / per-character shaders: `AdjustColorShader` (hue, saturation,
+    brightness, contrast for erect stages/characters), `DropShadowShader` (rim
+    lighting / drop shadow with optional mask threshold on erect stages),
+    `HSVShader`, `MultiplyShader`, `StrokeShader`, and `LeftMaskShader` /
+    `SserafimShader` (`EnableMask` event consumption).
+  - Stage / post-processing shaders: `RuntimeRainShader` and `PuddleShader`
+    (Philly Streets / Weekend-1 dynamic rain intensity and puddle reflections),
+    `GaussianBlurShader`, `WaveShader` / `WiggleEffectRuntime` (senpai/thorns
+    background distortion), and `MosaicEffect`.
+- Behavior freeze required from original source (`funkin/graphics/shaders/*.hx`,
+  `assets/shaders/*.frag`, and the stage/character `.hxc` script parameters)
+  before implementation.
+- Write set: `crates/oxide-game/src/render*` (WGSL shaders, Bevy material/post-process
+  pipelines, scene shader uniforms); `crates/oxide-vfs` if shader asset resolution
+  requires extensions.
+- Acceptance: deterministic shader uniform progression in scene steps, visual
+  render-diff fixture coverage for representative shader-active stages (e.g.
+  erect adjust-color/drop-shadow, weekend-1 rain, thorns wiggle) under ADR-0020,
+  and interactive playtest verification.
+
 ## 4. Dependencies and constraints
 
 - M4 pending obligations (input replay/jitter, native conductor corpus traces)
@@ -204,6 +227,11 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
 5. Weekend-1 sequence scripts + week-6 dialogue format/content — observation.
 6. Results accuracy formula + save-adjacent outputs — observation (save files
    remain M7).
+7. Native gameplay shaders and post-processing effects (`AdjustColorShader`,
+   `DropShadowShader`, `RuntimeRainShader`, `PuddleShader`, `WiggleEffect`,
+   `EnableMask` / `LeftMaskShader`, and stage `.hxc` uniform parameters) —
+   observation from `funkin/graphics/shaders/*.hx` and `assets/shaders/*.frag`
+   before 6G lands.
 
 ## 6. Honesty boundary summary
 

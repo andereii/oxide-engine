@@ -14,7 +14,8 @@ product scope; `WORKFLOW.md` defines execution, not a different product.
   compare conductor timing with the original within the approved 1 ms budget. Replay,
   rendering, performance and hardware input require their own evidence.
 - Freeplay/albums, Story/10 levels, Options, Credits, Codex, compatible saves, week-6
-  dialogue, video/subtitles and censorship variants.
+  dialogue, video/subtitles, censorship variants, and native gameplay shaders/visual
+  effects (reimplemented in WGSL/Bevy for M6 Phase 6G).
 - Own mod format (`mod.toml`), layered assets, Rhai script registration/events, hot reload and
   `oxide new/check/pack/dev`. No promise of V-Slice/HScript mod compatibility.
 - Windows and Linux; 1280x720 base rendering with the agreed scaling modes.

@@ -924,3 +924,22 @@ fail-closed (no auto-repair).
 - New engine capability named: per-prop static color multiply (the
   darkenStageProps/blackenStageProps passes) — extends the 6B scene
   without touching the frozen camera algebra.
+
+## 2026-11-09 — Phase 6G added to M6: native gameplay shaders & visual effects in Bevy/WGSL (human product decision)
+
+- **Decision (human-approved 2026-11-09):** Milestone M6 gains **Phase 6G**
+  (`docs/M6-CONTRACT.md` §3, `docs/GOAL.md`) to reimplement the native V-Slice
+  gameplay shaders and post-processing visual effects in Bevy/WGSL.
+- **Scope:**
+  - Per-sprite / per-character shaders: `AdjustColorShader` (hue, saturation,
+    brightness, contrast for erect stages/characters), `DropShadowShader` (rim
+    lighting / drop shadow with mask threshold on erect stages), `HSVShader`,
+    `MultiplyShader`, `StrokeShader`, and `LeftMaskShader` / `SserafimShader`
+    (`EnableMask` event consumption).
+  - Stage / post-processing shaders: `RuntimeRainShader` and `PuddleShader`
+    (Philly Streets / Weekend-1 dynamic rain intensity and puddle reflections),
+    `GaussianBlurShader`, `WaveShader` / `WiggleEffectRuntime` (senpai/thorns
+    background distortion), and `MosaicEffect`.
+- **Execution order:** 6G requires its own behavior-freeze round from the native
+  `funkin/graphics/shaders/*.hx` and `assets/shaders/*.frag` sources before
+  implementation, and may proceed after 6E (or alongside 6F).
