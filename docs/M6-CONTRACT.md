@@ -1263,3 +1263,22 @@ frozen §12.4.1 `health_icon` rows.
   trace digests and geometry unchanged; all frame/run digests refreshed on
   the pinned llvmpipe adapter; school normal/hard still share one run
   digest with distinct trace digests).
+
+### 13.5 Amendment (2026-11-09, playtest-verified 1-frame icon parity fix)
+
+- **OBSERVED** (flixel 6.2.1 `FlxAnimationController.hx` L247-270):
+  `add(..., indices, ...)` DISCARDS indices >= numFrames; on a 1-frame
+  legacy icon (icon-dad/gf/parents, 150x150) the `loadAnimationOld`
+  `losing` index 1 is dropped, so `playAnimation(toLosing, losing)` finds
+  neither clip and the icon stays on `idle` (frame 0). The previous
+  implementation registered `losing` frame 1 unconditionally, so the icon
+  selected an out-of-range frame and DISAPPEARED from the screen. Fix:
+  `IconSheet::legacy` registers `losing` only when `frames.len() >= 2`
+  (mirroring the `winning >= 3` guard), and `HealthIconState::quad`
+  degrades a hypothetical out-of-range clip index to frame 0 instead of
+  drawing nothing (defensive parity, the native controller can never
+  select such an index). Unit test `single_frame_icon_stays_idle_and_is_
+  drawn_under_losing_health` pins the 1-frame behavior.
+- **Fixtures:** the approved render-slice-2 establishment was refreshed
+  (same ADR-0020 authority; sample lists/trace digests/geometry unchanged;
+  frame/run digests updated). `render-diff` PASS, quick `verify` exit 0.
