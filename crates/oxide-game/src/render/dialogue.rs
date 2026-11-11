@@ -191,7 +191,7 @@ pub(crate) fn load_dialogue(
     pages: &mut PageStore,
     id: &str,
 ) -> Result<LoadedDialogue, RenderError> {
-    let conversation_path = format!("data/dialogue/conversations/{id}.json");
+    let conversation_path = format!("preload/data/dialogue/conversations/{id}.json");
     let source = vfs
         .resolve(&conversation_path)
         .ok_or_else(|| RenderError::MissingAsset {
@@ -227,7 +227,7 @@ pub(crate) fn load_dialogue(
 
     let mut boxes = BTreeMap::new();
     for box_id in &box_ids {
-        let data_path = format!("data/dialogue/boxes/{box_id}.json");
+        let data_path = format!("preload/data/dialogue/boxes/{box_id}.json");
         let source = vfs
             .resolve(&data_path)
             .ok_or_else(|| RenderError::MissingAsset {
@@ -271,7 +271,7 @@ pub(crate) fn load_dialogue(
 
     let mut speakers = BTreeMap::new();
     for speaker_id in &speaker_ids {
-        let data_path = format!("data/dialogue/speakers/{speaker_id}.json");
+        let data_path = format!("preload/data/dialogue/speakers/{speaker_id}.json");
         let source = vfs
             .resolve(&data_path)
             .ok_or_else(|| RenderError::MissingAsset {
@@ -333,4 +333,32 @@ pub(crate) fn load_dialogue(
         speakers,
         font_bytes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Asset-gated: the real senpai conversation load (data + box + speaker
+    /// sheets + font) through the shipped tree.
+    #[test]
+    fn real_senpai_dialogue_loads() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let vfs = Vfs::new(std::path::PathBuf::from(&root));
+        let mut pages = PageStore::default();
+        let loaded = load_dialogue(&vfs, &mut pages, "senpai").expect("senpai dialogue loads");
+        assert_eq!(loaded.conversation_id, "senpai");
+        assert_eq!(loaded.conversation.dialogue.len(), 3);
+        assert!(loaded.boxes.contains_key("roses"), "the roses box loads");
+        assert!(loaded.speakers.contains_key("senpai"));
+        assert!(loaded.speakers.contains_key("bf-pixel"));
+        assert!(!loaded.font_bytes.is_empty());
+        // The week6 library resolution found the shipped sheets.
+        let roses = &loaded.boxes["roses"];
+        assert!(roses.sheet.clips.contains_key("enter"));
+        let senpai = &loaded.speakers["senpai"];
+        assert!(senpai.sheet.clips.contains_key("talkEnter"));
+    }
 }
