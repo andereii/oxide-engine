@@ -943,3 +943,43 @@ fail-closed (no auto-repair).
 - **Execution order:** 6G requires its own behavior-freeze round from the native
   `funkin/graphics/shaders/*.hx` and `assets/shaders/*.frag` sources before
   implementation, and may proceed after 6E (or alongside 6F).
+
+## 2026-11-09 — 6E: ab_glyph dependency + dialogue fixture establishment (human-approved)
+
+- Dependency: `ab_glyph = "0.2.32"` in `oxide-game` (Apache-2.0/MIT, pure
+  Rust, no C/native dependencies, already vendored in the local registry).
+  Rationale: the shipped `assets/fonts/pixel.otf` ("Pixel Arial 11", Bold)
+  is a TTF/OTF raster font; the conversation text (size 32, fill #3F2021,
+  shadow #D89494 at +2/+2, letterSpacing −1, greedy word wrap) is dynamic
+  per line, so a runtime glyph rasterizer is required. The engine bakes
+  deterministic glyph pages per line at load from the approved dependency;
+  the alternative (an offline bitmap atlas) cannot cover arbitrary dialogue
+  text. The raster is pinned by a two-pass byte-identity test.
+- The dialogue fixture family is the human-approved third ADR-0020
+  establishment: `render-slice-2` gains the `dialogue` family (senpai/
+  normal, the synthesized CUTSCENE_ADVANCE playthrough, trigger-relative
+  samples). Digests are llvmpipe engine output, not native pixel parity.
+- Dialogue data taxonomy: the dedicated `DialogueKind` surface (rather than
+  extending the global `DataKind`/`Typed`) avoids shifting the parse-all
+  corpus inventory counts mid-phase; unification is a recorded follow-up
+  with the equivalence check `implied_dialogue_kind(path) ==
+  implied_kind(path).map(DialogueKind::from)`.
+
+## 2026-11-09 — 6E review resolutions (M6-CONTRACT §14.5)
+
+- Dialogue Opening advances are no-ops (native box.skip() is inert before
+  typing), the dialogue text uses letterSpacing 0 + linear glyph sampling
+  (the score text's −1/OUTLINE is a different surface), the roses/thorns
+  scripted box animations (`sentenceEnd`/`click`/`speaking`/reversed `exit`
+  via frameIndices) are wired, CUTSCENE_ADVANCE coalesces to one per tick
+  after the event rows, and the weekend-1 z-300 `Can Shot` prop gained its
+  missing draw path.
+- The 6E trigger rows are gated by the new story-entry toggle:
+  `build_chart_events_with_story(..., false)` keeps the frozen bopeebo/school
+  render families byte-identical (verified trace-digest identity at the
+  establishment); the dialogue fixture replays with the story rows.
+- The dialogue fixture family is established (senpai/normal, chart taps +
+  the fixed advance cadence, 16 trigger-relative samples) and re-established
+  after the review fixes; digests are engine output on llvmpipe, not native
+  pixel parity. Pause 'Restart Dialogue' remains the M7 pause-surface item;
+  `AnimationData` unknown-key retention is a stated pre-existing M1 limit.

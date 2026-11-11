@@ -1523,3 +1523,98 @@ mechanics the scripts consult are M7 surfaces.
   dialogue render fixture family third/fourth pass approval (like the 6D
   HUD establishment); (c) D5-gameover explosion-suffix variants stay out
   of 6E (game-over surface is its own slice).
+
+### 14.4 Amendment (2026-11-09, 6E integration): implementation record + fixture establishment
+
+- **Delivered (commits 1973679..e4a9cd5 + the integration pass):**
+  - `oxide-data`: dialogue schemas (`conversations/*.json`, `dialogue/boxes/*.json`,
+    `dialogue/speakers/*.json`) with a dedicated `DialogueKind` taxonomy
+    (the global `DataKind`/`Typed` extension is a recorded follow-up: adding
+    variants shifts the parse-all corpus inventory counts), fail-closed
+    `#RRGGBB[AA]` colors, unknown keys retained, round-trip + corpus tests.
+    CORRECTION to §14.1: the shipped checkout carries **7 conversations**
+    (roses, roses-censored, roses-pico, roses-pico-censored, senpai,
+    senpai-pico, thorns), not 9; 3 boxes, 9 speakers as frozen.
+  - `oxide-game` trace surface: `InputEvent::Advance` and the schema-2/3
+    `note_kind` field are ADD-ONLY-IF-PRESENT (kind-free streams stay
+    byte-identical; the frozen bopeebo/school digests are structurally
+    unchanged — pinned by the gated render tests).
+  - Conversation engine: the five-state machine, the exact FlxTypeText
+    batch rule (`delay 0.05`, `_timer %= delay`, `skip()` instant), the
+    per-entry `setText`/`appendText` boundary, the suffix-strip→idle
+    animation fallbacks, the outro `stepped(8)` alpha + [D] virtual music
+    volume, the camCutscene layer group after the HUD group
+    (backdrop 10 < speaker 200 < box 300, identity projection), the
+    ab_glyph pixel.otf raster (deterministic pages, shadow pass first,
+    letterSpacing −1, greedy word wrap) and the native onCreate kick
+    (DIALOGUE_START fires on the trigger tick; the first advance only
+    skips the typing).
+  - Weekend-1: the 2hot note-kind rules in the SIM (cockgun 1 s window,
+    un-cocked firegun hit consumed with no row/score/health, firegun miss
+    `takeCanDamage` −0.5, cockgun miss health 0.0 — score/combo unchanged),
+    the scene can/explosion runtime (ARCING/SHOT/IMPACTED, `Can Start` →
+    `Hit Pico` → EZ explosion, `Can Shot` frame-3 big explosion, the
+    darkenStageProps tint pass with the native exclusion lists and the
+    0x11→0x22→1.4 s fade), the darnell 11-step can-cutscene chain with the
+    cutscene-local conductor per-beat dance rule and the folded overlay
+    surface, `ending_video` consumed as the named [D] no-op (video player
+    deferred to the media phase).
+- **Dialogue fixture family (ADR-0020 third establishment, human-approved):**
+  a third `render-slice-2` family `dialogue` (chart `senpai`, difficulty
+  `normal`): the schema-3 event replay with the synthesized
+  `CUTSCENE_ADVANCE` playthrough (fixed 4 s cadence from the trigger),
+  rendered through `SliceRenderer::build_for_song_with_dialogue`, with the
+  deterministic trigger-relative sample plan frozen in the manifest.
+  Two-run SHA-256 equality is asserted at capture; the established digests
+  are engine output on the pinned llvmpipe adapter, NOT native pixel parity.
+- **Approval item resolution:** `ab_glyph = "0.2.32"` was added to
+  `oxide-game` (pure Rust, MIT/Apache-2.0, zero C/native deps) under the
+  human approval; rationale in `docs/DECISIONS.md`. The dialogue fixture
+  establishment is the approved third ADR-0020 pass.
+
+### 14.5 Amendment (2026-11-09, 6E review round): findings + resolutions
+
+Two focused reviews covered the phase (dialogue pipeline / weekend-1 + xtask).
+Resolutions below; the crate fixes are validated by the in-crate tests and a
+re-established dialogue fixture (frames change — the approved ADR-0020 path).
+
+- **Dialogue Opening advance (BLOCK, fixed):** native advancing while the box
+  animation still plays dispatches DIALOGUE_COMPLETE_LINE →
+  `DialogueBox.skip()` → `FlxTypeText.skip()` is a NO-OP before typing starts,
+  so the state REMAINS Opening (Conversation.hx L338-343, DialogueBox.hx
+  L172-175). The Rust machine had moved Opening → Idle without a setText,
+  corrupting multi-line entries; Opening advances are now no-ops and a
+  real-surface multi-line regression pins it.
+- **Dialogue text style (fixed):** `letterSpacing` is 0 for the dialogue text
+  (the −1 belongs to `PlayState.scoreText` with OUTLINE); the box `isPixel`
+  flag affects the box SPRITE sampling only, not the `FunkinTypeText` glyphs
+  (default sampling → the dialogue glyph pages use the LINEAR sampler). The
+  score text keeps its −1/OUTLINE surface unchanged.
+- **Box script animations (fixed):** the shipped scripted box subclasses
+  (roses/thorns) are wired: `sentenceEnd` on typing complete, `click` →
+  `speaking` on line advances, hidden text + `exit` (REVERSED via the data's
+  `frameIndices`, addByIndices ordering) on dialogue end.
+- **Advance coalescing/order (fixed):** at most ONE `CUTSCENE_ADVANCE` per
+  scene tick (native boolean check) and it applies AFTER the event rows
+  (native processSongEvents → input queue → cutscene keys).
+- **Weekend-1 `Can Shot` prop draw (fixed):** the 7.1 s z-300 prop had a
+  runtime but no draw path; a `Weekend1CanShotProp` stage item/layer is now
+  registered and drawn.
+- **Named limitations recorded:** the PauseSubState 'Restart Dialogue' path is
+  the M7 pause-surface deliverable (owner named; not silently dropped); the
+  shared `AnimationData` schema retains no unknown keys inside animation
+  objects (pre-existing M1 behavior, now stated instead of implied); the
+  `fontFamily` field is fail-closed to the shipped "Pixel Arial 11 Bold";
+  the headless cutscene music start remains a play-session audio seam [D].
+- **Story-entry flag (integration correction):** `build_chart_events_with_story`
+  exposes the 6E trigger toggle; the frozen bopeebo/school render families
+  replay with `story_entry = false` (freeplay shape — byte-identical trace
+  digests verified at the establishment), the dialogue family with `true`.
+- **Dialogue fixture family:** `render-slice-2` gains the `dialogue` family
+  (senpai/normal; chart taps + the fixed CUTSCENE_ADVANCE cadence — an
+  advance-only plan GameOvers at ~7.7 s on the real chart, so the taps keep
+  the sim live; the equivalence claim is the same advance ticks, 30 s end,
+  no GameOver, two-run determinism). Frames/digests are llvmpipe engine
+  output, NOT native pixel parity. The dialogue frames were re-established
+  after the text-style/box-animation fixes (the fifth ADR-0020 pass covers
+  this family).
