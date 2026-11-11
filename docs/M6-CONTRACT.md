@@ -231,7 +231,8 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
    `DropShadowShader`, `RuntimeRainShader`, `PuddleShader`, `WiggleEffect`,
    `EnableMask` / `LeftMaskShader`, and stage `.hxc` uniform parameters) —
    observation from `funkin/graphics/shaders/*.hx` and `assets/shaders/*.frag`
-   before 6G lands.
+   before 6G lands. → **FROZEN 2026-11-11 as §15** (EnableMask targets
+   DropShadowShader, not LeftMaskShader; PuddleShader is dead code).
 
 ## 6. Honesty boundary summary
 
@@ -1649,3 +1650,383 @@ re-established dialogue fixture (frames change — the approved ADR-0020 path).
   `full_chart_gameplay` gate does not by itself certify M6; the remaining
   required gates and the human/orchestrator CI provenance checks still
   apply.
+
+## 15. Phase 6G behavior freeze — native gameplay shaders & post-processing (WGSL)
+
+Analyst round read the installed `$HOME/Descargas/fnf/Funkin` source + assets
+read-only (2026-11-11); original files untouched. Path abbreviations:
+`SHADERS/` = `source/funkin/graphics/shaders/`, `FRAG/` =
+`assets/preload/shaders/`, `SCRIPTS/` = `assets/preload/scripts/`.
+
+**Scope boundary (APPROVED 2026-11-09, re-affirmed by this freeze):** the 6G
+deliverable is the GAMEPLAY/STAGE shader set. Several native shader classes
+are used only by M7 UI surfaces (Freeplay, character select, Title, results):
+`GaussianBlurShader`, `MosaicEffect`, `AngleMask`, `StrokeShader`,
+`LeftMaskShader`, `ColorSwap` — they are recorded here as OBSERVED data, but
+their engine integration (if any) belongs to the meta/UI phases, not 6G.
+
+### 15.1 OBSERVED facts (native citations)
+
+**Attach mechanisms (global).** Gameplay sprites get shaders via plain
+`sprite.shader = X` (OpenFL runtime shader on the FlxSprite); whole-screen
+effects attach as `ShaderFilter` on `FlxG.camera.filters`. `FlxRuntimeShader`
+loads its fragment at runtime via `Paths.frag(key)` → `shaders/$key.frag`
+(Paths.hx:90-92) — this covers `adjustColor.frag`, `hsv.frag`, `rain.frag`,
+`wiggle.frag`, `gaussianBlur.frag`, `mosaic.frag`, `puddle.frag`;
+`DropShadowShader`, `SserafimShader`, `MultiplyShader`, `StrokeShader`,
+`LeftMaskShader`, `AngleMask`, `ColorSwapShader` carry inline
+`@:glFragmentSource` GLSL in the Haxe instead. Erect stage scripts force
+`character.useRenderTexture = true` so multi-limb atlas characters render
+through one shader pass (mainStageErect.hxc:87, mallXmasErect.hxc:46);
+`DropShadowShader`'s `attachedSprite` setter does the same
+(DropShadowShader.hx:262-265). No shader in these families is constructed in
+Haxe gameplay code (`PlayState`/`Stage`/`Character`); `Stage.setShader`
+(Stage.hx:367-373) exists but no shipped script calls it.
+
+**Shared post-effect base (`RuntimePostEffectShader.hx`).** Injects
+`uScreenResolution` (= FlxG.width/height), `uCameraBounds` =
+(camera.view left/top/right/bottom), `uFrameBounds` = frame UV rect, plus
+screen↔world↔frame coordinate helpers. `updateViewInfo` / `updateFrameInfo`
+are called MANUALLY by consumers (per frame / per animation frame), not by a
+base update loop. No time uniform in the base; time is per subclass.
+
+#### Per-sprite / per-character shaders
+
+**AdjustColorShader** (`SHADERS/AdjustColorShader.hx` + `FRAG/adjustColor.frag`).
+- Uniforms, built in Haxe (line numbers from the .hx): `hue` in DEGREES →
+  W3C-feColorMatrix hue-rotation `mat3 hueMatrix` with luma weights
+  0.299/0.587/0.114 (l.24, l.108-122); `saturation` in percent — positives ×3,
+  then `1 + val/100` with Rec.709 luma 0.2126/0.7152/0.0722 (l.39-40,
+  l.124-137); `brightness` on a 0-255 scale, uploaded `val/255` (l.51-57);
+  `contrast` in percent, `1 + val/100`, positives additionally pushed through
+  the exponential curve `(((0.00852259 * e^(4.76454*(val-1))) * 1.01) -
+  0.0086078159) * 10 + 1` (l.72-77).
+- Fragment composition order is FIXED: **brightness → hue → contrast →
+  saturation**; input un-premultiplied (`rgb/a`), output re-premultiplied
+  (adjustColor.frag:13-29).
+- Shipped values (all static, set once at stage/character build; zero
+  FlxTween/FlxTimer targets any AdjustColorShader):
+  - mainStageErect.hxc:30-47,75-83 — BF brightness=-23/hue=12/contrast=7,
+    GF -30/-9/-4, Dad -33/-32/-23 (saturation 0 everywhere).
+  - mallXmasErect.hxc:24-42 — shared hue=5/saturation=20 (santa + all
+    characters); boppers hue=15/brightness=20.
+  - limoRideErect.hxc:241-267 — hue=-30/sat=-20/brightness=-30 (dancers, car,
+    all characters).
+  - phillyTrainErect.hxc:201-203,368-374,457-464 — hue=-26/sat=-16/
+    brightness=-5 (train, pico pair, bloodPool, characters).
+  - phillyStreetsErect.hxc:179-183,667 — hue=-5/sat=-40/contrast=-25/
+    brightness=-20, all characters.
+  - characters/otis-speaker.hxc:44-91 and nene-tankmen.hxc:20-41 — hue=-40/
+    sat=-20/brightness=-40/contrast=-25; viz members brightness=-12/hue=-30.
+  - characters/nene-pixel.hxc:161-188 — `noRimShader` hue=-10/sat=-23/
+    brightness=-66/contrast=24.
+
+**DropShadowShader** (`SHADERS/DropShadowShader.hx`, inline GLSL).
+- Uniforms (defaults from ctor l.485-501): `dist` = `distance` 15 — PIXELS IN
+  TEXTURE SPACE, not camera (comment l.47); `str` = strength 1; `thr` =
+  threshold 0.1; angle degrees with semantics 0=RIGHT, 90=UP, 180=LEFT,
+  270=DOWN (l.29-33), uploaded as `angCos`/`angSin` (l.139-147); `dropColor`
+  (FlxColor /255, l.218); built-in HSBC `baseHue/baseContrast/baseSaturation/
+  baseBrightness` with the SAME math as AdjustColorShader (l.91-106, 164-206);
+  alt mask `altMask` (blue channel, l.70) + `useMask` + `thr2` =
+  `maskThreshold`.
+- Fragment: sampling offset `uv + vec2(dist*angCos*ratio.x,
+  -dist*angSin*ratio.y)` (l.460-463); anti-aliased luma threshold via
+  difference-based edge width and `smoothstep(threshold-delta, threshold+
+  delta, luma)` (l.397-453); rim term `(1 - shadowAlpha*str) * intensity`
+  adds `dropColor * rim` (l.465-475); premultiplied output. Alt mask:
+  `useMask && altMask.b > 0` switches the threshold to `thr2` (l.418-431).
+- `uFrameBounds` + `angleOffset = frame.angle` are re-uploaded PER ANIMATION
+  FRAME CHANGE — scripts hook `animation.onFrameChange` (e.g.
+  tankmanBattlefieldErect.hxc:81-87); no per-beat or tweened uniforms.
+- Shipped values: tankmanBattlefieldErect.hxc:35-88 — every character
+  `setAdjustColor(-46,-38,-25,-20)` (arg order b,h,c,s), color `0xFFDFEF3C`,
+  BF/GF angle=90, DAD angle=25/threshold=0.3, gf/nene-tankmen
+  `maskThreshold=0.4, useAltMask=true` with masks `erect/masks/gfTankmen_mask`
+  / `neneTankmen_mask`; tankman-bloody loads `tankmanCaptainBloody_mask` but
+  keeps `useAltMask=false` (saved as `tankmanRim`, l.72). schoolErect.hxc:36-113
+  — base `setAdjustColor(-66,-10,24,-23)`, color `0xFF52351d`, distance=5; BF
+  angle=90 + pixel masks (maskThreshold=1), GF re-set
+  (-42,-10,5,-25)/angle=90/distance=3/threshold=0.3, DAD `senpai_mask`.
+  props/TankmanSprite.hxc:57-82 — angle=135/threshold=0.4 (side-dependent
+  comment). nene-pixel.hxc:161-176 — abot speaker (threshold=1,
+  maskThreshold=0, `aBotPixelSpeaker_mask`).
+
+**HSVShader** (`SHADERS/HSVShader.hx` + `FRAG/hsv.frag`). `_hue/_sat/_val`
+MULTIPLICATIVE factors (defaults 1/1/1; not degrees), applied to the HSV
+components plus the coupling `value *= (_hue * 0.5) + 0.5` (hsv.frag:40),
+then back to RGB. Gameplay use is NOTE desaturation only:
+`NoteSprite.desaturate()` sets saturation=0.2 and attaches the shader
+(NoteSprite.hx:237-241); `Strumline.hx:964` calls it on a hit note that is a
+transparent held note; `revive()` resets shader to null and factors to 1.0
+to keep note batching (NoteSprite.hx:262-267). Static otherwise; also used by
+M7 UI (Freeplay capsules, DifficultyStars, OptionsState menuBG).
+
+**MultiplyShader** (`SHADERS/MultiplyShader.hx`): `uBlendColor` multiply
+(`base*blend*opacity + base*(1-opacity)`). ZERO instantiation sites in
+`source/` or `assets/` — dead code. No gameplay behavior to freeze against it.
+
+**StrokeShader** (`SHADERS/StrokeShader.hx`): `size` (px per axis) + `color`;
+single-pixel 4-neighbor outline on zero-alpha texels, no AA. Freeplay +
+debug offset overlay only; NOT used on gameplay characters.
+
+**LeftMaskShader** (`SHADERS/LeftMaskShader.hx`): uniforms `sprX`, `maskX`,
+`uvFrameX/Y` (defaults 0); left-edge wipe — texels with `uv.x < (maskX -
+sprX)/TextureSize.x + uvFrameX` become transparent. ResultState (results
+screen) ONLY (ResultState.hx:65-66, 354-357, 811 per-frame `swagSprX`).
+**NOT the EnableMask target and NOT gameplay.**
+
+**SserafimShader** (`SHADERS/SserafimShader.hx`, inline GLSL; stage
+`SCRIPTS/stages/sserafim.hxc`).
+- Uniforms (ctor l.313-327): HSBC `baseHue` (DEGREES uploaded raw; `radians()`
+  in-GLSL, l.171 — unlike AdjustColorShader), `baseSaturation` (percent math
+  in-GLSL l.182-183), `baseBrightness` (0-255, /255 in-GLSL l.200),
+  `baseContrast` (percent + the same exponential curve in-GLSL l.188-195);
+  `darkAmt` = `darkenAmount` 0-1 (l.21); `lightColor` =
+  `pulseLightColor` (WHITE, l.26/122); `pulseStrength` (l.31); 
+  `truckStrength` (l.36); `isChar` (ctor arg, l.42) — changes the dark/light
+  divisor (5 vs 2, l.279-282).
+- Fragment: same HSBC order brightness→hue→contrast→saturation (l.197-212);
+  `darkFactor = (truckStrength + pulseStrength) * 0.07 + darkAmt` with the
+  light term sign-flipped when `darkAmt > 0.65` (l.279-282); multiply color
+  = mix(white, black, darkFactor/5 for chars, /1 for stage) mixed toward
+  `lightColor` scaled by pulseStrength (`lightMultiplier = 0.07`, l.268-304);
+  premultiplied out.
+- Applied to: floor (l.174), sserafim girls (l.175-177), every added
+  character (l.346), every prop except light props (l.386-409), cutscene
+  sprites (l.633-648); constructed `new SserafimShader(true)` /
+  `new SserafimShader()` (l.91-92).
+- Cadence (THE ONLY shader with per-event/per-beat uniforms in gameplay):
+  - `sserafimDark` event → `setDarkenAmt(amount, duration)` tweens
+    `darkenAmount` with `FlxEase.sineInOut` (l.413-420, events l.207-276).
+  - `sserafimLights` → `flashTruckLights` sets `truckLightStrength = amount`,
+    then per-frame `onUpdate` copies the tweened sprite alpha into the
+    shaders, 0 on complete (l.422-449).
+  - `sserafimPulseLights` → `setLightState(enabled, colors, durations,
+    intensities)` stores per-beat arrays (l.456-464); `onBeatHit` (l.498-505)
+    picks `lightsIntensities[beat % n]` → `flashBackLight` sets
+    `pulseLightColor`/`pulseLightStrength` and tweens alpha→0, per-frame
+    `onUpdate` copies into the shaders (l.466-496).
+  - Cutscene adjust-color tweens: l.814-825 (`baseBrightness:55,
+    baseHue:0, baseContrast:-30, baseSaturation:0`, sineOut, 49/24 s),
+    l.835-846 (`66/10/-17/0`, expoIn, 15/24), `setAdjustColor(0,0,0,0)` at
+    the crash (l.858-859); post-kick `resetClear()` =
+    `setAdjustColor(-24, 6, -26, -74)` (l.953-954) fading back to 0 over
+    `6.0*4` s sineOut (l.974-985). Song retry: `darkenAmount = 0` +
+    `FlxTween.cancelTweensOf` (l.360-364).
+
+#### EnableMask event (exact chain)
+
+1. Chart: `data/songs/stress/stress-chart-pico.json:250` —
+   `{ "t": 61982, "e": "EnableMask", "v": {} }` (the ONLY occurrence in the
+   whole assets tree).
+2. Dispatch: PlayState.hx:1498 `new SongEventScriptEvent(event);
+   dispatchEvent(eventEvent)` (dispatch order l.1513: Module, Song, Events,
+   Notes, Stage, Conversation, Characters); afterwards
+   `SongEventRegistry.handleEvent` traces `WARNING: No event handler`
+   (SongEventRegistry.hx:113-123) — there is no built-in handler.
+3. Consumer: tankmanBattlefieldErect.hxc:97-100 —
+   `if (scriptEvent.eventData.eventKind == "EnableMask" && tankmanRim !=
+   null) { tankmanRim.useAltMask = true; }` — the whole effect is toggling
+   DropShadowShader's `useMask` uniform ON (no position/fields are set).
+   Reset to false on song retry (l.122-125); BF's shader cleared on game
+   over (l.26-27).
+
+#### Stage / post-processing shaders
+
+**RuntimeRainShader** (`SHADERS/RuntimeRainShader.hx` + `FRAG/rain.frag`).
+- Uniforms (defaults from the .hx): `uTime` 1 — seconds, accumulated by
+  `update(elapsed)` (l.25, 125-128); `uSpriteMode` false (l.33); `uScale` 1
+  — drop size (l.44); `uIntensity` 0.5 — 0 = no rain, 1 = max (l.53);
+  `uPuddleY`/`uPuddleScaleY` (l.62/71); `uRainColor` = 0xFF6680cc normalized
+  (l.95-122); `uMask`/`uBlurredScreen`/`uLightMap`/`numLights`+`lights[8]`
+  are declared but UNUSED in the shipped `main()` (dead/commented paths,
+  rain.frag:214-227, 264, 274-289).
+- Fragment math: 4-layer drop grid, layer scales {1.0, 1.8, 2.6, 4.8}
+  (l.244-249); grid sheared `p.x += p.y * 0.1`, falling
+  `p.y -= uTime * 500.0 / scale` (≈500 px/s per scale unit, l.159); per-column
+  Y stagger and per-cell X jitter via `rand` (l.164-170); drop shape
+  `max(a.x*0.8, a.y*0.5) - 0.1` (l.173); INTENSITY = drop-cell probability:
+  `empty = rand(index) < mix(1.0, 0.1, intensity)` (l.175); layer hits
+  displace the texture sample (`wpos.x += v*10*uScale; wpos.y -= v*2*uScale`,
+  l.256-257) and accumulate `rainSum += (1-rainSum)*0.75`; final
+  `color = mix(color, uRainColor, 0.1 * rainSum)` (l.286). Sprite mode maps
+  through `screenToFrame`/`screenToWorld` and samples the sprite texture
+  displaced (l.237, 268-272). The puddle/ripple + reflection block inside
+  rain.frag is COMMENTED OUT (l.274-283 dead) — `uPuddleY`/`uPuddleScaleY`
+  are settable but visually inert.
+- Usage: whole-screen `ShaderFilter` on `FlxG.camera` in
+  phillyStreets.hxc:23,124,149-150 (scale = FlxG.height/200; per-song
+  intensity remap darnell 0→0.1, lit-up 0.1→0.2, 2hot 0.2→0.4; puddle values
+  set at l.527-528), phillyStreetsErect.hxc:25,126,152-153 (same scale;
+  intensities 0→0.01, 0.01→0.02, 0.02→0.04; `rainColor = 0xFFa8adb5`),
+  phillyBlazin.hxc:26,38-42 (intensity FIXED 0.5). Sprite-level
+  `spriteMode = true` on the `bgTrees` prop in spookyMansionErect.hxc:24,39-45
+  (scale = FlxG.height/200*2, intensity 0.4; `updateFrameInfo(frame)` per
+  frame change at l.84 — the only `updateFrameInfo` consumer). Game over:
+  `FlxG.camera.filters = []` (phillyStreets.hxc:498-503, phillyBlazin.hxc:49);
+  retry restores the filter (phillyStreets.hxc:513, phillyBlazin.hxc:56).
+- Cadence: `uTime` per frame via `update(event.elapsed)` in stage onUpdate
+  (phillyStreets.hxc:382/388, phillyBlazin.hxc:103, spookyMansionErect.hxc:97);
+  `uIntensity` per frame (NOT per beat) =
+  `FlxMath.remapToRange(Conductor.songPosition, 0, music.length, start,
+  end)` (phillyStreets.hxc:378-380; reset to start when no music, l.386);
+  phillyBlazin multiplies elapsed by `rainTimeScale` which smooth-lerps to
+  0.02 and INCREASES by 0.7 per note hit (l.103-104, 139). No beat-bop
+  driver.
+
+**PuddleShader** (`SHADERS/PuddleShader.hx` + `FRAG/puddle.frag`): the
+fragment is `color.r = color.g = color.b = color.a` — a grayscale-from-alpha
+passthrough, NOT a UV distortion. ZERO instantiation sites (only the class
+definition); the real puddle mirror lives inside rain.frag and is commented
+out there. Dead code.
+
+**WaveShader** (`SHADERS/WaveShader.hx`): inline fragment is a pure
+pass-through (identity). ZERO consumers. Dead code.
+
+**WiggleEffectRuntime** (`SHADERS/WiggleEffectRuntime.hx` + `FRAG/wiggle.frag`).
+- Uniforms: `effectType` int (enum: DREAMY=0, WAVY=1, HEAT_WAVE_HORIZONTAL=2,
+  HEAT_WAVE_VERTICAL=3, FLAG=4, l.6-13); `uSpeed` (`waveSpeed`),
+  `uFrequency` (`waveFrequency`), `uWaveAmplitude` (UV units), `uTime`
+  seconds accumulated by `update(elapsed)` (l.80-85). No
+  setDuration/setForce API in this runtime version.
+- Fragment (DREAMY, l.34-48): pixel-grid QUANTIZED sine displacement —
+  `pt.x = floor(pt.x/h)*h`; `offsetX = sin(pt.x*uFrequency + uTime*uSpeed) *
+  uWaveAmplitude`; `pt.y += floor(offsetX/w)*w; pt.y = floor(pt.y/w)*w`;
+  then the y-axis half-amplitude/half-speed pass. WAVY = plain
+  `pt.y += sin(...)`; HEAT_WAVE_H/V single-axis; FLAG dual-axis with extra
+  spatial terms (l.56-58).
+- Usage (sprite-level on stage props): schoolEvil.hxc:24-32 —
+  `wiggleBack = new WiggleEffectRuntime(2*0.8, 4*0.4, 0.011, DREAMY)`
+  (uSpeed 1.6, uFrequency 1.6, amplitude 0.011) on `backTrees`;
+  `wiggleSchool = (2, 4, 0.017)` on `school`;
+  `wiggleGround`/`wiggleTrees` = (2, 4, 0.007) on `street`/`trees`.
+  schoolEvilErect.hxc:24-32 — `wiggleBack` (backspikes) and `wiggleSpike`
+  (backspike), amplitudes 0.011/0.01.
+- Cadence: ONLY `uTime` advances, per frame via `update(event.elapsed)`
+  (schoolEvil.hxc:44-50, schoolEvilErect.hxc:44-50). uSpeed/uFrequency/
+  uWaveAmplitude/effectType are set ONCE at construction and never re-set
+  anywhere in the tree. NO beat-bop interaction (stage `onBeatHit` in these
+  stages never touches wiggle uniforms).
+
+**GaussianBlurShader** (`SHADERS/GaussianBlurShader.hx` + `FRAG/
+gaussianBlur.frag`): class comment "not actually gaussian!". `_amount`
+float, default 1 (radius ∝ `_amount*2` texels per axis). Effective output is
+a two-pass `blur13` kernel (offsets 1.4118/3.2941/5.1765 × direction,
+weights 0.19648/0.29691/0.09447/0.01038, gaussianBlur.frag:61-85); the
+tilt-shift 3×3 loop computes a value that is DISCARDED
+(`gl_FragColor = blurredShit`, l.113). Static (amount set once). ALL usage
+is M7 UI: Freeplay capsules/rank/fav icons (CapsuleText.hx:35,
+SongItemGroup.hx:15-26) and char-select/freeplay fades. NO pause/game-over/
+level-start camera usage exists in gameplay.
+
+**MosaicEffect** (`SHADERS/MosaicEffect.hx` + `FRAG/mosaic.frag`):
+`uBlocksize` in TEXELS; `floor(coordv*blocks)/blocks` quantization.
+Single usage: char-select Nametag (Nametag.hx:22-53, 85-113) with a
+1/30 s step sequence of block sizes. Event-driven, never per frame/beat.
+M7 UI only.
+
+**Cadence summary (cross-cutting).** No gameplay shader in the shipped game
+is driven by camera-zoom bops or SetCameraBop. Per-frame: rain uTime +
+intensity remap, wiggle uTime, sserafim tween onUpdate copies. Per
+animation-frame change: rain sprite-mode + DropShadow uFrameBounds/angle
+sync. Per event: EnableMask → useAltMask, sserafim event tweens. Per beat:
+only sserafim `sserafimPulseLights` backlight selection.
+
+### 15.2 DERIVED requirements (Oxide engine integration; labelled DER)
+
+1. **Per-sprite shaders map to per-layer materials (DER).** The scene's
+   ordered `LayerSpec` quads currently render with a plain tint
+   (`ColorMaterial`). Each gameplay shader family becomes one WGSL fragment +
+   one uniform struct bound as a Bevy custom material on the affected LAYERS
+   (a character or stage prop may own one). HSBC uniforms stay the SCENE's
+   f64 state and convert to f32 once at material sync, matching the
+   existing vertex-cast rule (§2 decision 1).
+2. **Whole-screen post effects map to a post pass on the game-camera
+   target, BEFORE HUD compositing (DER).** Native `FlxG.camera.filters`
+   applies to the game camera only — camHUD is a separate camera not
+   filtered by rain. In the layer stack the post pass must therefore cover
+   the stage/character/overlay layers and NOT the HUD / dialogue layers
+   (HUD layers start at the existing HUD index; dialogue/cutscene layers sit
+   above and are likewise outside the game camera in native).
+3. **Time driver (DER).** `uTime` accumulates in SECONDS from the same 1 ms
+   sim ticks (`TICK_SECONDS`) the scene already consumes — deterministic
+   fixed-step accumulation replaces the native `update(elapsed)`. Rain
+   intensity derives from the conductor's song position in ms via the same
+   `remapToRange(start, end)` formula (0 = song start, full length = song
+   end); phillyBlazin's `rainTimeScale` lerps toward 0.02 and gains 0.7 per
+   note hit. Rain filter clears on game over and restores on retry.
+4. **Frame-change uniform sync (DER).** Wherever the anim scheduler already
+   processes frame changes, that hook must re-emit the frame-dependent
+   uniforms (rain sprite-mode frame info; DropShadow `uFrameBounds` +
+   `angleOffset = frame.angle`). Animate-atlas limb characters under a
+   shader need the native `useRenderTexture = true` equivalence — in Oxide
+   the shader binds per final composed layer, which is the same single-pass
+   result (engine decision, see 15.3).
+5. **EnableMask (DER).** `EnableMask` remains a trace-recorded event whose
+   only gameplay effect is setting the tankman DropShadow layer's
+   `useMask` flag true (applies to the saved `tankmanRim` shader state),
+   reset on retry; the event carries no fields. Sserafim-specific events
+   (`sserafimDark`, `sserafimLights`, `sserafimPulseLights`) drive the
+   SserafimShader tween/per-beat state as OBSERVED (15.1).
+6. **WGSL uniform layout (DER).** Uniform structs must match WGSL
+   alignment: scalars as f32, vec2/vec4 aligned, mat3 packed as
+   `mat3x3<f32>` (16-byte columns). Percent/degree/unit conversions stay in
+   the same place as native (hue degrees → matrix in shader or upload, per
+   the OBSERVED class; brightness /255; saturation/contrast curves exactly
+   transcribed). Composition order (brightness→hue→contrast→saturation) is
+   an OBSERVABLE invariant.
+
+### 15.3 Engine decisions
+
+1. **One WGSL family per native shader family, no shader-registry
+   framework.** Extend the existing per-layer material model with a private
+   material variant (Bevy `Material2d` implementations) — an enum over the
+   shipped families plus plain tint. Generic .frag loading or runtime GLSL
+   parsing is NOT introduced; the shipped runtime-loaded fragments
+   (adjustColor, hsv, rain, wiggle, plus the inline DropShadow/Sserafim
+   math) are transcribed to WGSL constants in `oxide-game`. Equivalence
+   check: identical uniform values must produce identical per-pixel output
+   on the same sampled texture (validated on llvmpipe fixtures).
+2. **Dead native code is recorded, not implemented (OBS→decision).**
+   `MultiplyShader`, `WaveShader`, `PuddleShader`, and rain.frag's
+   commented-out puddle/ripple/reflection/light paths have no shipped
+   behavior; implementing them would invent observables. The gameplay-
+   required set is: AdjustColorShader, DropShadowShader (+mask),
+   HSVShader (note desaturation), RuntimeRainShader (screen + sprite
+   modes), WiggleEffectRuntime, SserafimShader (+ its three events).
+3. **M7 UI shader families are OBSERVED-only here** (GaussianBlur,
+   MosaicEffect, AngleMask, StrokeShader, LeftMaskShader, ColorSwap): their
+   integration is deferred to the meta/UI phases; no 6G work is spent on
+   them.
+4. **`useRenderTexture` equivalence.** Native erect stages force a
+   render texture so all limbs share one shader pass; Oxide already composes
+   characters as layer groups, so binding the shader at the composed layer
+   is the simplest equivalent (no intermediate render texture).
+5. **No new dependencies** (Bevy 0.20 custom materials are built-in); no
+   `oxide-vfs` change needed since shaders are source-level WGSL, not
+   resolved assets.
+
+### 15.4 Validation obligations & human approval items
+
+- **Unit obligations (no fixture approval needed):** uniform stepping
+  determinism in scene steps — uTime accumulation at fixed 1 ms ticks, rain
+  intensity remap at known song positions (incl. the no-music reset and the
+  phillyBlazin timeScale/note-hit rule), sserafim tween + per-beat light
+  progression, EnableMask → useAltMask toggle + retry reset in trace/state,
+  DropShadow frame-change sync. Two-run sha256 determinism on shader-active
+  scene state rows per the established pattern.
+- **Fixture establishment proposal (needs ADR-0020 path + HUMAN APPROVAL):**
+  representative shader-active stages on the pinned `llvmpipe` adapter —
+  phillyStreetsErect (rain + adjust-color), schoolEvil (wiggle),
+  tankmanBattlefieldErect or schoolErect (drop-shadow + EnableMask) and
+  sserafim (event-driven light/dark). Fixtures are established once after
+  review, never regenerated during `verify`; per 6F they remain ENGINE
+  fixtures on llvmpipe, NOT native pixel parity — native rendered-output
+  traces stay a standing deferred obligation (§14.x / 6F record).
+- **Approval items:** (a) the fixture-establishment ADR for the 6G shader
+  families (no pre-authorization exists); (b) none other — no new
+  dependencies, no tolerance changes, no asset changes are requested.
+  Implementation of the WGSL families may proceed after this freeze on the
+  approved write set (`crates/oxide-game/src/render*`), with review before
+  integration.
