@@ -1311,6 +1311,25 @@ frozen §12.4.1 `health_icon` rows.
   (same ADR-0020 authority; sample lists/trace digests/geometry unchanged;
   frame/run digests updated). `render-diff` PASS, quick `verify` exit 0.
 
+### 13.6 Amendment (2026-11-10, playtest-verified max-health bar fill parity fix)
+
+- **OBSERVED / DERIVED (`ec3e00a`):** in 64-bit IEEE-754 arithmetic,
+  `healthLerp = lerp(healthLerp, 2.0, 0.15)` stagnates at
+  `1.9999999999999993` (`2.0 - 3 * 2^-52`) because `(2.0 - healthLerp) * 0.15 <
+  0.5 * 2^-52`, which caused `flx_bar_fill_width` (`numDivisions = 100`
+  `floor` quantization) to truncate `(healthLerp / 2.0) * 100.0 =
+  99.99999999999997` to `99` divisions (`587.0` px instead of `593.0` px),
+  leaving a permanent 6-pixel red sliver on the left edge of the health bar
+  at max health. Fix (`crates/oxide-game/src/render/hud.rs`): `HudState::begin_tick`
+  snaps `health_lerp = health` when `(health - health_lerp).abs() < 1e-4`, and
+  `flx_bar_fill_width` treats `(HEALTH_MAX - value).abs() < 1e-7` as fraction
+  `1.0`. Unit tests pin both convergence and direct `flx_bar_fill_width` full
+  fill.
+- **Fixtures:** the approved `render-slice-2` manifest (`tests/fixtures/render-slice/_manifest.json`)
+  was refreshed on the same ADR-0020 authority for the 29 max-health frames
+  and 6 run digests affected by the 100% green bar fill (sample lists, trace
+  digests, and geometry unchanged). `cargo xtask render-diff` PASS (exit 0).
+
 ## 14. Phase 6E behavior freeze — week-6 in-game dialogue + weekend-1 choreography + school presentation
 
 Analyst round read the installed `$HOME/Descargas/fnf/Funkin` source + assets
