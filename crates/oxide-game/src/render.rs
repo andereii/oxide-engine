@@ -22,6 +22,7 @@
 mod anim;
 // The interactive play module reuses the exact same scene/layer pipeline as the
 // headless renderer. These stay crate-private; only `play` consumes them.
+pub(crate) mod conversation;
 pub(crate) mod geometry;
 pub(crate) mod harness;
 pub(crate) mod hud;
