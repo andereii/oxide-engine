@@ -63,6 +63,7 @@ enum Action {
     ReplayCorpus,
     GameplaySim,
     NoteNative,
+    FullChartGameplay,
     RenderDiff,
     PerfBudget,
     InputJitter,
@@ -326,7 +327,15 @@ const GATES: &[Gate] = &[
         timeout_secs: 600,
         ignored_tests: "not_applicable",
     },
-    pending("full_chart_gameplay", 6, "Full-chart gameplay acceptance."),
+    Gate {
+        id: "full_chart_gameplay",
+        milestone: 6,
+        coverage: "Fail-closed full-chart gameplay over the explicit corpus: 61 corpus chart-ids × declared difficulties = 166 runs; two-run schema-2 note-pass determinism (self sha256 equality, zero misses/game-over), two-run schema-3 event-pass determinism with per-kind row totals equal to the parsed chart events (ScrollSpeed 'both' = one row per strumline; §12.6 accounting), and a per-run scene inventory load via SliceRenderer::build_for_song (no per-tick rendering in this gate). DEFERRED parity obligations are NOT covered: native rendered-output traces, Windows/hardware evidence, CI artifacts/dual-platform receipts, native camera/input probes and the M4 replay/input-jitter obligations; render/perf remain separate gates (render_diff, perf_budget). A green run does not by itself certify M6; cumulative milestone acceptance and CI provenance checks still apply.",
+        action: Action::FullChartGameplay,
+        dependencies: BASELINE,
+        timeout_secs: 3600,
+        ignored_tests: "not_applicable",
+    },
     pending("ui_save_e2e", 7, "UI and save end-to-end acceptance."),
     pending(
         "ruby_mods",
@@ -1236,6 +1245,21 @@ impl Drop for ValidationSlot {
     }
 }
 
+fn requires_explicit_assets(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Corpus(_)
+            | Action::AssetTests(_, _)
+            | Action::Media
+            | Action::ReplayCorpus
+            | Action::GameplaySim
+            | Action::FullChartGameplay
+            | Action::NoteNative
+            | Action::RenderDiff
+            | Action::PerfBudget
+    )
+}
+
 fn gate_command(gate: &Gate, options: &Options, root: &Path, executable: &Path) -> Option<Command> {
     let mut command = match gate.action {
         Action::Cargo(args) => {
@@ -1309,6 +1333,14 @@ fn gate_command(gate: &Gate, options: &Options, root: &Path, executable: &Path) 
         Action::NoteNative => {
             let mut command = Command::new(executable);
             command.arg("note-native");
+            if let Some(assets) = &options.assets {
+                command.arg("--assets").arg(assets);
+            }
+            command
+        }
+        Action::FullChartGameplay => {
+            let mut command = Command::new(executable);
+            command.args(["full-chart-gameplay", "--corpus"]);
             if let Some(assets) = &options.assets {
                 command.arg("--assets").arg(assets);
             }
@@ -1497,17 +1529,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
                     ));
                 }
             }
-            if matches!(
-                gate.action,
-                Action::Corpus(_)
-                    | Action::AssetTests(_, _)
-                    | Action::Media
-                    | Action::ReplayCorpus
-                    | Action::GameplaySim
-                    | Action::NoteNative
-                    | Action::RenderDiff
-                    | Action::PerfBudget
-            ) {
+            if requires_explicit_assets(gate.action) {
                 match &options.assets {
                     None => prerequisite_errors.push("explicit --assets DIR is required; no implicit home-specific corpus is accepted".into()),
                     Some(path) if !path.is_dir() => prerequisite_errors.push(format!("--assets is not a directory: {}", path.display())),
@@ -1883,6 +1905,32 @@ mod tests {
             }
             assert!(GATES.iter().any(|gate| options.required(gate) && matches!(gate.action, Action::ExternalCi)));
         }
+        let m6 = Options::parse(
+            &[
+                "--profile".into(),
+                "milestone".into(),
+                "--milestone".into(),
+                "M6".into(),
+            ],
+            Path::new("/workspace"),
+        );
+        assert!(m6.errors.is_empty());
+        let full_chart = GATES
+            .iter()
+            .find(|gate| gate.id == "full_chart_gameplay")
+            .unwrap();
+        assert!(m6.required(full_chart));
+        assert!(
+            !matches!(full_chart.action, Action::Pending),
+            "full_chart_gameplay is implemented and must execute, not stay pending"
+        );
+        assert!(
+            GATES
+                .iter()
+                .filter(|gate| gate.milestone == 6)
+                .all(|gate| !matches!(gate.action, Action::Pending)),
+            "no M6 obligation remains pending"
+        );
         let release = Options::parse(
             &["--profile".into(), "release".into()],
             Path::new("/workspace"),
@@ -2098,6 +2146,7 @@ mod tests {
             "conductor",
             "gameplay_sim_bopeebo",
             "native_note_reference",
+            "full_chart_gameplay",
             "render_diff",
             "perf_budget",
         ] {
@@ -2203,6 +2252,7 @@ mod tests {
             ("native_note_reference", 5, "executable"),
             ("render_diff", 5, "executable"),
             ("perf_budget", 5, "executable"),
+            ("full_chart_gameplay", 6, "executable"),
             ("fuzz_parsers", 9, "pending"),
         ] {
             let gate = GATES.iter().find(|gate| gate.id == id).unwrap();
@@ -2318,6 +2368,81 @@ mod tests {
     }
 
     #[test]
+    fn full_chart_gameplay_gate_is_milestone_six_corpus_bound_and_fail_closed() {
+        let gate = GATES
+            .iter()
+            .find(|gate| gate.id == "full_chart_gameplay")
+            .unwrap();
+        assert!(matches!(gate.action, Action::FullChartGameplay));
+        assert_eq!(gate.milestone, 6);
+        assert_eq!(gate.dependencies, BASELINE);
+        assert_eq!(gate.timeout_secs, 3600);
+        assert_eq!(gate.ignored_tests, "not_applicable");
+        for required in [
+            "61 corpus chart-ids",
+            "166 runs",
+            "two-run schema-2 note-pass determinism",
+            "zero misses/game-over",
+            "two-run schema-3 event-pass determinism",
+            "per-kind row totals equal to the parsed chart events",
+            "SliceRenderer::build_for_song",
+            "per-run scene inventory load",
+            "NOT covered",
+            "native rendered-output traces",
+            "Windows/hardware evidence",
+            "CI artifacts",
+            "native camera/input probes",
+            "M4 replay/input-jitter",
+            "render_diff",
+            "perf_budget",
+            "does not by itself certify M6",
+        ] {
+            assert!(
+                gate.coverage.contains(required),
+                "full_chart_gameplay coverage is missing {required:?}: {}",
+                gate.coverage
+            );
+        }
+        assert!(
+            requires_explicit_assets(Action::FullChartGameplay),
+            "full_chart_gameplay must block without an explicit --assets directory"
+        );
+        let with_assets = Options::parse(
+            &["--assets".into(), "corpus".into()],
+            Path::new("/workspace"),
+        );
+        let command = gate_command(
+            gate,
+            &with_assets,
+            Path::new("/workspace"),
+            Path::new("xtask"),
+        )
+        .unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            args,
+            ["full-chart-gameplay", "--corpus", "--assets", "corpus"]
+        );
+        let without_assets = Options::parse(&[], Path::new("/workspace"));
+        let command = gate_command(
+            gate,
+            &without_assets,
+            Path::new("/workspace"),
+            Path::new("xtask"),
+        )
+        .unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(args, ["full-chart-gameplay", "--corpus"]);
+        assert_eq!(command.get_current_dir(), Some(Path::new("/workspace")));
+    }
+
+    #[test]
     fn commands_are_locked_strict_and_never_recurse_into_verify() {
         let options = Options::parse(
             &["--assets".into(), "corpus".into()],
@@ -2347,12 +2472,19 @@ mod tests {
                     gate.id
                 );
             }
-            if matches!(gate.action, Action::Corpus(_) | Action::Media) {
+            if matches!(
+                gate.action,
+                Action::Corpus(_) | Action::Media | Action::FullChartGameplay
+            ) {
                 assert!(args.iter().any(|arg| arg == "--corpus"), "{}", gate.id);
             }
             if matches!(
                 gate.action,
-                Action::GameplaySim | Action::NoteNative | Action::RenderDiff | Action::PerfBudget
+                Action::GameplaySim
+                    | Action::FullChartGameplay
+                    | Action::NoteNative
+                    | Action::RenderDiff
+                    | Action::PerfBudget
             ) {
                 assert!(
                     args.iter().any(|arg| arg == "--assets"),

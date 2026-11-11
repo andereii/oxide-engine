@@ -1618,3 +1618,34 @@ re-established dialogue fixture (frames change — the approved ADR-0020 path).
   output, NOT native pixel parity. The dialogue frames were re-established
   after the text-style/box-animation fixes (the fifth ADR-0020 pass covers
   this family).
+
+### 6F.1 Implementation record (2026-11-11)
+
+- The `full_chart_gameplay` gate is implemented as a fail-closed xtask
+  subcommand (`full-chart-gameplay --corpus --assets <dir>`, exit 0 only
+  when every run passes) and wired into the acceptance catalogue at
+  milestone 6 (`Action::FullChartGameplay`, dependencies = the portable
+  baseline, 3600 s timeout). The gate covers:
+  1. every corpus chart-id (61) × its declared difficulties (166 runs) —
+     two-run schema-2 note-pass determinism (self sha256 equality, zero
+     misses/game-over for the synthesized-tap pass);
+  2. two-run schema-3 event-pass determinism with the per-kind row totals
+     equal to the parsed chart-file event counts (ScrollSpeed 'both' = one
+     row per strumline; the §12.6 accounting);
+  3. a per-run scene inventory LOAD check
+     (`SliceRenderer::build_for_song`) exercising the stage/character/
+     note-style/HUD page resolution end-to-end (no per-tick rendering in
+     this gate).
+- The existing `gameplay-sim --corpus` prototype remains a diagnostic
+  (self-checked evidence, not the gate); the new subcommand is the
+  acceptance surface.
+- **Deferred parity obligations preserved (NOT covered by this gate):**
+  native rendered-output traces (the render fixtures remain engine output
+  on llvmpipe, not native pixel parity), Windows/hardware evidence, CI
+  artifacts/dual-platform receipts (the `dual_platform_ci` gate), the
+  native camera/input probes and the M4 replay/input-jitter obligations.
+  Render/perf remain their own gates (`render_diff`, `perf_budget`).
+- Milestone acceptance stays cumulative and explicit: a green
+  `full_chart_gameplay` gate does not by itself certify M6; the remaining
+  required gates and the human/orchestrator CI provenance checks still
+  apply.

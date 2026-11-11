@@ -2693,7 +2693,7 @@ const CORPUS: &str = include_str!("../../tools/oracle/corpus.txt");
 
 const CHART_ID_VARIATIONS: [&str; 4] = ["default", "erect", "pico", "bf"];
 
-fn corpus_ids() -> Vec<&'static str> {
+pub(crate) fn corpus_ids() -> Vec<&'static str> {
     CORPUS
         .lines()
         .map(str::trim)
@@ -2716,16 +2716,53 @@ fn split_chart_id(chart_id: &str) -> (String, String) {
     (chart_id.to_owned(), String::new())
 }
 
-struct CorpusRun {
-    event_count: usize,
-    opponent_count: usize,
-    tap_count: usize,
-    digest: String,
+pub(crate) struct CorpusRun {
+    pub(crate) event_count: usize,
+    pub(crate) opponent_count: usize,
+    pub(crate) tap_count: usize,
+    pub(crate) digest: String,
     // Schema-3 event pass (contract §12.5): full-trace digest, row total and
     // the per-kind row counts (== parsed chart event counts per run).
-    event_digest: String,
-    event_rows: usize,
-    event_counts: Vec<(String, usize)>,
+    pub(crate) event_digest: String,
+    pub(crate) event_rows: usize,
+    pub(crate) event_counts: Vec<(String, usize)>,
+}
+
+/// Reads the declared difficulty list for a `corpus.txt`-style chart id from
+/// the explicit assets root.
+///
+/// This is the same metadata the sim and renderer loaders consume; the gate
+/// needs the list before it can schedule the 166 runs. The file is read-only.
+pub(crate) fn declared_corpus_difficulties(
+    assets_root: &Path,
+    chart_id: &str,
+) -> Result<Vec<String>, String> {
+    let (song, suffix) = split_chart_id(chart_id);
+    let metadata_path = format!("preload/data/songs/{song}/{song}-metadata{suffix}.json");
+    let metadata_bytes = fs::read(assets_root.join(&metadata_path)).map_err(|error| {
+        format!("cannot read metadata for chart-id {chart_id:?} (path {metadata_path:?}): {error}")
+    })?;
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata_bytes)
+        .map_err(|error| format!("metadata {metadata_path:?} is not valid JSON: {error}"))?;
+    let difficulty_values = metadata
+        .get("playData")
+        .and_then(|data| data.get("difficulties"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{metadata_path:?} lacks playData.difficulties"))?;
+    let mut difficulties = Vec::with_capacity(difficulty_values.len());
+    for value in difficulty_values {
+        difficulties.push(
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                format!("{metadata_path:?}: playData.difficulties must be strings")
+            })?,
+        );
+    }
+    if difficulties.is_empty() {
+        return Err(format!(
+            "{metadata_path:?} declares an empty difficulty list"
+        ));
+    }
+    Ok(difficulties)
 }
 
 fn run_corpus(assets_root: &Path, trace_dir: &Path) -> Result<String, String> {
@@ -2733,31 +2770,7 @@ fn run_corpus(assets_root: &Path, trace_dir: &Path) -> Result<String, String> {
     let mut aggregate: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
     for chart_id in corpus_ids() {
-        let (song, suffix) = split_chart_id(chart_id);
-        let metadata_path = format!("preload/data/songs/{song}/{song}-metadata{suffix}.json");
-        let metadata_bytes = fs::read(assets_root.join(&metadata_path)).map_err(|error| {
-            format!(
-                "cannot read metadata for chart-id {chart_id:?} (path {metadata_path:?}): {error}"
-            )
-        })?;
-        let metadata: serde_json::Value = serde_json::from_slice(&metadata_bytes)
-            .map_err(|error| format!("metadata {metadata_path:?} is not valid JSON: {error}"))?;
-        let difficulty_values = metadata
-            .get("playData")
-            .and_then(|data| data.get("difficulties"))
-            .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| format!("{metadata_path:?} lacks playData.difficulties"))?;
-        let mut difficulties = Vec::with_capacity(difficulty_values.len());
-        for value in difficulty_values {
-            difficulties.push(value.as_str().map(str::to_owned).ok_or_else(|| {
-                format!("{metadata_path:?}: playData.difficulties must be strings")
-            })?);
-        }
-        if difficulties.is_empty() {
-            return Err(format!(
-                "{metadata_path:?} declares an empty difficulty list"
-            ));
-        }
+        let difficulties = declared_corpus_difficulties(assets_root, chart_id)?;
         for difficulty in &difficulties {
             let run = corpus_run(assets_root, chart_id, difficulty, trace_dir)?;
             let mut event_kinds = run
@@ -2803,7 +2816,7 @@ fn run_corpus(assets_root: &Path, trace_dir: &Path) -> Result<String, String> {
     Ok(summary)
 }
 
-fn corpus_run(
+pub(crate) fn corpus_run(
     assets_root: &Path,
     chart_id: &str,
     difficulty: &str,
@@ -3050,6 +3063,27 @@ fn schema3_chart_kind(event: &TraceEvent) -> &str {
     }
 }
 
+/// Expected schema-3 rows for one parsed chart-file `events` entry
+/// (contract §12.6): ScrollSpeed defaults to `strumline = "both"`, which
+/// emits one row per strumline (player + opponent = 2); every other current
+/// kind emits exactly one row.
+///
+/// An unknown ScrollSpeed strumline value deliberately counts as one expected
+/// row: the sim never invents a target and records zero rows, so the per-run
+/// accounting fails closed on such a chart (§12.6 finding 5).
+pub(crate) fn expected_event_rows(kind: &str, event: Option<&serde_json::Value>) -> usize {
+    if kind == "ScrollSpeed" {
+        let strumline = event
+            .and_then(|event| event.get("v"))
+            .and_then(|value| value.get("strumline"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("both");
+        usize::from(strumline == "both") + 1
+    } else {
+        1
+    }
+}
+
 /// Corpus notes split for the synthesis (review finding 5): player notes feed
 /// the taps; the shared end and the expected opponent-note count come from
 /// ALL notes, so an opponent hold ending after the last player note is still
@@ -3122,16 +3156,7 @@ fn player_notes_for(
                 .ok_or_else(|| format!("{chart_path:?}: events[{index}] lacks string e"))?;
             // ScrollSpeed 'both' (the default) emits one row per target
             // strumline; every other current kind emits exactly one row.
-            let row_count = if kind == "ScrollSpeed" {
-                let strumline = value
-                    .get("v")
-                    .and_then(|v| v.get("strumline"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("both");
-                usize::from(strumline == "both") + 1
-            } else {
-                1
-            };
+            let row_count = expected_event_rows(kind, Some(value));
             counts
                 .entry(kind.to_owned())
                 .and_modify(|count| *count += row_count)
@@ -4102,5 +4127,27 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.contains("unsupported argument"), "{error}");
+    }
+
+    #[test]
+    fn schema3_row_accounting_counts_scrollspeed_both_per_strumline() {
+        let both = serde_json::json!({"t": 1000, "e": "ScrollSpeed", "v": {"scroll": 1.0, "strumline": "both"}});
+        let defaulted = serde_json::json!({"t": 1000, "e": "ScrollSpeed", "v": {"scroll": 1.0}});
+        let player = serde_json::json!({"t": 1000, "e": "ScrollSpeed", "v": {"scroll": 1.0, "strumline": "player"}});
+        let opponent = serde_json::json!({"t": 1000, "e": "ScrollSpeed", "v": {"scroll": 1.0, "strumline": "opponent"}});
+        let unknown = serde_json::json!({"t": 1000, "e": "ScrollSpeed", "v": {"scroll": 1.0, "strumline": "all"}});
+        let focus = serde_json::json!({"t": 1000, "e": "FocusCamera", "v": {"char": 1}});
+
+        assert_eq!(expected_event_rows("ScrollSpeed", Some(&both)), 2);
+        // The default strumline is 'both' (one row per strumline).
+        assert_eq!(expected_event_rows("ScrollSpeed", Some(&defaulted)), 2);
+        assert_eq!(expected_event_rows("ScrollSpeed", Some(&player)), 1);
+        assert_eq!(expected_event_rows("ScrollSpeed", Some(&opponent)), 1);
+        // Unknown values stay at one expected row so the sim's zero rows fail
+        // the per-run accounting closed (§12.6 finding 5).
+        assert_eq!(expected_event_rows("ScrollSpeed", Some(&unknown)), 1);
+        assert_eq!(expected_event_rows("ScrollSpeed", None), 2);
+        assert_eq!(expected_event_rows("FocusCamera", Some(&focus)), 1);
+        assert_eq!(expected_event_rows("EnableMask", None), 1);
     }
 }

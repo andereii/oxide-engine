@@ -983,3 +983,17 @@ fail-closed (no auto-repair).
   after the review fixes; digests are engine output on llvmpipe, not native
   pixel parity. Pause 'Restart Dialogue' remains the M7 pause-surface item;
   `AnimationData` unknown-key retention is a stated pre-existing M1 limit.
+
+## 2026-11-11 — 6F full_chart_gameplay gate (M6-CONTRACT §6F.1)
+
+- The gate is a separate fail-closed xtask subcommand rather than an
+  extension of `gameplay-sim --corpus` (which stays a diagnostic): the gate
+  aggregates ALL failures, exits nonzero on any run error, and includes the
+  per-run scene inventory load; no fixture writes and no skips. The
+  catalogue entry runs it at milestone 6 with the portable baseline as
+  dependencies and the deferred parity obligations named in the coverage
+  text (native rendered-output traces, Windows/hardware, CI artifacts/
+  dual-platform receipts, native camera/input probes, M4 replay/input-jitter).
+  The gate also fails closed on non-distinct corpus inventories (duplicate
+  chart-id lines or (id, difficulty) plans) so count-preserving drift cannot
+  produce a false green.
