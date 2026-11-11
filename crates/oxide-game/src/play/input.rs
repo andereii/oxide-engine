@@ -32,6 +32,13 @@ pub(crate) fn direction_for(key: KeyCode) -> Option<i64> {
     }
 }
 
+/// The native `CUTSCENE_ADVANCE` keyboard binding (`[Z, ENTER]`,
+/// Controls.hx). Press edges are handled by the window; autorepeat is
+/// filtered before this mapping runs.
+pub(crate) fn is_advance_key(key: KeyCode) -> bool {
+    matches!(key, KeyCode::KeyZ | KeyCode::Enter)
+}
+
 /// Normal lane-event decision: every real press is forwarded, while a release
 /// is forwarded only when the per-lane held predicate turns false (the last
 /// bound key for that lane went up).
@@ -189,9 +196,6 @@ impl TickPlanner {
     /// Appends the `CUTSCENE_ADVANCE` transition ([Z, ENTER]) on `tick`.
     /// Ignored while paused/terminal like lane transitions; no autorepeat is
     /// synthesized by this planner (the window forwards real keydowns only).
-    /// Consumed by the 6E conversation slice's play-window wiring
-    /// (M6-CONTRACT §14.2); temporary allow until that lands.
-    #[allow(dead_code)]
     pub(crate) fn queue_advance(&mut self, tick: u64) {
         if self.paused || self.terminal {
             return;

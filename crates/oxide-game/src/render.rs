@@ -237,6 +237,6 @@ impl SliceRenderer {
     /// return identical bytes.
     pub fn frame(&mut self) -> Result<Vec<u8>, RenderError> {
         let layers = self.scene.draw()?;
-        self.harness.render(&layers)
+        self.harness.render(&layers, self.scene.layer_specs())
     }
 }

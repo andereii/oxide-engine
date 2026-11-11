@@ -21,7 +21,7 @@ use super::input::{
 };
 use super::{PlayConfig, PlayError, PlayReport, QuitReason, VoiceVolumeTick};
 use crate::render::load::{self, LoadedNote};
-use crate::render::scene::{Quad, Scene};
+use crate::render::scene::{LayerSpec, Quad, Scene};
 use crate::slice::{GameplaySimState, TallyCounts, TraceEvent};
 
 /// `Constants.HIT_WINDOW_MS` (already frozen in the M5 slice). Used only to
@@ -394,6 +394,23 @@ impl PlayRuntime {
             self.planner.queue(tick, direction, pressed);
         }
         Ok(())
+    }
+
+    /// Stamps one `CUTSCENE_ADVANCE` press on the next sim tick. The scene
+    /// ignores it unless a conversation is active, so the window only needs
+    /// the native `isInCutscene` gate for clarity.
+    pub(crate) fn queue_advance(&mut self) -> Result<(), PlayError> {
+        if !self.scene.conversation_active() {
+            return Ok(());
+        }
+        let tick = self.planner.stamp_tick(self.last_position_ms)?;
+        self.planner.queue_advance(tick);
+        Ok(())
+    }
+
+    /// Current scene layer specs, re-read by the window's material refresh.
+    pub(crate) fn layer_specs(&self) -> &[LayerSpec] {
+        self.scene.layer_specs()
     }
 
     /// ESC pause/resume: the playback clock and the sim stop together.

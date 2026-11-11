@@ -10,6 +10,7 @@ use oxide_audio::conductor::{Conductor, Dispatch};
 
 use super::RenderError;
 use super::anim::CharacterScheduler;
+use super::dialogue::{ConversationRuntime, SCREEN_PROJECTION};
 use super::geometry::{
     self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, BopConfig, Camera, DEFAULT_HUD_CAMERA_ZOOM,
     GAME_HEIGHT, HALF_HEIGHT, HALF_WIDTH, OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y,
@@ -634,6 +635,12 @@ pub(crate) struct Scene {
     hud: Option<Hud>,
     /// Index of the first HUD layer in `layer_specs`.
     hud_start: usize,
+    /// 6E in-game conversation (M6-CONTRACT §14.2). Its layer group is
+    /// appended after the HUD group and draws above it. `None` for the
+    /// frozen render-fixture path and synthetic scenes without dialogue.
+    conversation: Option<ConversationRuntime>,
+    /// Index of the first conversation layer in `layer_specs`.
+    conversation_start: usize,
 }
 
 /// One scene-owned HUD: loaded assets + runtime state + layer registry.
@@ -648,7 +655,7 @@ impl Scene {
     /// into Bevy's `Assets<Image>`.
     pub(crate) fn new(loaded: LoadedSlice) -> Result<(Self, Vec<PageImage>), RenderError> {
         let LoadedSlice {
-            pages,
+            mut pages,
             stage_zoom,
             props,
             characters: loaded_characters,
@@ -660,9 +667,7 @@ impl Scene {
             player_vocals: _,
             opponent_vocals: _,
             hud,
-            // The scene-integration slice wires the conversation runtime
-            // (M6-CONTRACT §14.2); temporary allow until that lands.
-            dialogue: _unused_dialogue,
+            dialogue,
         } = loaded;
         // The HUD state is built before the character rigs consume the loaded
         // characters (it needs their normalized `healthIcon` data).
@@ -755,6 +760,20 @@ impl Scene {
             _ => None,
         };
 
+        // M6-CONTRACT §14.2: the camCutscene group is appended after the HUD
+        // group, so its quads draw above the gameplay HUD. The runtime bakes
+        // every line's glyph pages into the same page store before `pages`
+        // leaves this constructor.
+        let conversation_start = layer_specs.len();
+        let conversation = match dialogue {
+            Some(dialogue) => Some(ConversationRuntime::new(
+                dialogue,
+                &mut layer_specs,
+                &mut pages,
+            )?),
+            None => None,
+        };
+
         let mut player_note_indices = vec![usize::MAX; notes.len()];
         let mut opponent_note_indices = vec![usize::MAX; notes.len()];
         for (index, note) in notes.iter().enumerate() {
@@ -811,6 +830,8 @@ impl Scene {
                 camera_events: CameraEventState::new(follow_focus, scroll_speed),
                 hud,
                 hud_start,
+                conversation,
+                conversation_start,
             },
             pages,
         ))
@@ -818,6 +839,14 @@ impl Scene {
 
     pub(crate) fn layer_specs(&self) -> &[LayerSpec] {
         &self.layer_specs
+    }
+
+    /// Whether the loaded conversation is currently running (the native
+    /// `isInCutscene` gate for the advance key).
+    pub(crate) fn conversation_active(&self) -> bool {
+        self.conversation
+            .as_ref()
+            .is_some_and(ConversationRuntime::active)
     }
 
     /// One scene tick, consuming only events/inputs that belong to `sim_ms`.
@@ -936,11 +965,24 @@ impl Scene {
                 // M6-CONTRACT §14: while a conversation is active the advance
                 // key drives its state machine; the gameplay scene itself has
                 // no advance effect.
-                InputEvent::Advance { .. } => {}
+                InputEvent::Advance { .. } => {
+                    if let Some(conversation) = &mut self.conversation {
+                        conversation.advance();
+                    }
+                }
             }
         }
 
         self.process_events(events)?;
+
+        // The conversation's per-tick update runs after the event rows (a
+        // same-tick `dialogue:` trigger is already active) and before the
+        // draw path re-reads `layer_specs`. Completed conversations write
+        // zero alpha and no text pages, so their group stops drawing.
+        if let Some(conversation) = &mut self.conversation {
+            conversation.begin_tick(self.sim_ms);
+            conversation.sync_layer_specs(&mut self.layer_specs)?;
+        }
 
         self.trigger_opponent_notes();
         // Strumline.hx:653-669: an opponent hold that reached its end no
@@ -1442,9 +1484,22 @@ impl Scene {
             // EnableMask / sserafim / any no-handler kind: record-only
             // (M6-CONTRACT §12.2).
             TraceEvent::UnknownEvent { .. } => {}
-            // The 6E conversation slice consumes `choreography` trigger rows;
-            // record-only until that lands.
-            TraceEvent::Choreography { .. } => {}
+            // The 6E conversation slice consumes `dialogue:` trigger rows.
+            // Unknown conversation ids and triggers without a loaded payload
+            // fail closed instead of silently showing the wrong content.
+            TraceEvent::Choreography { event, .. } => {
+                if let Some(id) = event.strip_prefix("dialogue:") {
+                    let Some(conversation) = &mut self.conversation else {
+                        return Err(RenderError::Unsupported {
+                            detail: format!(
+                                "dialogue trigger {event:?} fired but the scene loaded no \
+                                 conversation payload"
+                            ),
+                        });
+                    };
+                    conversation.start(id)?;
+                }
+            }
             TraceEvent::OpponentHit {
                 note_id,
                 note_direction,
@@ -1570,6 +1625,12 @@ impl Scene {
                     .compose(&hud.assets, &hud.layers, self.camera_events.hud_zoom);
             for (index, quads) in hud_quads.into_iter().enumerate() {
                 layers[self.hud_start + index] = quads;
+            }
+        }
+        if let Some(conversation) = &self.conversation {
+            let conversation_quads = conversation.draw(SCREEN_PROJECTION)?;
+            for (index, quads) in conversation_quads.into_iter().enumerate() {
+                layers[self.conversation_start + index] = quads;
             }
         }
         Ok(layers)

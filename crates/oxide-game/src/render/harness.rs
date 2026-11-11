@@ -177,6 +177,8 @@ struct ReadbackState {
 pub(crate) struct Harness {
     app: App,
     mesh_handles: Vec<Handle<Mesh>>,
+    material_handles: Vec<Handle<ColorMaterial>>,
+    page_handles: Vec<Handle<Image>>,
     entities: Vec<Entity>,
     requested: Arc<AtomicU64>,
     result: ReadbackSlot,
@@ -382,6 +384,8 @@ impl Harness {
         Ok(Self {
             app,
             mesh_handles,
+            material_handles,
+            page_handles,
             entities,
             requested,
             result,
@@ -392,7 +396,18 @@ impl Harness {
 
     /// Updates the layer meshes and returns the current frame as RGBA8 bytes
     /// (1280x720, row-major, top-left origin, straight alpha).
-    pub(crate) fn render(&mut self, layers: &[Vec<Quad>]) -> Result<Vec<u8>, RenderError> {
+    ///
+    /// [D] Materials are built once, but the scene re-reads its `LayerSpec`s
+    /// on every tick. Refreshing the whole material list here (instead of
+    /// tracking a mutable conversation subrange) is the smallest honest
+    /// update: only the conversation layers ever change values, the refresh
+    /// is O(layer count) with no allocation, and the frozen fixture digests
+    /// are unchanged because their specs are constant.
+    pub(crate) fn render(
+        &mut self,
+        layers: &[Vec<Quad>],
+        specs: &[LayerSpec],
+    ) -> Result<Vec<u8>, RenderError> {
         if let Some(detail) = &self.failed {
             return Err(RenderError::Readback {
                 detail: detail.clone(),
@@ -406,6 +421,25 @@ impl Harness {
                     self.mesh_handles.len()
                 ),
             });
+        }
+        if specs.len() != self.material_handles.len() {
+            return Err(RenderError::Renderer {
+                detail: format!(
+                    "scene produced {} layer specs but the harness owns {} materials",
+                    specs.len(),
+                    self.material_handles.len()
+                ),
+            });
+        }
+
+        {
+            let mut materials = self.app.world_mut().resource_mut::<Assets<ColorMaterial>>();
+            sync_material_specs(
+                &mut materials,
+                &self.material_handles,
+                &self.page_handles,
+                specs,
+            )?;
         }
 
         {
@@ -700,6 +734,54 @@ fn store_readback_failure(state: &ReadbackState, generation: u64, failure: Readb
         *slot = Some((generation, Err(failure)));
     }
     state.reported.store(generation, Ordering::Release);
+}
+
+/// Rewrites every material from the current scene layer specs.
+///
+/// [D] The windowed and headless harnesses both build materials once at app
+/// construction. The 6E conversation changes a layer's color alpha and its
+/// text page index at runtime, so each frame upload re-reads the specs. Only
+/// conversation layers actually change; the loop is bounded by the scene's
+/// fixed layer count and allocates nothing.
+pub(crate) fn sync_material_specs(
+    materials: &mut Assets<ColorMaterial>,
+    handles: &[Handle<ColorMaterial>],
+    page_handles: &[Handle<Image>],
+    specs: &[LayerSpec],
+) -> Result<(), RenderError> {
+    if handles.len() != specs.len() {
+        return Err(RenderError::Renderer {
+            detail: format!(
+                "scene produced {} layer specs but the renderer owns {} materials",
+                specs.len(),
+                handles.len()
+            ),
+        });
+    }
+    for (handle, spec) in handles.iter().zip(specs) {
+        let texture = match spec.page {
+            Some(index) => Some(
+                page_handles
+                    .get(index)
+                    .ok_or_else(|| RenderError::Renderer {
+                        detail: format!(
+                            "layer spec references page {index} but only {} pages were uploaded",
+                            page_handles.len()
+                        ),
+                    })?
+                    .clone(),
+            ),
+            None => None,
+        };
+        let Some(mut material) = materials.get_mut(handle) else {
+            return Err(RenderError::Renderer {
+                detail: "layer material handle is missing from Assets<ColorMaterial>".to_string(),
+            });
+        };
+        material.color = Color::srgba(spec.color[0], spec.color[1], spec.color[2], spec.color[3]);
+        material.texture = texture;
+    }
+    Ok(())
 }
 
 /// Degenerate but non-empty placeholder so hidden layers never create an

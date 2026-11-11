@@ -14,10 +14,10 @@ use bevy::sprite_render::AlphaMode2d;
 use bevy::window::{PresentMode, Window, WindowCloseRequested, WindowPlugin, WindowResolution};
 use bevy::winit::WinitPlugin;
 
-use super::input::direction_for;
+use super::input::{direction_for, is_advance_key};
 use super::session::PlayRuntime;
 use super::{PlayConfig, PlayError, QuitReason, WindowConfig};
-use crate::render::harness::{build_mesh, placeholder_mesh};
+use crate::render::harness::{build_mesh, placeholder_mesh, sync_material_specs};
 use crate::render::load::PageImage;
 use crate::render::scene::{LayerSpec, Quad};
 
@@ -25,6 +25,8 @@ use crate::render::scene::{LayerSpec, Quad};
 #[derive(Resource)]
 struct WindowLayers {
     mesh_handles: Vec<Handle<Mesh>>,
+    material_handles: Vec<Handle<ColorMaterial>>,
+    page_handles: Vec<Handle<Image>>,
     entities: Vec<Entity>,
     /// F6 debug-overlay text entity (top layer, hidden until toggled).
     overlay: Entity,
@@ -151,6 +153,8 @@ pub(crate) fn build(
     app.insert_resource(runtime);
     app.insert_resource(WindowLayers {
         mesh_handles,
+        material_handles,
+        page_handles,
         entities,
         overlay,
     });
@@ -166,6 +170,7 @@ fn play_frame(
     mut runtime: ResMut<PlayRuntime>,
     layers: Res<WindowLayers>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
     mut visibility: Query<&mut Visibility>,
     mut overlay_text: Query<&mut Text2d, With<DebugOverlayText>>,
     time: Res<Time>,
@@ -212,6 +217,14 @@ fn play_frame(
                 KeyCode::F6 => {
                     runtime.toggle_debug_overlay();
                 }
+                // CUTSCENE_ADVANCE: [Z, ENTER] press edges drive the active
+                // conversation once per tick; autorepeat is filtered above.
+                key if is_advance_key(key) => {
+                    if let Err(error) = runtime.queue_advance() {
+                        runtime.request_error(error, &mut exit);
+                        return;
+                    }
+                }
                 key => {
                     if let Some(direction) = direction_for(key)
                         && let Err(error) = runtime.queue_key(direction, true)
@@ -255,7 +268,14 @@ fn play_frame(
             return;
         }
     };
-    if let Err(error) = upload_layers(&layers, &mut meshes, &mut visibility, &quads) {
+    if let Err(error) = upload_layers(
+        &layers,
+        runtime.layer_specs(),
+        &mut meshes,
+        &mut materials,
+        &mut visibility,
+        &quads,
+    ) {
         runtime.request_error(error, &mut exit);
         return;
     }
@@ -296,7 +316,9 @@ fn update_overlay(
 
 fn upload_layers(
     layers: &WindowLayers,
+    specs: &[LayerSpec],
     meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
     visibility: &mut Query<&mut Visibility>,
     quads: &[Vec<Quad>],
 ) -> Result<(), PlayError> {
@@ -309,6 +331,16 @@ fn upload_layers(
             ),
         });
     }
+
+    sync_material_specs(
+        materials,
+        &layers.material_handles,
+        &layers.page_handles,
+        specs,
+    )
+    .map_err(|error| PlayError::Session {
+        detail: format!("could not refresh layer materials: {error}"),
+    })?;
 
     for (handle, layer) in layers.mesh_handles.iter().zip(quads.iter()) {
         if layer.is_empty() {

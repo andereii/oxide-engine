@@ -15,6 +15,7 @@ use std::path::Path;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, Image, ImageSampler, ImageType};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use oxide_atlas::{AnimateStage, frame_quad, parse_animate, parse_packer_text, parse_sparrow};
 use oxide_data::Typed;
 use oxide_data::character::AnimationData;
@@ -53,6 +54,53 @@ impl Role {
 /// A decoded page ready to be inserted into Bevy's `Assets<Image>`.
 pub(crate) struct PageImage {
     pub(crate) image: Image,
+}
+
+impl PageImage {
+    /// Builds a page from straight-alpha RGBA8 bytes.
+    ///
+    /// Used for the runtime-baked dialogue glyph pages: the loader page store
+    /// only decodes files, while `raster_glyph_page` returns raw coverage
+    /// pages. The sampler follows the dialogue `isPixel` rule (nearest).
+    pub(crate) fn from_rgba(
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        is_pixel: bool,
+    ) -> Result<Self, RenderError> {
+        let path = "<runtime glyph page>".to_string();
+        if width == 0 || height == 0 {
+            return Err(RenderError::Image {
+                path,
+                detail: "runtime glyph page has a zero dimension".to_string(),
+            });
+        }
+        let expected = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
+        if rgba.len() != expected {
+            return Err(RenderError::Image {
+                path,
+                detail: format!(
+                    "runtime glyph page is {width}x{height} but carries {} bytes (expected {expected})",
+                    rgba.len()
+                ),
+            });
+        }
+        let mut image = Image::new(
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            rgba,
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        image.sampler = sampler_for(is_pixel);
+        Ok(Self { image })
+    }
 }
 
 /// One frame of a sparse or packer page (trimmed-frame geometry kept
@@ -363,12 +411,11 @@ pub(crate) fn load_slice_for_song(
 }
 
 /// Dialogue-enabled variant of [`load_slice_for_song`] (6E). The chart id is
-/// consumed by the scene-integration slice (M6-CONTRACT §14.2); temporary
-/// dead-code allow until it lands.
-#[allow(dead_code)]
 /// mapped through the shipped senpai-family table; ids outside that table
 /// simply load without a dialogue payload. The frozen fixture entry point
-/// above deliberately never calls this.
+/// above deliberately never calls this. The xtask dialogue fixture family
+/// consumes these (next slice); temporary dead-code allow.
+#[allow(dead_code)]
 pub(crate) fn load_slice_for_song_with_dialogue(
     assets_root: &Path,
     chart_id: &str,
@@ -430,7 +477,8 @@ fn split_song_variant(chart_id: &str) -> (&str, &str) {
 
 /// Shipped week-6 dialogue family (uncensored only): the same song/variant
 /// table the choreography triggers use (`slice/choreography.rs`).
-/// Consumed by the scene-integration slice; temporary allow.
+/// The xtask dialogue fixture family consumes these (next slice); temporary
+/// allow.
 #[allow(dead_code)]
 fn dialogue_conversation_id(chart_id: &str) -> Option<&'static str> {
     let (song, variant) = split_song_variant(chart_id);
@@ -445,8 +493,8 @@ fn dialogue_conversation_id(chart_id: &str) -> Option<&'static str> {
 }
 
 /// Dialogue id for a loader call. `enabled == false` is the frozen render
-/// fixture path and always yields `None`. Consumed by the scene-integration
-/// slice; temporary allow.
+/// fixture path and always yields `None`. The xtask dialogue fixture family
+/// consumes these (next slice); temporary allow.
 #[allow(dead_code)]
 fn dialogue_load_id(chart_id: &str, enabled: bool) -> Option<&'static str> {
     if enabled {
@@ -856,6 +904,13 @@ pub(crate) struct PageStore {
 }
 
 impl PageStore {
+    /// The decoded pages in registration order (test-only; the production
+    /// loader consumes `pages.pages` directly in the LoadedSlice literal).
+    #[cfg(test)]
+    pub(crate) fn into_pages(self) -> Vec<PageImage> {
+        self.pages
+    }
+
     fn load_image_key(
         &mut self,
         vfs: &Vfs,
