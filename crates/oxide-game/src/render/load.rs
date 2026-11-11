@@ -62,13 +62,10 @@ impl PageImage {
     ///
     /// Used for the runtime-baked dialogue glyph pages: the loader page store
     /// only decodes files, while `raster_glyph_page` returns raw coverage
-    /// pages. The sampler follows the dialogue `isPixel` rule (nearest).
-    pub(crate) fn from_rgba(
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-        is_pixel: bool,
-    ) -> Result<Self, RenderError> {
+    /// pages. `FunkinTypeText` uses flixel's default sampling, so these pages
+    /// are always LINEAR; the dialogue box's `isPixel` applies to its sprite
+    /// page only.
+    pub(crate) fn from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Result<Self, RenderError> {
         let path = "<runtime glyph page>".to_string();
         if width == 0 || height == 0 {
             return Err(RenderError::Image {
@@ -99,7 +96,7 @@ impl PageImage {
             TextureFormat::Rgba8UnormSrgb,
             RenderAssetUsages::default(),
         );
-        image.sampler = sampler_for(is_pixel);
+        image.sampler = sampler_for(false);
         Ok(Self { image })
     }
 }
@@ -321,12 +318,6 @@ pub(crate) struct LoadedNote {
     pub(crate) sustain_ms: f64,
     pub(crate) opponent: bool,
     pub(crate) note_id: Option<u32>,
-    /// Chart note kind (`k`), preserved for the 6E choreography consumers
-    /// (M6-CONTRACT §14.2). The SIM reads the kind from its own note model;
-    /// the scene reads the kind from the row, so this field's consumer is
-    /// the choreography side of a later slice.
-    #[allow(dead_code)]
-    pub(crate) kind: Option<String>,
 }
 
 /// Everything the scene builder and headless harness need.
@@ -432,9 +423,7 @@ pub(crate) fn load_slice_for_song(
 /// Dialogue-enabled variant of [`load_slice_for_song`] (6E). The chart id is
 /// mapped through the shipped senpai-family table; ids outside that table
 /// simply load without a dialogue payload. The frozen fixture entry point
-/// above deliberately never calls this. The xtask dialogue fixture family
-/// consumes these (next slice); temporary dead-code allow.
-#[allow(dead_code)]
+/// above deliberately never calls this; the dialogue render family does.
 pub(crate) fn load_slice_for_song_with_dialogue(
     assets_root: &Path,
     chart_id: &str,
@@ -498,9 +487,6 @@ fn split_song_variant(chart_id: &str) -> (&str, &str) {
 
 /// Shipped week-6 dialogue family (uncensored only): the same song/variant
 /// table the choreography triggers use (`slice/choreography.rs`).
-/// The xtask dialogue fixture family consumes these (next slice); temporary
-/// allow.
-#[allow(dead_code)]
 fn dialogue_conversation_id(chart_id: &str) -> Option<&'static str> {
     let (song, variant) = split_song_variant(chart_id);
     match song {
@@ -514,9 +500,7 @@ fn dialogue_conversation_id(chart_id: &str) -> Option<&'static str> {
 }
 
 /// Dialogue id for a loader call. `enabled == false` is the frozen render
-/// fixture path and always yields `None`. The xtask dialogue fixture family
-/// consumes these (next slice); temporary allow.
-#[allow(dead_code)]
+/// fixture path and always yields `None`.
 fn dialogue_load_id(chart_id: &str, enabled: bool) -> Option<&'static str> {
     if enabled {
         dialogue_conversation_id(chart_id)
@@ -651,7 +635,6 @@ pub(crate) fn load_slice_from_paths(
             sustain_ms,
             opponent,
             note_id: Some(id),
-            kind: note.kind.clone(),
         });
     }
 

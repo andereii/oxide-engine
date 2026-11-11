@@ -755,8 +755,29 @@ impl GameplaySimState {
         chart_id: &str,
         difficulty: &str,
     ) -> Result<Self, SliceError> {
+        Self::build_chart_events_with_story(assets_root, chart_id, difficulty, true)
+    }
+
+    /// Event-enabled builder with an explicit story-entry flag (M6-CONTRACT
+    /// §14.1): `story_entry == true` emits the per-song choreography trigger
+    /// rows (week-6 dialogue / darnell cutscene / 2hot ending video);
+    /// `false` is the freeplay-shaped replay used by the frozen gameplay
+    /// fixtures (no triggers, byte-identical to the pre-6E streams).
+    pub fn build_chart_events_with_story(
+        assets_root: &Path,
+        chart_id: &str,
+        difficulty: &str,
+        story_entry: bool,
+    ) -> Result<Self, SliceError> {
         let selection = chart_paths(chart_id)?;
-        Self::build_selected(assets_root, &selection, difficulty, true, true)
+        Self::build_selected_with_story(
+            assets_root,
+            &selection,
+            difficulty,
+            true,
+            true,
+            story_entry,
+        )
     }
 
     /// Shared chart/metadata loading. `opponent_side` selects the add-only
@@ -768,6 +789,26 @@ impl GameplaySimState {
         difficulty: &str,
         opponent_side: bool,
         event_side: bool,
+    ) -> Result<Self, SliceError> {
+        Self::build_selected_with_story(
+            assets_root,
+            selection,
+            difficulty,
+            opponent_side,
+            event_side,
+            true,
+        )
+    }
+
+    /// Shared loader with the story-entry choreography toggle (see
+    /// [`Self::build_chart_events_with_story`]).
+    fn build_selected_with_story(
+        assets_root: &Path,
+        selection: &ChartSelection,
+        difficulty: &str,
+        opponent_side: bool,
+        event_side: bool,
+        story_entry: bool,
     ) -> Result<Self, SliceError> {
         let chart_path = selection.chart_path.as_str();
         let metadata_path = selection.metadata_path.as_str();
@@ -918,7 +959,7 @@ impl GameplaySimState {
         };
         // The story-entry trigger table is schema-3 only: the frozen schema-1
         // and schema-2 paths must stay byte-identical (bopeebo included).
-        let choreography = if event_side {
+        let choreography = if event_side && story_entry {
             ChoreographyState::build(&selection.song, &selection.variant, last_note_end_ms)
         } else {
             None

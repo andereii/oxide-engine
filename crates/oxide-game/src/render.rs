@@ -203,6 +203,19 @@ impl SliceRenderer {
         Self::from_loaded(loaded, AdapterPolicy::Software)
     }
 
+    /// Dialogue-enabled variant of [`Self::build_for_song`] (M6-CONTRACT
+    /// §14.3): loads the conversation payload for the senpai-family chart
+    /// ids so the scene can drive the in-game dialogue; other ids load
+    /// identically to [`Self::build_for_song`].
+    pub fn build_for_song_with_dialogue(
+        assets_root: &Path,
+        chart_id: &str,
+        difficulty: &str,
+    ) -> Result<SliceRenderer, RenderError> {
+        let loaded = load::load_slice_for_song_with_dialogue(assets_root, chart_id, difficulty)?;
+        Self::from_loaded(loaded, AdapterPolicy::Software)
+    }
+
     fn from_loaded(
         loaded: load::LoadedSlice,
         policy: AdapterPolicy,

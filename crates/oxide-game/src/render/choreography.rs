@@ -259,10 +259,8 @@ impl Weekend1Runtime {
     }
 
     /// Native zIndex of the 7.1 s `SpraycanAtlasSprite` (`300`), above the
-    /// stage's mid-ground props and below the spraycan pile.
-    /// Consumed by the cutscene layer routing slice (the 7.1 s prop draws
-    /// on its own z slot); temporary allow until the draw path uses it.
-    #[allow(dead_code)]
+    /// stage's mid-ground props and below the spraycan pile. Consumed by the
+    /// scene's `Weekend1CanShotProp` stage item.
     pub(crate) fn can_shot_prop_z(&self) -> f64 {
         CUTSCENE_CAN_SHOT_PROP_Z
     }
@@ -301,24 +299,8 @@ impl Weekend1Runtime {
     }
 
     #[cfg(test)]
-    /// Consumed by the cutscene walkthrough test; temporary allow.
-    #[allow(dead_code)]
-    pub(crate) fn cutscene_can_clip(&self) -> Option<CutsceneCanClip> {
-        self.cutscene_can.as_ref().map(|can| can.clip)
-    }
-
-    #[cfg(test)]
-    /// Consumed by the cutscene walkthrough test; temporary allow.
-    #[allow(dead_code)]
     pub(crate) fn can_shot_prop_active(&self) -> bool {
         self.can_shot_prop.as_ref().is_some_and(|can| can.alive)
-    }
-
-    #[cfg(test)]
-    /// Consumed by the cutscene walkthrough test; temporary allow.
-    #[allow(dead_code)]
-    pub(crate) fn pending_darken_ms(&self) -> Option<f64> {
-        self.pending_darken_ms
     }
 
     /// Applies one `Hit`/`OpponentHit` row's chart note kind.
@@ -514,9 +496,8 @@ impl Weekend1Runtime {
         Ok(out)
     }
 
-    /// Draws the 7.1 s `Can Shot` prop on its native zIndex-300 layer.
-    /// Consumed by the cutscene layer routing slice; temporary allow.
-    #[allow(dead_code)]
+    /// Draws the 7.1 s `Can Shot` prop on its native zIndex-300 layer
+    /// (consumed by the scene's `Weekend1CanShotProp` stage item).
     pub(crate) fn draw_can_shot_prop(
         &self,
         camera: &Camera,
@@ -641,7 +622,6 @@ enum CutsceneStepAction {
 }
 
 /// Native zIndex of the 7.1 s `SpraycanAtlasSprite`.
-#[allow(dead_code)]
 pub(crate) const CUTSCENE_CAN_SHOT_PROP_Z: f64 = 300.0;
 /// Native `cutsceneDelay = 2.0 s`: the camera move that establishes the
 /// darnell shot.
@@ -910,13 +890,14 @@ impl DarnellCutscene {
         true
     }
 
-    /// Consumed by the play-window gate + the fixture family; temporary
-    /// allow until those land.
+    /// The play-window `isInCutscene` input gate is the real consumer once
+    /// the cutscene path (not only conversations) is wired into the window.
     #[allow(dead_code)]
     pub(crate) fn active(&self) -> bool {
         self.active
     }
 
+    /// The fixture family and the play-window gate read the consumed flag.
     #[allow(dead_code)]
     pub(crate) fn consumed(&self) -> bool {
         self.consumed
@@ -929,8 +910,6 @@ impl DarnellCutscene {
     }
 
     #[cfg(test)]
-    /// Consumed by the cutscene overlay timeline test; temporary allow.
-    #[allow(dead_code)]
     pub(crate) fn overlay_removed(&self) -> bool {
         self.overlay.removed
     }
@@ -1114,4 +1093,50 @@ fn draw_explosions(
         ));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn darnell_cutscene_overlay_lifecycle_and_consumed_gate() {
+        let mut cutscene = DarnellCutscene::new(Vec::new());
+        assert!(!cutscene.active());
+        assert!(!cutscene.consumed());
+        assert!(cutscene.start(0.0));
+        assert!(cutscene.active());
+
+        let focus = CutsceneFocus::default();
+        let dance = CutsceneDanceState::default();
+        cutscene.advance(0.0, &focus, &dance);
+        assert_eq!(cutscene.overlay_alpha(), 1.0);
+        assert!(!cutscene.overlay_removed());
+        cutscene.advance(OVERLAY_REMOVE_MS, &focus, &dance);
+        assert!(
+            cutscene.overlay_removed(),
+            "the overlay is removed at 0.25 s"
+        );
+        cutscene.advance(
+            OVERLAY_FADE_START_MS + OVERLAY_FADE_MS / 2.0,
+            &focus,
+            &dance,
+        );
+        assert!(
+            (cutscene.overlay_alpha() - 0.5).abs() < 1e-12,
+            "the folded surface fades over 2 s after the 0.3 s start delay"
+        );
+
+        let actions = cutscene.advance(CUTSCENE_END_MS, &focus, &dance);
+        assert!(
+            actions.contains(&CutsceneAction::End),
+            "the 10 s step ends the cutscene"
+        );
+        assert!(!cutscene.active());
+        assert!(cutscene.consumed());
+        assert!(
+            !cutscene.start(CUTSCENE_END_MS + 1.0),
+            "a second can_cutscene trigger is ignored"
+        );
+    }
 }

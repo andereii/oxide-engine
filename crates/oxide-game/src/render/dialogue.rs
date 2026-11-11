@@ -12,6 +12,10 @@
 //! bopeebo/school frame digests stay byte-identical.
 //!
 //! The scene-integration slice (M6-CONTRACT §14.2) consumes these types.
+//!
+//! Unknown keys at the document/entry levels are retained by the
+//! `oxide_data::dialogue` schemas; unknown keys inside animation objects
+//! follow the shared M1 `AnimationData` schema (no extra map).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -86,19 +90,18 @@ impl DialogueSheet {
             });
         }
         let mut clips = BTreeMap::new();
+        let names: Vec<&str> = atlas
+            .subtextures
+            .iter()
+            .map(|texture| texture.name.as_str())
+            .collect();
         for animation in animations {
-            let indices: Vec<usize> = atlas
-                .subtextures
-                .iter()
-                .enumerate()
-                .filter(|(_, texture)| {
-                    animation
-                        .prefix
-                        .as_deref()
-                        .is_some_and(|prefix| texture.name.starts_with(prefix))
-                })
-                .map(|(index, _)| index)
-                .collect();
+            let Some(prefix) = animation.prefix.as_deref() else {
+                // Native `addAtlasAnimation` returns without registering a
+                // clip when the animation has no prefix.
+                continue;
+            };
+            let indices = select_clip_frames(&names, prefix, animation.frame_indices.as_deref());
             clips.insert(
                 animation.name.clone(),
                 DialogueClip {
@@ -114,6 +117,46 @@ impl DialogueSheet {
             clips,
         })
     }
+}
+
+/// Native `FlxAnimationController.addByPrefix`/`addByIndices` frame selection.
+///
+/// Prefix matches are ordered by the integer parsed from the frame name after
+/// the prefix (`FlxFrame.sortFrames`); `addByIndices` then resolves each
+/// requested number against that name space, preserving the requested order
+/// (so a reversed `frameIndices` draws reversed). Missing numbers are skipped
+/// like `findSpriteFrame == -1`.
+fn select_clip_frames(names: &[&str], prefix: &str, frame_indices: Option<&[i64]>) -> Vec<usize> {
+    let parsed: Vec<Option<i64>> = names
+        .iter()
+        .map(|name| {
+            let tail = name.strip_prefix(prefix)?;
+            let digits: String = tail.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+            digits.parse().ok()
+        })
+        .collect();
+    if let Some(indices) = frame_indices.filter(|indices| !indices.is_empty()) {
+        let mut frames = Vec::new();
+        for &requested in indices {
+            if let Some(index) = names
+                .iter()
+                .enumerate()
+                .find(|(index, _)| parsed[*index] == Some(requested))
+                .map(|(index, _)| index)
+            {
+                frames.push(index);
+            }
+        }
+        return frames;
+    }
+    let mut frames: Vec<(i64, usize)> = names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| name.starts_with(prefix))
+        .map(|(index, _)| (parsed[index].unwrap_or(0), index))
+        .collect();
+    frames.sort_by_key(|&(number, index)| (number, index));
+    frames.into_iter().map(|(_, index)| index).collect()
 }
 
 /// One loaded dialogue box: data + dual sampler pages + the parsed sheet.
@@ -149,6 +192,9 @@ pub(crate) struct LoadedDialogue {
 pub(crate) const SCREEN_PROJECTION: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
 const FULL_UV: [[f64; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+/// The only dialogue font family this pipeline can raster (`fonts/pixel.otf`).
+const DIALOGUE_FONT_FAMILY: &str = "Pixel Arial 11 Bold";
 
 /// The two pre-registered sampler variants of one dialogue sprite.
 #[derive(Debug, Clone, Copy)]
@@ -283,6 +329,8 @@ pub(crate) struct ConversationRuntime {
     conversation_id: String,
     active: bool,
     last_tick_ms: Option<f64>,
+    #[cfg(test)]
+    advance_count: usize,
 }
 
 impl ConversationRuntime {
@@ -324,6 +372,7 @@ impl ConversationRuntime {
                 speaker_elapsed_ms: 0.0,
                 display_text: String::new(),
                 prefix_chars: 0,
+                text_visible: true,
                 current_key: None,
                 raster_error: None,
                 backdrop_started: false,
@@ -334,14 +383,9 @@ impl ConversationRuntime {
             conversation_id,
             active: false,
             last_tick_ms: None,
+            #[cfg(test)]
+            advance_count: 0,
         })
-    }
-
-    /// Consumed by the xtask dialogue fixture family (M6-CONTRACT §14.3
-    /// approval item); temporary allow until that lands.
-    #[allow(dead_code)]
-    pub(crate) fn conversation_id(&self) -> &str {
-        &self.conversation_id
     }
 
     pub(crate) fn active(&self) -> bool {
@@ -371,9 +415,9 @@ impl ConversationRuntime {
         self.last_tick_ms = None;
         self.active = true;
         // Native `Conversation.onCreate` dispatches DIALOGUE_START immediately
-        // (setupMusic/backdrop + the first entry opens); the user's first
-        // advance press only skips the typing. The fresh core therefore kicks
-        // Start -> Opening here, on the trigger tick.
+        // (setupMusic/backdrop + the first entry opens). The fresh core
+        // therefore kicks Start -> Opening here, on the trigger tick; an
+        // advance before the box animation finishes is a no-op.
         self.core.advance(&mut self.surface);
         Ok(())
     }
@@ -402,17 +446,31 @@ impl ConversationRuntime {
         if !self.active || self.core.completed() {
             return;
         }
+        #[cfg(test)]
+        {
+            self.advance_count += 1;
+        }
         self.core.advance(&mut self.surface);
         if self.core.completed() {
             self.active = false;
         }
     }
 
-    /// Consumed by the xtask dialogue fixture family (M6-CONTRACT §14.3
-    /// approval item); temporary allow until that lands.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn completed(&self) -> bool {
         self.core.completed()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance_count(&self) -> usize {
+        self.advance_count
+    }
+
+    #[cfg(test)]
+    pub(crate) fn skip(&mut self) {
+        if self.active {
+            self.core.skip(&mut self.surface);
+        }
     }
 
     /// Writes the current colors and text page indices into the scene's
@@ -527,6 +585,8 @@ struct DialogueSurface {
     speaker_elapsed_ms: f64,
     display_text: String,
     prefix_chars: usize,
+    /// `DialogueBox.onDialogueEnd` sets `textDisplay.visible = false`.
+    text_visible: bool,
     current_key: Option<(String, String)>,
     raster_error: Option<String>,
     backdrop_started: bool,
@@ -544,6 +604,7 @@ impl DialogueSurface {
         self.speaker_elapsed_ms = 0.0;
         self.display_text.clear();
         self.prefix_chars = 0;
+        self.text_visible = true;
         self.current_key = None;
         self.raster_error = None;
         self.backdrop_started = false;
@@ -557,10 +618,40 @@ impl DialogueSurface {
         }
         if self.box_animation.is_some() {
             self.box_elapsed_ms += elapsed_ms;
+            self.finish_box_animation();
         }
         if self.speaker_animation.is_some() {
             self.speaker_elapsed_ms += elapsed_ms;
         }
+    }
+
+    /// Native box `onAnimationFinished` chain for the scripted subclasses:
+    /// `sentenceEnd` -> `idle`, `click` -> `speaking`.
+    fn finish_box_animation(&mut self) {
+        let Some(box_id) = self.active_box.as_ref() else {
+            return;
+        };
+        if !is_scripted_box(box_id) {
+            return;
+        }
+        let Some(asset) = self.boxes.get(box_id) else {
+            return;
+        };
+        let Some(animation) = self.box_animation.as_deref() else {
+            return;
+        };
+        if !box_clip_finished(asset, animation, self.box_elapsed_ms) {
+            return;
+        }
+        match animation {
+            "sentenceEnd" => self.play_box("idle"),
+            "click" => self.play_box("speaking"),
+            _ => {}
+        }
+    }
+
+    fn active_box_scripted(&self) -> bool {
+        self.active_box.as_deref().is_some_and(is_scripted_box)
     }
 
     fn backdrop_alpha(&self) -> f64 {
@@ -653,6 +744,9 @@ impl DialogueSurface {
     }
 
     fn current_pages(&self) -> (Option<usize>, Option<usize>) {
+        if !self.text_visible {
+            return (None, None);
+        }
         let Some(key) = &self.current_key else {
             return (None, None);
         };
@@ -747,6 +841,9 @@ impl DialogueSurface {
         projection: [f64; 6],
         reveal: usize,
     ) -> Result<(Vec<Quad>, Vec<Quad>), RenderError> {
+        if !self.text_visible {
+            return Ok((Vec::new(), Vec::new()));
+        }
         let Some(key) = &self.current_key else {
             return Ok((Vec::new(), Vec::new()));
         };
@@ -808,7 +905,12 @@ impl ConversationSurface for DialogueSurface {
             .is_none_or(|name| box_clip_finished(asset, name, self.box_elapsed_ms))
     }
 
-    fn on_entry_open(&mut self, entry: &DialogueEntryData, box_changed: bool) {
+    fn on_entry_open(
+        &mut self,
+        entry: &DialogueEntryData,
+        box_changed: bool,
+        script_opening: bool,
+    ) {
         if box_changed || self.active_box.as_deref() != Some(entry.box_id.as_str()) {
             self.active_box = Some(entry.box_id.clone());
             // A fresh/revived box has an empty text display until the
@@ -822,7 +924,11 @@ impl ConversationSurface for DialogueSurface {
             self.backdrop_started = true;
             self.backdrop_elapsed_ms = 0.0;
         }
-        self.play_box(&entry.box_animation);
+        // The roses/thorns script sets Opening before super.onDialogueLine,
+        // so the native entry-advance branch skips playDialogueBoxAnimation.
+        if !script_opening {
+            self.play_box(&entry.box_animation);
+        }
     }
 
     fn on_speaker_show(&mut self, entry: &DialogueEntryData, speaker_changed: bool) {
@@ -836,12 +942,54 @@ impl ConversationSurface for DialogueSurface {
 
     fn on_line_set(&mut self, text: &str, _typed_len: usize) {
         self.prefix_chars = 0;
+        self.text_visible = true;
         self.set_display(text);
     }
 
     fn on_line_append(&mut self, text: &str, _typed_len: usize) {
+        self.text_visible = true;
         self.append_display(text);
     }
+
+    fn line_advance_forces_opening(&self) -> bool {
+        self.active_box_scripted()
+    }
+
+    fn on_line_advanced(&mut self) {
+        if !self.active_box_scripted() {
+            return;
+        }
+        // Roses/thorns `onDialogueLine` after `super`: click from idle, then
+        // speaking from click.
+        match self.box_animation.as_deref() {
+            Some("idle") => self.play_box("click"),
+            Some("click") => self.play_box("speaking"),
+            _ => {}
+        }
+    }
+
+    fn on_typing_complete(&mut self) {
+        if self.active_box_scripted() {
+            self.play_box("sentenceEnd");
+        }
+    }
+
+    fn on_dialogue_end(&mut self) {
+        // Only the roses/thorns subclasses hide the text display and play
+        // `exit` (the data's reversed frameIndices make the appear animation
+        // play backwards); the base DialogueBox hook is empty.
+        if self.active_box_scripted() {
+            self.text_visible = false;
+            self.play_box("exit");
+        }
+    }
+}
+
+/// The shipped scripted box subclasses (`dialogue/boxes/{roses,thorns}.hxc`).
+/// Both override the same five callbacks; roses additionally plays the
+/// textbox-click SFX (the play/audio seam, not the render surface).
+fn is_scripted_box(box_id: &str) -> bool {
+    matches!(box_id, "roses" | "thorns")
 }
 
 fn box_frame(asset: &BoxAsset, animation: Option<&str>, elapsed_ms: f64) -> Option<DialogueFrame> {
@@ -1028,6 +1176,20 @@ fn text_colors(data: &DialogueBoxData) -> Result<([f32; 4], Option<[f32; 4]>), R
     Ok((fill, shadow))
 }
 
+/// Fails closed when a box asks for a font family this pipeline cannot
+/// raster. The shipped boxes all use the embedded `Pixel Arial 11 Bold`.
+fn validate_font_family(data: &DialogueBoxData) -> Result<(), RenderError> {
+    if data.text.font_family == DIALOGUE_FONT_FAMILY {
+        return Ok(());
+    }
+    Err(RenderError::Unsupported {
+        detail: format!(
+            "dialogue box {:?} uses font family {:?}; only {:?} is supported",
+            data.name, data.text.font_family, DIALOGUE_FONT_FAMILY
+        ),
+    })
+}
+
 fn text_size(data: &DialogueBoxData) -> f64 {
     data.text
         .size
@@ -1072,9 +1234,11 @@ fn bake_line_rasters(
                 field_width,
                 TEXT_LETTER_SPACING,
             )?;
-            let fill_page = push_glyph_page(pages, &raster.fill, box_asset.data.is_pixel)?;
+            // `DialogueBox.isPixel` controls the box sprite page only; the
+            // `FunkinTypeText` glyphs use flixel's default (linear) sampling.
+            let fill_page = push_glyph_page(pages, &raster.fill)?;
             let shadow_page = match &raster.shadow {
-                Some(page) => Some(push_glyph_page(pages, page, box_asset.data.is_pixel)?),
+                Some(page) => Some(push_glyph_page(pages, page)?),
                 None => None,
             };
             cache.insert(
@@ -1090,17 +1254,12 @@ fn bake_line_rasters(
     Ok(cache)
 }
 
-fn push_glyph_page(
-    pages: &mut Vec<PageImage>,
-    page: &GlyphPage,
-    is_pixel: bool,
-) -> Result<usize, RenderError> {
+fn push_glyph_page(pages: &mut Vec<PageImage>, page: &GlyphPage) -> Result<usize, RenderError> {
     let index = pages.len();
     pages.push(PageImage::from_rgba(
         page.width,
         page.height,
         page.rgba.clone(),
-        is_pixel,
     )?);
     Ok(index)
 }
@@ -1248,6 +1407,7 @@ pub(crate) fn load_dialogue(
             });
         };
         let data = *box_data;
+        validate_font_family(&data)?;
         let (xml_path, xml_bytes, png_path, _png_bytes) =
             resolve_sheet_sources(vfs, &data.asset_path)?;
         let atlas = parse_sparrow_sheet(&xml_path, &xml_bytes)?;
@@ -1337,7 +1497,11 @@ pub(crate) fn load_dialogue(
 
 #[cfg(test)]
 mod tests {
+    use oxide_data::character::AnimationData;
+    use oxide_data::dialogue::{DialogueTyped, parse_dialogue_any};
+
     use super::*;
+    use crate::render::conversation::ConversationPhase;
 
     #[test]
     fn debug_senpai_walkthrough() {
@@ -1381,15 +1545,285 @@ mod tests {
         );
     }
 
-    /// Asset-gated: the real senpai conversation load (data + box + speaker
-    /// sheets + font) through the shipped tree.
-    fn senpai_runtime(root: &std::ffi::OsStr) -> ConversationRuntime {
+    /// Asset-gated: the real conversation load (data + box + speaker sheets +
+    /// font) through the shipped tree.
+    fn runtime_with_pages(
+        root: &std::ffi::OsStr,
+        id: &str,
+    ) -> (ConversationRuntime, Vec<PageImage>) {
         let vfs = Vfs::new(std::path::PathBuf::from(root));
         let mut pages = PageStore::default();
-        let loaded = load_dialogue(&vfs, &mut pages, "senpai").expect("senpai dialogue loads");
+        let loaded = load_dialogue(&vfs, &mut pages, id).expect("dialogue loads");
         let mut specs = Vec::new();
         let mut page_images = pages.into_pages();
-        ConversationRuntime::new(loaded, &mut specs, &mut page_images).expect("runtime builds")
+        let runtime =
+            ConversationRuntime::new(loaded, &mut specs, &mut page_images).expect("runtime builds");
+        (runtime, page_images)
+    }
+
+    fn senpai_runtime(root: &std::ffi::OsStr) -> ConversationRuntime {
+        runtime_with_pages(root, "senpai").0
+    }
+
+    /// Drives the runtime to the first visible typed character of the first
+    /// entry (the box animation runs first).
+    fn drive_until_typing(runtime: &mut ConversationRuntime) -> u64 {
+        for tick in 0..20_000u64 {
+            runtime.begin_tick(tick as f64);
+            if runtime.core().typed_len() > 0 {
+                return tick;
+            }
+        }
+        panic!("the first entry never types");
+    }
+
+    /// Drives the box surface until `animation` is current.
+    fn drive_until_box_animation(runtime: &mut ConversationRuntime, animation: &str) -> f64 {
+        let mut tick = runtime.last_tick_ms.unwrap_or(0.0);
+        for _ in 0..20_000 {
+            if runtime.surface.box_animation.as_deref() == Some(animation) {
+                return tick;
+            }
+            tick += 1.0;
+            runtime.begin_tick(tick);
+        }
+        panic!("box animation {animation:?} never became current");
+    }
+
+    fn drive_until_phase(runtime: &mut ConversationRuntime, phase: ConversationPhase) -> f64 {
+        let mut tick = runtime.last_tick_ms.unwrap_or(0.0);
+        for _ in 0..40_000 {
+            if runtime.core().phase() == phase {
+                return tick;
+            }
+            tick += 1.0;
+            runtime.begin_tick(tick);
+        }
+        panic!("conversation phase {phase:?} never became current");
+    }
+
+    /// F1: advancing during Opening dispatches DIALOGUE_COMPLETE_LINE, whose
+    /// `FlxTypeText.skip()` is a no-op before typing starts. The phase stays
+    /// Opening and the later multi-line append still has its pre-baked raster.
+    #[test]
+    fn opening_advance_is_a_noop_and_multiline_raster_stays_valid() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let (mut runtime, _pages) = runtime_with_pages(&root, "thorns");
+        runtime.start("thorns").expect("thorns starts");
+        assert_eq!(runtime.core().phase(), ConversationPhase::Opening);
+        runtime.advance();
+        assert_eq!(
+            runtime.core().phase(),
+            ConversationPhase::Opening,
+            "an Opening advance must not skip the unset first line"
+        );
+        assert_eq!(runtime.core().line_index(), 0);
+
+        drive_until_typing(&mut runtime);
+        assert_eq!(runtime.core().phase(), ConversationPhase::Speaking);
+        drive_until_phase(&mut runtime, ConversationPhase::Idle);
+        runtime.advance();
+        assert_eq!(
+            runtime.core().line_index(),
+            1,
+            "the multi-line entry appends its second line"
+        );
+        assert_eq!(runtime.core().phase(), ConversationPhase::Speaking);
+        runtime
+            .draw(SCREEN_PROJECTION)
+            .expect("the appended multi-line text has a baked raster");
+
+        // The thorns exit uses the same reversed appear indices.
+        let thorns = &runtime.surface.boxes["thorns"];
+        let enter = &thorns.sheet.clips["enter"];
+        let exit = &thorns.sheet.clips["exit"];
+        let reversed: Vec<usize> = enter.frames.iter().rev().copied().collect();
+        assert_eq!(
+            exit.frames, reversed,
+            "exit draws the appear frames reversed"
+        );
+    }
+
+    /// F3: the roses/thorns scripts play `sentenceEnd` on typing complete,
+    /// `click` -> `speaking` on line advances, and hide the text + play the
+    /// reversed `exit` on dialogue end.
+    #[test]
+    fn scripted_box_animations_follow_the_roses_script() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let (mut runtime, _pages) = runtime_with_pages(&root, "senpai");
+        let first_exit_rect = {
+            let roses = &runtime.surface.boxes["roses"];
+            let enter = &roses.sheet.clips["enter"];
+            let exit = &roses.sheet.clips["exit"];
+            let reversed: Vec<usize> = enter.frames.iter().rev().copied().collect();
+            assert_eq!(
+                exit.frames, reversed,
+                "the roses exit frameIndices [4,3,2,1,0] reverse the appear clip"
+            );
+            roses.sheet.frames.get(reversed[0]).map(|frame| frame.rect)
+        };
+
+        runtime.start("senpai").expect("senpai starts");
+        drive_until_typing(&mut runtime);
+        drive_until_phase(&mut runtime, ConversationPhase::Idle);
+        assert_eq!(
+            runtime.surface.box_animation.as_deref(),
+            Some("sentenceEnd"),
+            "onTypingComplete plays sentenceEnd"
+        );
+        drive_until_box_animation(&mut runtime, "idle");
+        runtime.advance();
+        assert_eq!(
+            runtime.core().phase(),
+            ConversationPhase::Opening,
+            "the script forces Opening on a line advance"
+        );
+        assert_eq!(
+            runtime.surface.box_animation.as_deref(),
+            Some("click"),
+            "idle -> click on the line advance"
+        );
+        drive_until_box_animation(&mut runtime, "speaking");
+        runtime.skip();
+        assert!(!runtime.surface.text_visible, "the text display is hidden");
+        assert_eq!(
+            runtime.surface.box_animation.as_deref(),
+            Some("exit"),
+            "onDialogueEnd plays exit"
+        );
+        assert_eq!(
+            box_frame(
+                &runtime.surface.boxes["roses"],
+                Some("exit"),
+                runtime.surface.box_elapsed_ms
+            )
+            .map(|frame| frame.rect),
+            first_exit_rect,
+            "the first exit frame is the last appear frame"
+        );
+    }
+
+    /// F2: dialogue glyph pages use flixel's default LINEAR sampler even
+    /// though the box sprite is `isPixel`; letterSpacing is the FlxText
+    /// default 0 (the score text's -1 is a different surface).
+    #[test]
+    fn dialogue_glyph_pages_are_linear_with_zero_letter_spacing() {
+        assert_eq!(TEXT_LETTER_SPACING, 0.0);
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let (runtime, pages) = runtime_with_pages(&root, "senpai");
+        let linear = bevy::image::ImageSampler::linear();
+        let mut checked = 0usize;
+        for cached in runtime.surface.cache.values() {
+            assert_eq!(
+                pages[cached.fill_page].image.sampler, linear,
+                "dialogue fill glyph pages must be linear"
+            );
+            if let Some(shadow) = cached.shadow_page {
+                assert_eq!(
+                    pages[shadow].image.sampler, linear,
+                    "dialogue shadow glyph pages must be linear"
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked > 0, "the senpai payload bakes glyph pages");
+    }
+
+    /// F7: a box asking for a font family the raster pipeline does not carry
+    /// fails closed with a typed error naming the family.
+    #[test]
+    fn unsupported_font_family_fails_closed() {
+        let json = r##"{
+  "version": "1.1.0",
+  "name": "Synthetic",
+  "assetPath": "synthetic",
+  "isPixel": true,
+  "flipX": false,
+  "flipY": false,
+  "offsets": [0, 0],
+  "scale": 1.0,
+  "text": {
+    "offsets": [0, 0],
+    "width": 100,
+    "color": "#000000",
+    "fontFamily": "Comic Sans",
+    "shadowColor": "#00000000",
+    "shadowWidth": 0
+  },
+  "animations": []
+}"##;
+        let document = parse_dialogue_any(json.as_bytes()).expect("synthetic box parses");
+        let DialogueTyped::Box(data) = document.typed else {
+            panic!("synthetic document must classify as a box");
+        };
+        let error = validate_font_family(&data).expect_err("unsupported family must fail");
+        match error {
+            RenderError::Unsupported { detail } => {
+                assert!(
+                    detail.contains("Comic Sans"),
+                    "error names the family: {detail}"
+                );
+                assert!(
+                    detail.contains(DIALOGUE_FONT_FAMILY),
+                    "error names the supported family: {detail}"
+                );
+            }
+            other => panic!("expected RenderError::Unsupported, got {other:?}"),
+        }
+    }
+
+    /// F3: `from_atlas` applies native addByPrefix sorting and addByIndices
+    /// ordering (a reversed index list draws reversed frames).
+    #[test]
+    fn dialogue_sheet_honors_frame_indices_in_requested_order() {
+        let xml = r#"<TextureAtlas imagePath="synthetic.png">
+  <SubTexture name="Clip0002" x="20" y="0" width="2" height="2"/>
+  <SubTexture name="Clip0000" x="0" y="0" width="1" height="1"/>
+  <SubTexture name="Clip0001" x="10" y="0" width="2" height="2"/>
+</TextureAtlas>"#;
+        let atlas = oxide_atlas::parse_sparrow(xml).expect("synthetic atlas parses");
+        let animation = |name: &str, frame_indices: Option<Vec<i64>>| AnimationData {
+            name: name.to_string(),
+            prefix: Some("Clip0".to_string()),
+            offsets: None,
+            looped: None,
+            frame_rate: None,
+            flip_x: None,
+            flip_y: None,
+            anim_type: None,
+            library: None,
+            frame_indices,
+            asset_path: None,
+            render_type: None,
+        };
+        let sheet = DialogueSheet::from_atlas(
+            [100.0, 100.0],
+            &atlas,
+            &[
+                animation("forward", None),
+                animation("reversed", Some(vec![2, 0])),
+            ],
+        )
+        .expect("sheet builds");
+        let widths = |name: &str| -> Vec<i32> {
+            sheet.clips[name]
+                .frames
+                .iter()
+                .map(|&index| sheet.frames[index].rect[2])
+                .collect()
+        };
+        assert_eq!(widths("forward"), vec![1, 2, 2], "prefix order is numeric");
+        assert_eq!(
+            widths("reversed"),
+            vec![2, 1],
+            "frameIndices order is preserved (not re-sorted)"
+        );
     }
 
     /// The runtime drives the frozen machine rules over the real payload:
@@ -1435,12 +1869,19 @@ mod tests {
             next_line,
             "the next entry opens with its own text"
         );
-        // Exhaust the remaining entries; the completion deactivates the
-        // runtime and a later trigger restarts it (kill/revive).
-        for _ in 0..8 {
-            runtime.advance();
+        // Exhaust the remaining entries. Advances while Opening are no-ops,
+        // so drive the Idle phases and let the box/typing clocks resolve.
+        let mut tick = open_tick as f64 + 120.0;
+        for _ in 0..300_000 {
+            if runtime.completed() {
+                break;
+            }
+            if runtime.core().phase() == ConversationPhase::Idle {
+                runtime.advance();
+            }
+            tick += 1.0;
+            runtime.begin_tick(tick);
         }
-        runtime.begin_tick(100_000.0);
         assert!(runtime.completed());
         assert!(!runtime.active());
         runtime.start("senpai").expect("restart after completion");

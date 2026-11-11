@@ -64,6 +64,8 @@ enum StageItemKind {
     /// The pre-registered weekend-1 can layer (`spraycanPile.zIndex - 1`);
     /// draws nothing until a kickcan row spawns a can.
     Weekend1Can,
+    /// The 7.1 s darnell-cutscene `Can Shot` prop at native zIndex 300.
+    Weekend1CanShotProp,
     /// One-shot `SpraypaintExplosion` layer (native stage member appended
     /// after the loaded props, above the stage group).
     Weekend1BigExplosion,
@@ -646,6 +648,10 @@ pub(crate) struct Scene {
     /// 6E in-game conversation (M6-CONTRACT §14.2). Its layer group is
     /// appended after the HUD group and draws above it. `None` for the
     /// frozen render-fixture path and synthetic scenes without dialogue.
+    ///
+    /// The native PauseSubState "Restart Dialogue" path
+    /// (`Conversation.resetConversation`) is the M7 pause-surface deliverable;
+    /// it is intentionally not wired into this scene.
     conversation: Option<ConversationRuntime>,
     /// Index of the first conversation layer in `layer_specs`.
     conversation_start: usize,
@@ -740,6 +746,11 @@ impl Scene {
         }
         if let Some(runtime) = &weekend1 {
             sorted.push((runtime.can_z(), sorted.len(), StageItemKind::Weekend1Can));
+            sorted.push((
+                runtime.can_shot_prop_z(),
+                sorted.len(),
+                StageItemKind::Weekend1CanShotProp,
+            ));
             sorted.push((0.0, sorted.len(), StageItemKind::Weekend1BigExplosion));
             sorted.push((0.0, sorted.len(), StageItemKind::Weekend1EzExplosion));
         }
@@ -760,6 +771,12 @@ impl Scene {
                     (characters[index].pages(), [1.0, 1.0, 1.0, 1.0])
                 }
                 StageItemKind::Weekend1Can => {
+                    let page = weekend1
+                        .as_ref()
+                        .map_or(usize::MAX, |runtime| runtime.can_page());
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                }
+                StageItemKind::Weekend1CanShotProp => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.can_page());
@@ -1260,23 +1277,30 @@ impl Scene {
                         self.player_line.release(direction);
                     }
                 }
-                // M6-CONTRACT §14: while a conversation is active the advance
-                // key drives its state machine; the gameplay scene itself has
-                // no advance effect.
-                InputEvent::Advance { .. } => {
-                    if let Some(conversation) = &mut self.conversation {
-                        conversation.advance();
-                    }
-                }
+                // M6-CONTRACT §14: the advance key is consumed after the
+                // event rows, one coalesced CUTSCENE_ADVANCE per tick.
+                InputEvent::Advance { .. } => {}
             }
         }
 
         self.process_events(events)?;
 
-        // The conversation's per-tick update runs after the event rows (a
-        // same-tick `dialogue:` trigger is already active) and before the
-        // draw path re-reads `layer_specs`. Completed conversations write
-        // zero alpha and no text pages, so their group stops drawing.
+        // Native order: processSongEvents -> processInputQueue -> cutscene
+        // keys. A same-tick `dialogue:` trigger starts first; two advance
+        // keys in one frame are one native boolean check, not two advances.
+        if inputs
+            .iter()
+            .any(|input| matches!(input, InputEvent::Advance { .. }))
+            && let Some(conversation) = &mut self.conversation
+        {
+            conversation.advance();
+        }
+
+        // The conversation's per-tick update runs after the event rows and
+        // the cutscene advance (a same-tick trigger is already active) and
+        // before the draw path re-reads `layer_specs`. Completed
+        // conversations write zero alpha and no text pages, so their group
+        // stops drawing.
         if let Some(conversation) = &mut self.conversation {
             conversation.begin_tick(self.sim_ms);
             conversation.sync_layer_specs(&mut self.layer_specs)?;
@@ -1957,6 +1981,10 @@ impl Scene {
                 StageItemKind::Character(index) => self.characters[index].draw(&self.camera)?,
                 StageItemKind::Weekend1Can => match &self.weekend1 {
                     Some(runtime) => runtime.draw_can(&self.camera)?,
+                    None => Vec::new(),
+                },
+                StageItemKind::Weekend1CanShotProp => match &self.weekend1 {
+                    Some(runtime) => runtime.draw_can_shot_prop(&self.camera)?,
                     None => Vec::new(),
                 },
                 StageItemKind::Weekend1BigExplosion => match &self.weekend1 {
@@ -3239,8 +3267,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::render::anim::AnimationDef;
+    use crate::render::conversation::ConversationPhase;
+    use crate::render::dialogue::{BoxAsset, DialogueSheet, LoadedDialogue};
     use crate::render::load::ReceptorFrames;
     use oxide_audio::conductor::TimeChange;
+    use oxide_data::dialogue::{
+        BackdropData, ConversationData, DialogueBoxData, DialogueBoxTextData, DialogueEntryData,
+        OutroData,
+    };
 
     fn animation(frames: &[usize], looped: bool) -> AnimationDef {
         AnimationDef::test(frames, 24.0, looped)
@@ -3359,6 +3393,113 @@ mod tests {
             cutscene_changes: None,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
+    }
+
+    fn empty_dialogue_entry(box_id: &str, lines: usize) -> DialogueEntryData {
+        DialogueEntryData {
+            speaker: String::new(),
+            speaker_animation: String::new(),
+            box_id: box_id.to_string(),
+            box_animation: "enter".to_string(),
+            text: (0..lines).map(|_| String::new()).collect(),
+            speed: None,
+            extra: BTreeMap::new(),
+        }
+    }
+
+    /// A raster-free conversation: empty lines never bake glyph pages, so the
+    /// scene-level advance/order tests run without reference assets.
+    fn synthetic_dialogue() -> LoadedDialogue {
+        let conversation = ConversationData {
+            version: "1.0.0".to_string(),
+            backdrop: BackdropData::Solid {
+                fade_time: 0.0,
+                color: "#000000".to_string(),
+                extra: BTreeMap::new(),
+            },
+            music: None,
+            outro: Some(OutroData::None {
+                extra: BTreeMap::new(),
+            }),
+            dialogue: vec![
+                empty_dialogue_entry("synthetic", 2),
+                empty_dialogue_entry("synthetic", 1),
+            ],
+            extra: BTreeMap::new(),
+        };
+        let box_data = DialogueBoxData {
+            version: "1.1.0".to_string(),
+            name: "Synthetic".to_string(),
+            asset_path: "synthetic".to_string(),
+            is_pixel: false,
+            flip_x: false,
+            flip_y: false,
+            offsets: (0.0, 0.0),
+            scale: 1.0,
+            text: DialogueBoxTextData {
+                offsets: (0.0, 0.0),
+                width: 100,
+                size: None,
+                color: "#000000".to_string(),
+                font_family: "Pixel Arial 11 Bold".to_string(),
+                shadow_color: None,
+                shadow_width: Some(0),
+                extra: BTreeMap::new(),
+            },
+            animations: Vec::new(),
+            extra: BTreeMap::new(),
+        };
+        LoadedDialogue {
+            conversation_id: "test".to_string(),
+            conversation,
+            boxes: BTreeMap::from([(
+                "synthetic".to_string(),
+                BoxAsset {
+                    data: box_data,
+                    linear_page: 0,
+                    pixel_page: 0,
+                    sheet: DialogueSheet {
+                        page_size: [1.0, 1.0],
+                        frames: Vec::new(),
+                        clips: BTreeMap::new(),
+                    },
+                },
+            )]),
+            speakers: BTreeMap::new(),
+            font_bytes: Vec::new(),
+        }
+    }
+
+    fn test_scene_with_dialogue(dialogue: LoadedDialogue) -> Scene {
+        let loaded = LoadedSlice {
+            pages: Vec::new(),
+            stage_zoom: 1.1,
+            props: Vec::new(),
+            characters: vec![
+                test_character(Role::Player, (100.0, 200.0), bf_animations(), Some("idle")),
+                test_character(Role::Opponent, (300.0, 400.0), BTreeMap::new(), None),
+                test_character(Role::Girlfriend, (500.0, 600.0), BTreeMap::new(), None),
+            ],
+            note_style: test_note_style(),
+            notes: Vec::new(),
+            scroll_speed: 1.5,
+            conductor_changes: vec![TimeChange {
+                time_stamp: 0.0,
+                beat_time: 0.0,
+                bpm: 100.0,
+                time_signature_num: 4,
+                time_signature_den: 4,
+            }],
+            player_vocals: Vec::new(),
+            opponent_vocals: Vec::new(),
+            hud: None,
+            dialogue: Some(dialogue),
+            weekend1_props: None,
+            cutscene_changes: None,
+        };
+        Scene::new(loaded)
+            .expect("synthetic dialogue scene builds")
+            .0
     }
 
     fn bf_animations() -> BTreeMap<String, AnimationDef> {
@@ -4055,7 +4196,6 @@ mod tests {
                 sustain_ms: 3000.0,
                 opponent: true,
                 note_id: Some(0),
-                kind: None,
             }],
         );
         let opponent_hit = TraceEvent::OpponentHit {
@@ -4279,5 +4419,142 @@ mod tests {
             .filter(|layer| !layer.is_empty())
             .count();
         assert!(non_empty >= 7, "bar/score/icons contribute quads");
+    }
+
+    fn dialogue_trigger_row(sim: u64) -> TraceEvent {
+        TraceEvent::Choreography {
+            schema: "3",
+            kind: "choreography",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event: "dialogue:test".to_string(),
+            arg: None,
+        }
+    }
+
+    /// F4: two advance keys in one frame are one native boolean check, and
+    /// the advance runs after `processSongEvents` (a same-tick dialogue
+    /// trigger starts first).
+    #[test]
+    fn dialogue_advance_is_coalesced_and_applied_after_event_rows() {
+        // Two Advance inputs in one step: one advance moves from the first
+        // empty line to the second; an uncoalesced second advance would open
+        // entry 1 instead.
+        let mut scene = test_scene_with_dialogue(synthetic_dialogue());
+        scene
+            .step(0, &[dialogue_trigger_row(0)], &[])
+            .expect("trigger tick");
+        assert!(scene.conversation_active());
+        let advance = InputEvent::Advance { sim_ms: 1 };
+        scene
+            .step(1, &[], &[advance.clone(), advance])
+            .expect("advance tick");
+        let conversation = scene.conversation.as_ref().expect("conversation");
+        assert_eq!(
+            conversation.advance_count(),
+            1,
+            "two Advance events are one advance"
+        );
+        assert_eq!(conversation.core().entry_index(), 0);
+        assert_eq!(
+            conversation.core().line_index(),
+            1,
+            "one advance reached the second empty line"
+        );
+
+        // Same-tick trigger + advance: the event row starts the conversation
+        // first, so the advance is counted (an advance processed before the
+        // rows would hit an inactive runtime and not be applied).
+        let mut scene = test_scene_with_dialogue(synthetic_dialogue());
+        scene
+            .step(
+                0,
+                &[dialogue_trigger_row(0)],
+                &[InputEvent::Advance { sim_ms: 0 }],
+            )
+            .expect("trigger + advance tick");
+        let conversation = scene.conversation.as_ref().expect("conversation");
+        assert!(conversation.active(), "the same-tick trigger started");
+        assert_eq!(
+            conversation.advance_count(),
+            1,
+            "the advance applies after the trigger starts"
+        );
+        assert_eq!(conversation.core().phase(), ConversationPhase::Idle);
+    }
+
+    /// F8: the 7.1 s `Can Shot` prop has its own z-300 stage item/layer and
+    /// receives a quad after a kickcan + the cutscene `CanShotProp` action.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the weekend-1 prop draw"]
+    fn weekend1_can_shot_prop_draws_on_its_z300_layer() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let loaded =
+            super::super::load::load_slice_for_song(std::path::Path::new(&root), "2hot", "easy")
+                .expect("2hot loads");
+        let (mut scene, _pages) = Scene::new(loaded).expect("2hot scene builds");
+
+        let can_shot_position = scene
+            .stage_items
+            .iter()
+            .position(|item| matches!(item.kind, StageItemKind::Weekend1CanShotProp))
+            .expect("the Can Shot stage item is registered");
+        let can_shot_layer = scene.stage_items[can_shot_position].layers[0].1;
+        assert_eq!(
+            scene.layer_specs[can_shot_layer].color,
+            [1.0, 1.0, 1.0, 1.0],
+            "the prop layer is untinted white"
+        );
+        assert!(
+            scene.layer_specs[can_shot_layer].page.is_some(),
+            "the prop layer is bound to the spraycan atlas page"
+        );
+
+        // z-sort: every stage prop below 300 draws before the prop, every
+        // prop above 300 draws after it.
+        for (index, item) in scene.stage_items.iter().enumerate() {
+            let StageItemKind::Prop(prop_index) = item.kind else {
+                continue;
+            };
+            let z = scene.props[prop_index].prop.z_index;
+            if z < 300.0 {
+                assert!(
+                    index < can_shot_position,
+                    "prop z {z} sorts below the Can Shot"
+                );
+            } else if z > 300.0 {
+                assert!(
+                    index > can_shot_position,
+                    "prop z {z} sorts above the Can Shot"
+                );
+            }
+        }
+
+        scene
+            .weekend1
+            .as_mut()
+            .expect("weekend-1 payload")
+            .on_hit("weekend-1-kickcan", 0.0);
+        // The 7.1 s cutscene step is the native `Can Shot` trigger.
+        scene
+            .apply_cutscene_action(super::super::choreography::CutsceneAction::CanShotProp)
+            .expect("CanShotProp action applies");
+        assert!(
+            scene
+                .weekend1
+                .as_ref()
+                .expect("weekend-1 payload")
+                .can_shot_prop_active(),
+            "the 7.1 s prop is alive"
+        );
+
+        let layers = scene.draw().expect("scene draws");
+        assert!(
+            !layers[can_shot_layer].is_empty(),
+            "the Can Shot prop layer receives its atlas quad"
+        );
     }
 }

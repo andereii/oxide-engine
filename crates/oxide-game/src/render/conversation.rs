@@ -7,8 +7,8 @@
 //!
 //! This module owns no Bevy pages. Box/speaker/text surfaces are abstracted
 //! behind [`ConversationSurface`], so the hermetic tests drive the machine
-//! with a recording fake and the later 6E scene slice wires the real sprites.
-//! [`raster_glyph_page`] is the pure ab_glyph half of that later load-path
+//! with a recording fake and the 6E dialogue/scene slice wires the real
+//! sprites. [`raster_glyph_page`] is the pure ab_glyph half of that load-path
 //! baking (`fonts/pixel.otf`, size 32).
 //!
 //! [D] `music_volume` is a virtual scalar: the play session/audio seam owns
@@ -16,8 +16,6 @@
 //! [D] The entry `speed` field is inert on the observed path (`Conversation.hx`
 //! never assigns `DialogueBox.speed`), so the pinned 0.05 s/char delay stays
 //! constant.
-
-#![allow(dead_code)] // consumed by the 6E scene/play slices in the next tasks
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use oxide_data::dialogue::{ConversationData, DialogueEntryData, OutroData};
@@ -29,15 +27,14 @@ pub(crate) const TYPE_DELAY_SECONDS: f64 = 0.05;
 /// Observed dialogue font size (`DialogueBox.loadText` creates `FunkinTypeText`
 /// at 32 px with the embedded pixel font).
 pub(crate) const TEXT_SIZE: f64 = 32.0;
-/// Native text `letterSpacing` (`FlxText.letterSpacing = -1` in the week-6
-/// pixel presentation).
-pub(crate) const TEXT_LETTER_SPACING: f64 = -1.0;
+/// Native dialogue text `letterSpacing` (`FlxText` default 0). The score
+/// text's `-1` belongs to `PlayState.scoreText`, not `DialogueBox.loadText`.
+pub(crate) const TEXT_LETTER_SPACING: f64 = 0.0;
 /// `shadowWidth` default 2: the shadow pass draws every glyph at (+2, +2).
 pub(crate) const SHADOW_OFFSET: f64 = 2.0;
 /// The fixed shelf width used when packing baked glyphs into a page.
 const GLYPH_PAGE_WIDTH: u32 = 1024;
-/// One transparent pixel between packed glyphs (nearest sampling needs no
-/// bleed margin, but the gap keeps page rects unambiguous).
+/// One transparent pixel between packed glyphs keeps page rects unambiguous.
 const GLYPH_PADDING: u32 = 1;
 
 /// The five native `ConversationState` values.
@@ -59,7 +56,7 @@ struct LinearFade {
     elapsed: f64,
 }
 
-/// The output/query surface the later 6E load/scene slice implements.
+/// The output/query surface the 6E load/scene slice implements.
 ///
 /// Default methods keep the hermetic fake small and let the real surface
 /// implement only what it draws. `box_animation`/`box_animation_finished`
@@ -78,7 +75,16 @@ pub(crate) trait ConversationSurface {
 
     /// Entry open: swap/revive the box when `box_changed`, then play the
     /// entry's `boxAnimation` (with the native suffix-strip -> idle fallback).
-    fn on_entry_open(&mut self, _entry: &DialogueEntryData, _box_changed: bool) {}
+    /// `script_opening` is the roses/thorns script override that forces the
+    /// state to `Opening` before `super.onDialogueLine`; the native box skips
+    /// `playDialogueBoxAnimation` in that branch.
+    fn on_entry_open(
+        &mut self,
+        _entry: &DialogueEntryData,
+        _box_changed: bool,
+        _script_opening: bool,
+    ) {
+    }
 
     /// Opening complete: swap/revive the speaker when `speaker_changed`, then
     /// play the entry's `speakerAnimation`.
@@ -91,6 +97,16 @@ pub(crate) trait ConversationSurface {
     /// A later line of the same entry (`appendText`): keep the already-typed
     /// prefix and type the new text after it.
     fn on_line_append(&mut self, _text: &str, _typed_len: usize) {}
+
+    /// Whether the active box script sets `ConversationState.Opening` before
+    /// the native `onDialogueLine` super call (roses/thorns).
+    fn line_advance_forces_opening(&self) -> bool {
+        false
+    }
+
+    /// Post-super script hook for a dialogue line advance (roses/thorns play
+    /// `click`, or `speaking` when `click` is already current).
+    fn on_line_advanced(&mut self) {}
 
     /// Native `onTypingComplete` (the box script plays `sentenceEnd` here).
     fn on_typing_complete(&mut self) {}
@@ -126,6 +142,7 @@ pub(crate) struct ConversationState {
     outro_elapsed: f64,
     outro_alpha: f64,
     /// [D] Virtual music volume consumed by the play/audio seam.
+    #[allow(dead_code)] // play-session audio seam (M6-CONTRACT §14.2)
     music_volume: f64,
     music_fade: Option<LinearFade>,
     completed: bool,
@@ -156,19 +173,23 @@ impl ConversationState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn phase(&self) -> ConversationPhase {
         self.phase
     }
 
+    #[cfg(test)]
     pub(crate) fn entry_index(&self) -> usize {
         self.entry_index
     }
 
+    #[cfg(test)]
     pub(crate) fn line_index(&self) -> usize {
         self.line_index
     }
 
     /// Full text of the current line (even while it is still typing).
+    #[cfg(test)]
     pub(crate) fn line_text(&self) -> &str {
         &self.line_text
     }
@@ -184,6 +205,7 @@ impl ConversationState {
     }
 
     /// [D] Virtual music volume (`0..=1`).
+    #[cfg(test)]
     pub(crate) fn music_volume(&self) -> f64 {
         self.music_volume
     }
@@ -239,15 +261,28 @@ impl ConversationState {
         }
         match self.phase {
             ConversationPhase::Start => self.start(surface),
-            ConversationPhase::Opening | ConversationPhase::Speaking => {
-                self.skip_typing(surface);
+            ConversationPhase::Opening => {
+                // Native DIALOGUE_COMPLETE_LINE -> `DialogueBox.skip()` ->
+                // `FlxTypeText.skip()` is a NO-OP before typing starts, so
+                // the state remains Opening.
             }
-            ConversationPhase::Idle => self.next_line(surface),
+            ConversationPhase::Speaking => self.skip_typing(surface),
+            ConversationPhase::Idle => {
+                let script_opening = surface.line_advance_forces_opening();
+                if script_opening {
+                    self.phase = ConversationPhase::Opening;
+                }
+                self.next_line(surface, script_opening);
+                if script_opening {
+                    surface.on_line_advanced();
+                }
+            }
             ConversationPhase::Ending => self.finish(surface),
         }
     }
 
     /// `skipConversation`: `DIALOGUE_END` immediately, skipping the outro.
+    #[cfg(test)]
     pub(crate) fn skip(&mut self, surface: &mut impl ConversationSurface) {
         if self.completed || self.phase == ConversationPhase::Ending {
             return;
@@ -314,11 +349,11 @@ impl ConversationState {
             }
         }
         self.entry_index = 0;
-        self.open_entry(surface);
+        self.open_entry(surface, false);
     }
 
     /// `showCurrentDialogueBox` + `playDialogueBoxAnimation`.
-    fn open_entry(&mut self, surface: &mut impl ConversationSurface) {
+    fn open_entry(&mut self, surface: &mut impl ConversationSurface, script_opening: bool) {
         let Some(entry) = self.conversation.dialogue.get(self.entry_index).cloned() else {
             self.enter_ending(surface);
             return;
@@ -333,7 +368,7 @@ impl ConversationState {
             self.current_box = Some(entry.box_id.clone());
         }
         self.phase = ConversationPhase::Opening;
-        surface.on_entry_open(&entry, box_changed);
+        surface.on_entry_open(&entry, box_changed, script_opening);
     }
 
     /// `showCurrentSpeaker` + `playSpeakerAnimation` + `setText`.
@@ -374,7 +409,7 @@ impl ConversationState {
     }
 
     /// `onDialogueLine` in the Idle state.
-    fn next_line(&mut self, surface: &mut impl ConversationSurface) {
+    fn next_line(&mut self, surface: &mut impl ConversationSurface, script_opening: bool) {
         let Some(entry) = self.conversation.dialogue.get(self.entry_index).cloned() else {
             self.enter_ending(surface);
             return;
@@ -386,7 +421,7 @@ impl ConversationState {
             if self.entry_index >= self.conversation.dialogue.len() {
                 self.enter_ending(surface);
             } else {
-                self.open_entry(surface);
+                self.open_entry(surface, script_opening);
             }
         } else {
             let text = entry.text[self.line_index].clone();
@@ -396,17 +431,11 @@ impl ConversationState {
 
     /// `onDialogueCompleteLine` -> `DialogueBox.skip()`.
     fn skip_typing(&mut self, surface: &mut impl ConversationSurface) {
+        // `FlxTypeText.skip()` only completes an active typewriter; before
+        // typing starts it is a no-op and the phase is left unchanged.
         if self.phase == ConversationPhase::Speaking && self.typing {
             self.typed_len = self.line_text.chars().count();
             self.complete_typing(surface);
-        } else {
-            // Native `DialogueBox.skip()` on an inactive/empty text display
-            // does not fire the completion callback. The frozen advance rule
-            // still moves the state to Idle; an Opening entry's first line is
-            // skipped without a setText.
-            self.typing = false;
-            self.type_timer = 0.0;
-            self.phase = ConversationPhase::Idle;
         }
     }
 
@@ -553,7 +582,6 @@ struct BakedGlyph {
     ch: char,
     rect: [u32; 4],
     width: u32,
-    height: u32,
     coverage: Vec<f32>,
 }
 
@@ -648,7 +676,6 @@ pub(crate) fn raster_glyph_page(
                                 ch,
                                 rect,
                                 width,
-                                height,
                                 coverage,
                             });
                             cursor_x = cursor_x.saturating_add(width).saturating_add(GLYPH_PADDING);
@@ -864,9 +891,14 @@ mod tests {
             self.finished
         }
 
-        fn on_entry_open(&mut self, entry: &DialogueEntryData, box_changed: bool) {
+        fn on_entry_open(
+            &mut self,
+            entry: &DialogueEntryData,
+            box_changed: bool,
+            script_opening: bool,
+        ) {
             self.events.push(format!(
-                "entry:{}:{}:{box_changed}",
+                "entry:{}:{}:{box_changed}:{script_opening}",
                 entry.box_id, entry.box_animation
             ));
         }
@@ -908,7 +940,7 @@ mod tests {
         state.advance(&mut surface);
         assert_eq!(state.phase(), ConversationPhase::Opening);
         assert_eq!(state.entry_index(), 0);
-        assert_eq!(last_event(&surface), "entry:roses:enter:true");
+        assert_eq!(last_event(&surface), "entry:roses:enter:true:false");
 
         // The box animation has not started yet (`""` differs from `enter`),
         // so the native Opening check completes on the first frame.
@@ -948,7 +980,7 @@ mod tests {
         assert_eq!(state.phase(), ConversationPhase::Opening);
         assert_eq!(state.entry_index(), 1);
         assert_eq!(state.line_index(), 0);
-        assert_eq!(last_event(&surface), "entry:roses:speaking:false");
+        assert_eq!(last_event(&surface), "entry:roses:speaking:false:false");
 
         // Same box id: the Opening check still waits while the current box
         // animation equals the entry's requested `speaking`.
@@ -982,7 +1014,7 @@ mod tests {
         state.advance(&mut surface);
         assert_eq!(state.phase(), ConversationPhase::Opening);
         assert_eq!(state.entry_index(), 2);
-        assert_eq!(last_event(&surface), "entry:default:enter:true");
+        assert_eq!(last_event(&surface), "entry:default:enter:true:false");
 
         surface.animation.clear();
         surface.finished = false;
@@ -1053,8 +1085,9 @@ mod tests {
 
     #[test]
     fn advance_and_skip_follow_the_native_phase_table() {
-        // Advance during Opening moves to Idle without a setText (the line is
-        // skipped, matching the frozen Opening/Speaking skip rule).
+        // Advance during Opening dispatches DIALOGUE_COMPLETE_LINE, whose
+        // `FlxTypeText.skip()` is a NO-OP before typing starts: the phase
+        // stays Opening (Conversation.hx L338-343 / DialogueBox.hx L172-175).
         let mut state = ConversationState::new(conversation(
             vec![
                 entry("bf-pixel", "talk", "roses", "enter", &["one", "two"]),
@@ -1068,9 +1101,17 @@ mod tests {
         state.advance(&mut surface);
         assert_eq!(state.phase(), ConversationPhase::Opening);
         state.advance(&mut surface);
-        assert_eq!(state.phase(), ConversationPhase::Idle);
+        assert_eq!(state.phase(), ConversationPhase::Opening);
         assert_eq!(surface.event_count("set:"), 0);
         assert_eq!(surface.event_count("typing-complete"), 0);
+
+        // The box animation finishing completes Opening and calls setText.
+        state.begin_tick(0.0, &mut surface);
+        assert_eq!(state.phase(), ConversationPhase::Speaking);
+        assert_eq!(state.line_text(), "one");
+        assert_eq!(surface.event_count("set:one:0"), 1);
+        state.advance(&mut surface); // Speaking -> Idle (skip typing)
+        assert_eq!(state.phase(), ConversationPhase::Idle);
         state.advance(&mut surface);
         assert_eq!(state.phase(), ConversationPhase::Speaking);
         assert_eq!(state.line_index(), 1);
@@ -1179,7 +1220,7 @@ mod tests {
         state.begin_tick(0.0, &mut surface);
         state.advance(&mut surface); // Speaking -> Idle
         state.advance(&mut surface); // Idle -> entry 1 (Opening)
-        assert_eq!(last_event(&surface), "entry:roses:speaking:false");
+        assert_eq!(last_event(&surface), "entry:roses:speaking:false:false");
 
         surface.animation = "speaking".to_string();
         surface.finished = true;
@@ -1192,7 +1233,7 @@ mod tests {
         );
         state.advance(&mut surface); // Idle
         state.advance(&mut surface); // entry 2 (Opening)
-        assert_eq!(last_event(&surface), "entry:default:enter:true");
+        assert_eq!(last_event(&surface), "entry:default:enter:true:false");
     }
 
     #[test]
@@ -1307,11 +1348,11 @@ mod tests {
 
     #[test]
     fn raster_rejects_invalid_font_bytes_and_bad_size() {
-        let error = raster_glyph_page(b"not a font", 32.0, [1.0; 4], None, "hello", 100.0, -1.0)
+        let error = raster_glyph_page(b"not a font", 32.0, [1.0; 4], None, "hello", 100.0, 0.0)
             .expect_err("invalid font bytes must fail");
         assert!(matches!(error, RenderError::Unsupported { .. }));
 
-        let error = raster_glyph_page(b"not a font", 0.0, [1.0; 4], None, "hello", 100.0, -1.0)
+        let error = raster_glyph_page(b"not a font", 0.0, [1.0; 4], None, "hello", 100.0, 0.0)
             .expect_err("zero size must fail before parsing");
         assert!(matches!(error, RenderError::Unsupported { .. }));
     }
@@ -1327,9 +1368,9 @@ mod tests {
         let text = "Ah, a new fair maiden has come in search of true love!";
         let fill = [0.247, 0.125, 0.129, 1.0];
         let shadow = [0.847, 0.58, 0.58, 1.0];
-        let first = raster_glyph_page(&bytes, 32.0, fill, Some(shadow), text, 800.0, -1.0)
+        let first = raster_glyph_page(&bytes, 32.0, fill, Some(shadow), text, 800.0, 0.0)
             .expect("pixel.otf rasterizes");
-        let second = raster_glyph_page(&bytes, 32.0, fill, Some(shadow), text, 800.0, -1.0)
+        let second = raster_glyph_page(&bytes, 32.0, fill, Some(shadow), text, 800.0, 0.0)
             .expect("pixel.otf rasterizes");
         assert_eq!(first, second, "same input must bake the same page");
         assert!(!first.glyphs.is_empty());
@@ -1359,7 +1400,7 @@ mod tests {
             None,
             "word word word word word word",
             100.0,
-            -1.0,
+            0.0,
         )
         .expect("pixel.otf rasterizes");
         let min_y = wrapped
