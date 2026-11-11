@@ -232,7 +232,8 @@ fn trace_schema(event: &TraceEvent) -> &'static str {
         | TraceEvent::PlayAnimation { schema, .. }
         | TraceEvent::ScrollSpeed { schema, .. }
         | TraceEvent::HealthIcon { schema, .. }
-        | TraceEvent::UnknownEvent { schema, .. } => schema,
+        | TraceEvent::UnknownEvent { schema, .. }
+        | TraceEvent::Choreography { schema, .. } => schema,
     }
 }
 
@@ -1345,7 +1346,8 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::PlayAnimation { sim, .. }
         | TraceEvent::ScrollSpeed { sim, .. }
         | TraceEvent::HealthIcon { sim, .. }
-        | TraceEvent::UnknownEvent { sim, .. } => *sim,
+        | TraceEvent::UnknownEvent { sim, .. }
+        | TraceEvent::Choreography { sim, .. } => *sim,
     }
 }
 
@@ -1366,7 +1368,8 @@ fn trace_kind(event: &TraceEvent) -> &'static str {
         | TraceEvent::PlayAnimation { kind, .. }
         | TraceEvent::ScrollSpeed { kind, .. }
         | TraceEvent::HealthIcon { kind, .. }
-        | TraceEvent::UnknownEvent { kind, .. } => kind,
+        | TraceEvent::UnknownEvent { kind, .. }
+        | TraceEvent::Choreography { kind, .. } => kind,
     }
 }
 
@@ -1396,10 +1399,12 @@ const ERECT_CHART: &str = r#"{
 fn chart_ids_map_to_the_corpus_file_spelling() {
     assert_eq!(
         chart_paths("bopeebo-default").expect("default id"),
-        (
-            "preload/data/songs/bopeebo/bopeebo-chart.json".to_owned(),
-            "preload/data/songs/bopeebo/bopeebo-metadata.json".to_owned(),
-        )
+        ChartSelection {
+            song: "bopeebo".to_owned(),
+            variant: "default".to_owned(),
+            chart_path: "preload/data/songs/bopeebo/bopeebo-chart.json".to_owned(),
+            metadata_path: "preload/data/songs/bopeebo/bopeebo-metadata.json".to_owned(),
+        }
     );
     assert_eq!(
         chart_paths("bopeebo").expect("bare default id"),
@@ -1407,38 +1412,51 @@ fn chart_ids_map_to_the_corpus_file_spelling() {
     );
     assert_eq!(
         chart_paths("bopeebo-erect").expect("erect id"),
-        (
-            "preload/data/songs/bopeebo/bopeebo-chart-erect.json".to_owned(),
-            "preload/data/songs/bopeebo/bopeebo-metadata-erect.json".to_owned(),
-        )
+        ChartSelection {
+            song: "bopeebo".to_owned(),
+            variant: "erect".to_owned(),
+            chart_path: "preload/data/songs/bopeebo/bopeebo-chart-erect.json".to_owned(),
+            metadata_path: "preload/data/songs/bopeebo/bopeebo-metadata-erect.json".to_owned(),
+        }
     );
     assert_eq!(
         chart_paths("darnell-bf").expect("bf swap id"),
-        (
-            "preload/data/songs/darnell/darnell-chart-bf.json".to_owned(),
-            "preload/data/songs/darnell/darnell-metadata-bf.json".to_owned(),
-        )
+        ChartSelection {
+            song: "darnell".to_owned(),
+            variant: "bf".to_owned(),
+            chart_path: "preload/data/songs/darnell/darnell-chart-bf.json".to_owned(),
+            metadata_path: "preload/data/songs/darnell/darnell-metadata-bf.json".to_owned(),
+        }
     );
     assert_eq!(
         chart_paths("philly-nice-erect").expect("hyphenated song id"),
-        (
-            "preload/data/songs/philly-nice/philly-nice-chart-erect.json".to_owned(),
-            "preload/data/songs/philly-nice/philly-nice-metadata-erect.json".to_owned(),
-        )
+        ChartSelection {
+            song: "philly-nice".to_owned(),
+            variant: "erect".to_owned(),
+            chart_path: "preload/data/songs/philly-nice/philly-nice-chart-erect.json".to_owned(),
+            metadata_path: "preload/data/songs/philly-nice/philly-nice-metadata-erect.json"
+                .to_owned(),
+        }
     );
     assert_eq!(
         chart_paths("lit-up-bf").expect("hyphenated bf id"),
-        (
-            "preload/data/songs/lit-up/lit-up-chart-bf.json".to_owned(),
-            "preload/data/songs/lit-up/lit-up-metadata-bf.json".to_owned(),
-        )
+        ChartSelection {
+            song: "lit-up".to_owned(),
+            variant: "bf".to_owned(),
+            chart_path: "preload/data/songs/lit-up/lit-up-chart-bf.json".to_owned(),
+            metadata_path: "preload/data/songs/lit-up/lit-up-metadata-bf.json".to_owned(),
+        }
     );
     assert_eq!(
         chart_paths("winter-horrorland-default").expect("hyphenated default id"),
-        (
-            "preload/data/songs/winter-horrorland/winter-horrorland-chart.json".to_owned(),
-            "preload/data/songs/winter-horrorland/winter-horrorland-metadata.json".to_owned(),
-        )
+        ChartSelection {
+            song: "winter-horrorland".to_owned(),
+            variant: "default".to_owned(),
+            chart_path: "preload/data/songs/winter-horrorland/winter-horrorland-chart.json"
+                .to_owned(),
+            metadata_path: "preload/data/songs/winter-horrorland/winter-horrorland-metadata.json"
+                .to_owned(),
+        }
     );
 
     for invalid in [
@@ -1649,7 +1667,8 @@ fn m5_build_stays_schema_one_and_player_only_with_opponent_notes_present() {
         | TraceEvent::PlayAnimation { .. }
         | TraceEvent::ScrollSpeed { .. }
         | TraceEvent::HealthIcon { .. }
-        | TraceEvent::UnknownEvent { .. } => false,
+        | TraceEvent::UnknownEvent { .. }
+        | TraceEvent::Choreography { .. } => false,
     }));
 
     // The same fixture on the chart-id path takes the schema-2 extension and

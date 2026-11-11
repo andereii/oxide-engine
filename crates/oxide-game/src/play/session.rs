@@ -252,7 +252,9 @@ impl ScoreTracker {
                 | TraceEvent::PlayAnimation { .. }
                 | TraceEvent::ScrollSpeed { .. }
                 | TraceEvent::HealthIcon { .. }
-                | TraceEvent::UnknownEvent { .. } => {}
+                | TraceEvent::UnknownEvent { .. }
+                // Choreography trigger rows are scene-level content.
+                | TraceEvent::Choreography { .. } => {}
             }
         }
     }

@@ -272,7 +272,9 @@ pub(crate) struct LoadedNote {
     pub(crate) sustain_ms: f64,
     pub(crate) opponent: bool,
     pub(crate) note_id: Option<u32>,
-    /// Chart note kind (`k`), preserved for the 6E choreography consumers.
+    /// Chart note kind (`k`), preserved for the 6E choreography consumers
+    /// (M6-CONTRACT §14.2; temporary allow until the 2hot slice lands).
+    #[allow(dead_code)]
     pub(crate) kind: Option<String>,
 }
 

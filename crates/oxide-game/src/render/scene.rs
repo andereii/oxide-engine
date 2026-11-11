@@ -1439,6 +1439,9 @@ impl Scene {
             // EnableMask / sserafim / any no-handler kind: record-only
             // (M6-CONTRACT §12.2).
             TraceEvent::UnknownEvent { .. } => {}
+            // The 6E conversation slice consumes `choreography` trigger rows;
+            // record-only until that lands.
+            TraceEvent::Choreography { .. } => {}
             TraceEvent::OpponentHit {
                 note_id,
                 note_direction,
@@ -2402,6 +2405,7 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::PlayAnimation { sim, .. }
         | TraceEvent::ScrollSpeed { sim, .. }
         | TraceEvent::HealthIcon { sim, .. }
+        | TraceEvent::Choreography { sim, .. }
         | TraceEvent::UnknownEvent { sim, .. } => *sim,
     }
 }

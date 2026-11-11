@@ -1211,7 +1211,10 @@ impl HudState {
             | TraceEvent::CameraBop { .. }
             | TraceEvent::PlayAnimation { .. }
             | TraceEvent::ScrollSpeed { .. }
-            | TraceEvent::UnknownEvent { .. } => {}
+            | TraceEvent::UnknownEvent { .. }
+            // Choreography trigger rows are scene-level content, not HUD
+            // state (the conversation slice consumes them).
+            | TraceEvent::Choreography { .. } => {}
         }
         Ok(())
     }

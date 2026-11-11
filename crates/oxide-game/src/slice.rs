@@ -67,7 +67,9 @@ use thiserror::Error;
 use oxide_data::Typed;
 use oxide_vfs::Vfs;
 
+mod choreography;
 mod events;
+use choreography::ChoreographyState;
 use events::EventState;
 
 /// The frozen phase-1 player-only wire schema (`docs/M5-CONTRACT.md` §2).
@@ -129,14 +131,22 @@ const PBOT1_SHIT_THRESHOLD: f64 = 160.0;
 /// crate never owns the M4 CLI or stream types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
-    Press { sim_ms: u64, direction: i64 },
-    Release { sim_ms: u64, direction: i64 },
+    Press {
+        sim_ms: u64,
+        direction: i64,
+    },
+    Release {
+        sim_ms: u64,
+        direction: i64,
+    },
     /// M6-CONTRACT §14: the `CUTSCENE_ADVANCE` transition ([Z, ENTER]).
     ///
     /// The gameplay sim has no gameplay effect for it (the dialogue state
     /// machine lives in the scene); accepting the variant keeps one shared
     /// input surface for the play window and the deterministic scene.
-    Advance { sim_ms: u64 },
+    Advance {
+        sim_ms: u64,
+    },
 }
 
 /// Per-judgement tallies in the §2 wire order.
@@ -421,6 +431,19 @@ pub enum TraceEvent {
         #[serde(serialize_with = "serialize_event_payload")]
         value: Option<oxide_data::chart::SongEvent>,
     },
+    /// Story-entry choreography trigger (`docs/M6-CONTRACT.md` §14.1):
+    /// the per-song content table's song-start/ending hooks. `event` is the
+    /// trigger name (`dialogue:<conversation id>`, `can_cutscene`,
+    /// `ending_video`) and `arg` carries an optional trigger argument.
+    Choreography {
+        schema: &'static str,
+        kind: &'static str,
+        sim: u64,
+        input_ms: f64,
+        input_time_us: f64,
+        event: String,
+        arg: Option<String>,
+    },
 }
 
 /// Serializes only the raw `v` payload of the source event
@@ -581,6 +604,9 @@ pub struct GameplaySimState {
     active_holds: [Option<ActiveHold>; 4],
     /// Chart-event walker; present only on the schema-3 event-enabled path.
     events: Option<EventState>,
+    /// Story-entry trigger table; present only when the selected song has a
+    /// 6E choreography entry (never on bopeebo).
+    choreography: Option<ChoreographyState>,
     trace: Vec<TraceEvent>,
 }
 
@@ -681,15 +707,8 @@ impl GameplaySimState {
         if !matches!(difficulty, "easy" | "normal" | "hard") {
             return Err(SliceError::UnknownDifficulty(difficulty.to_owned()));
         }
-        let (chart_path, metadata_path) = chart_paths(BOPEEBO_CHART_ID)?;
-        Self::build_selected(
-            assets_root,
-            &chart_path,
-            &metadata_path,
-            difficulty,
-            false,
-            false,
-        )
+        let selection = chart_paths(BOPEEBO_CHART_ID)?;
+        Self::build_selected(assets_root, &selection, difficulty, false, false)
     }
 
     /// Builds the schema "2" sim for any `corpus.txt`-style chart id.
@@ -708,15 +727,8 @@ impl GameplaySimState {
         chart_id: &str,
         difficulty: &str,
     ) -> Result<Self, SliceError> {
-        let (chart_path, metadata_path) = chart_paths(chart_id)?;
-        Self::build_selected(
-            assets_root,
-            &chart_path,
-            &metadata_path,
-            difficulty,
-            true,
-            false,
-        )
+        let selection = chart_paths(chart_id)?;
+        Self::build_selected(assets_root, &selection, difficulty, true, false)
     }
 
     /// Builds the schema "3" sim with chart song-event consumption.
@@ -732,15 +744,8 @@ impl GameplaySimState {
         chart_id: &str,
         difficulty: &str,
     ) -> Result<Self, SliceError> {
-        let (chart_path, metadata_path) = chart_paths(chart_id)?;
-        Self::build_selected(
-            assets_root,
-            &chart_path,
-            &metadata_path,
-            difficulty,
-            true,
-            true,
-        )
+        let selection = chart_paths(chart_id)?;
+        Self::build_selected(assets_root, &selection, difficulty, true, true)
     }
 
     /// Shared chart/metadata loading. `opponent_side` selects the add-only
@@ -748,12 +753,13 @@ impl GameplaySimState {
     /// both `false` is the frozen M5 player-only path.
     fn build_selected(
         assets_root: &Path,
-        chart_path: &str,
-        metadata_path: &str,
+        selection: &ChartSelection,
         difficulty: &str,
         opponent_side: bool,
         event_side: bool,
     ) -> Result<Self, SliceError> {
+        let chart_path = selection.chart_path.as_str();
+        let metadata_path = selection.metadata_path.as_str();
         let vfs = Vfs::new(assets_root.to_path_buf());
         let chart_bytes = read_asset(&vfs, chart_path)?;
         let metadata_bytes = read_asset(&vfs, metadata_path)?;
@@ -810,6 +816,13 @@ impl GameplaySimState {
             .notes
             .get(difficulty)
             .ok_or_else(|| SliceError::UnknownDifficulty(difficulty.to_owned()))?;
+
+        // The 2hot ending-video hook fires on the last note end tick. Both
+        // chart sides count (the video follows the full song).
+        let last_note_end_ms = chart_notes.iter().fold(0.0_f64, |last, note| {
+            let end = note.time + note.sustain.unwrap_or(0.0);
+            if end.is_finite() { last.max(end) } else { last }
+        });
 
         let mut notes = Vec::with_capacity(chart_notes.len());
         let mut opponent_notes = Vec::new();
@@ -892,6 +905,13 @@ impl GameplaySimState {
         } else {
             None
         };
+        // The story-entry trigger table is schema-3 only: the frozen schema-1
+        // and schema-2 paths must stay byte-identical (bopeebo included).
+        let choreography = if event_side {
+            ChoreographyState::build(&selection.song, &selection.variant, last_note_end_ms)
+        } else {
+            None
+        };
 
         let mut state = Self {
             notes,
@@ -913,6 +933,7 @@ impl GameplaySimState {
             held: [false; 4],
             active_holds: [None; 4],
             events,
+            choreography,
             trace: Vec::new(),
         };
         // The first processed frame always follows a previous window pass in
@@ -961,6 +982,13 @@ impl GameplaySimState {
 
         self.mirror_holds(sim_ms);
         let mut dispatched = Vec::new();
+
+        // Story-entry hooks are dispatched on the first processed tick (the
+        // song-start boundary) and at the 2hot last-note-end boundary, before
+        // the chart song-event rows of the same tick.
+        if let Some(choreography) = &mut self.choreography {
+            choreography.dispatch(sim_ms, &mut dispatched);
+        }
 
         // Native `processSongEvents` runs after the camera/bop decay block and
         // before `processInputQueue`/`processNotes`; its rows therefore
@@ -1370,6 +1398,15 @@ fn player_lane(direction: i64) -> Option<usize> {
     usize::try_from(direction).ok().filter(|lane| *lane < 4)
 }
 
+/// A `corpus.txt`-style chart id resolved to its file paths and song parts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChartSelection {
+    song: String,
+    variant: String,
+    chart_path: String,
+    metadata_path: String,
+}
+
 /// Maps a `corpus.txt`-style chart id to the chart/metadata paths.
 ///
 /// `<song>-default` and the bare `<song>` shorthand use the unsuffixed file
@@ -1378,7 +1415,7 @@ fn player_lane(direction: i64) -> Option<usize> {
 /// (`default`/`erect`/`pico`/`bf`); otherwise the whole id is the song name
 /// (`philly-nice`, `winter-horrorland`). This keeps hyphenated song names
 /// intact for the bare-id shorthand.
-fn chart_paths(chart_id: &str) -> Result<(String, String), SliceError> {
+fn chart_paths(chart_id: &str) -> Result<ChartSelection, SliceError> {
     // A bare `<song>` (the DEFAULT variant) may itself contain hyphens
     // (`philly-nice`, `winter-horrorland`), so the variant suffix must be one
     // of the KNOWN corpus variations; an unknown/absent suffix is the default.
@@ -1406,10 +1443,12 @@ fn chart_paths(chart_id: &str) -> Result<(String, String), SliceError> {
         format!("-{variant}")
     };
     let stem = format!("preload/data/songs/{song}/{song}");
-    Ok((
-        format!("{stem}-chart{suffix}.json"),
-        format!("{stem}-metadata{suffix}.json"),
-    ))
+    Ok(ChartSelection {
+        song: song.to_owned(),
+        variant: variant.to_owned(),
+        chart_path: format!("{stem}-chart{suffix}.json"),
+        metadata_path: format!("{stem}-metadata{suffix}.json"),
+    })
 }
 
 fn read_asset(vfs: &Vfs, path: &str) -> Result<Vec<u8>, SliceError> {

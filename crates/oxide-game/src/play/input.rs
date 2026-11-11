@@ -189,6 +189,9 @@ impl TickPlanner {
     /// Appends the `CUTSCENE_ADVANCE` transition ([Z, ENTER]) on `tick`.
     /// Ignored while paused/terminal like lane transitions; no autorepeat is
     /// synthesized by this planner (the window forwards real keydowns only).
+    /// Consumed by the 6E conversation slice's play-window wiring
+    /// (M6-CONTRACT §14.2); temporary allow until that lands.
+    #[allow(dead_code)]
     pub(crate) fn queue_advance(&mut self, tick: u64) {
         if self.paused || self.terminal {
             return;
