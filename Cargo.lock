@@ -4455,6 +4455,7 @@ dependencies = [
 name = "oxide-game"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "bevy",
  "oxide-atlas",
  "oxide-audio",

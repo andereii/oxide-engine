@@ -1,8 +1,9 @@
-//! Serde schemas for V-Slice data formats, `EventRegistry` and validation.
-//! This crate performs no file or network I/O.
+//! Serde schemas for V-Slice data formats, `EventRegistry`, dialogue
+//! documents and validation. This crate performs no file or network I/O.
 
 pub mod character;
 pub mod chart;
+pub mod dialogue;
 pub mod error;
 pub mod events;
 pub mod kind;
@@ -116,7 +117,7 @@ pub fn parse_file(path: &std::path::Path, bytes: &[u8]) -> Result<ParsedDocument
     Ok(ParsedDocument { kind, typed })
 }
 
-fn parse_root(bytes: &[u8]) -> Result<Value, DataError> {
+pub(crate) fn parse_root(bytes: &[u8]) -> Result<Value, DataError> {
     let bytes = strip_bom(bytes);
     let text = std::str::from_utf8(bytes).map_err(|_| DataError::NotUtf8)?;
     serde_json::from_str(text).map_err(|error| DataError::Parse(error.to_string()))
