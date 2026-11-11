@@ -471,6 +471,15 @@ pub(crate) fn export_stream_from_notes(
             let (kind, direction, input_ms) = match input {
                 InputEvent::Press { sim_ms, direction } => ("press", *direction, *sim_ms),
                 InputEvent::Release { sim_ms, direction } => ("release", *direction, *sim_ms),
+                // The CUTSCENE_ADVANCE transition is not a lane input; the
+                // exported note stream never carries it (the dialogue family
+                // drives the renderer directly, not via the export).
+                // The CUTSCENE_ADVANCE transition is not a lane input; skip
+                // it while still consuming the stream slot.
+                InputEvent::Advance { .. } => {
+                    next_input += 1;
+                    continue;
+                }
             };
             events.push(StreamInput {
                 kind,
@@ -797,6 +806,13 @@ pub(crate) fn canonical_replay(
 pub(crate) enum EventInputPlan<'a> {
     Scripted(&'a [LaneNote]),
     ChartTaps(&'a [LaneNote]),
+    /// The dialogue fixture playthrough (M6-CONTRACT §14.3): the exact chart
+    /// taps keep the schema-3 gameplay stream live under the conversation
+    /// overlay (without lane inputs the senpai chart's window misses reach
+    /// the game-over substate before the fixed advance cadence can finish),
+    /// plus the synthesized `CUTSCENE_ADVANCE` presses. The replay ends at
+    /// [`DIALOGUE_REPLAY_END_MS`], past the conversation outro.
+    Dialogue(&'a [LaneNote]),
 }
 
 impl EventInputPlan<'_> {
@@ -807,8 +823,50 @@ impl EventInputPlan<'_> {
                 Ok((inputs, end_ms))
             }
             Self::ChartTaps(notes) => prepare_chart_stream(notes),
+            Self::Dialogue(notes) => prepare_dialogue_stream(notes),
         }
     }
+}
+
+/// The dialogue replay end: past the native 2.25 s start delay, the
+/// 3-entry `senpai` conversation and its outro.
+pub(crate) const DIALOGUE_REPLAY_END_MS: u64 = 30_000;
+/// Native `startConversation('senpai')` at 2250 ms plus the 2 s opening
+/// tween: the first `CUTSCENE_ADVANCE` press is due at 4250 ms.
+const DIALOGUE_FIRST_ADVANCE_MS: u64 = 4_250;
+/// The fixed playthrough cadence (one press per 4 s).
+const DIALOGUE_ADVANCE_CADENCE_MS: u64 = 4_000;
+/// Six presses cover the three-entry conversation plus the outro.
+const DIALOGUE_ADVANCE_COUNT: usize = 6;
+
+/// The fixed `CUTSCENE_ADVANCE` tick list for the dialogue fixture family.
+pub(crate) fn dialogue_advance_ticks() -> Vec<u64> {
+    (0..DIALOGUE_ADVANCE_COUNT)
+        .map(|index| DIALOGUE_FIRST_ADVANCE_MS + DIALOGUE_ADVANCE_CADENCE_MS * index as u64)
+        .collect()
+}
+
+/// Exact chart taps truncated to the dialogue replay end, plus the fixed
+/// advance presses on the shared 1 ms grid.
+fn prepare_dialogue_stream(notes: &[LaneNote]) -> Result<(Vec<InputEvent>, u64), String> {
+    let advance_ticks = dialogue_advance_ticks();
+    if let Some(tick) = advance_ticks
+        .iter()
+        .find(|tick| **tick > DIALOGUE_REPLAY_END_MS)
+    {
+        return Err(format!(
+            "dialogue advance tick {tick} lies after the {DIALOGUE_REPLAY_END_MS} ms replay end"
+        ));
+    }
+    let (mut inputs, _) = prepare_chart_stream(notes)?;
+    inputs.retain(|input| input_sim(input) <= DIALOGUE_REPLAY_END_MS);
+    inputs.extend(
+        advance_ticks
+            .into_iter()
+            .map(|sim_ms| InputEvent::Advance { sim_ms }),
+    );
+    inputs.sort_by_key(input_sim);
+    Ok((inputs, DIALOGUE_REPLAY_END_MS))
 }
 
 /// The event-enabled canonical replay used by the `render-diff` gate.
@@ -828,11 +886,16 @@ pub(crate) fn canonical_event_replay(
     chart_id: &str,
     difficulty: &str,
     plan: EventInputPlan<'_>,
+    story_entry: bool,
 ) -> Result<EventReplay, String> {
     let (inputs, end_ms) = plan.prepare()?;
-    let mut sim = GameplaySimState::build_chart_events(assets_root, chart_id, difficulty).map_err(
-        |error| format!("failed to build the {chart_id} {difficulty} event sim: {error}"),
-    )?;
+    let mut sim = GameplaySimState::build_chart_events_with_story(
+        assets_root,
+        chart_id,
+        difficulty,
+        story_entry,
+    )
+    .map_err(|error| format!("failed to build the {chart_id} {difficulty} event sim: {error}"))?;
     let (ticks, trace) = replay_ticks(&mut sim, &inputs, end_ms)?;
     let trace_bytes = serialize_trace(&trace)?;
     Ok(EventReplay {
@@ -1002,6 +1065,9 @@ fn count_kinds(trace: &[TraceEvent]) -> KindCounts {
             TraceEvent::HoldDrop { .. } => counts.hold_drop += 1,
             TraceEvent::HoldEnd { .. } => counts.hold_end += 1,
             TraceEvent::GameOver { .. } => counts.game_over += 1,
+            // Choreography trigger rows are scene-level content, not note
+            // accounting (the render-diff schema-3 rows are a separate tally).
+            TraceEvent::Choreography { .. } => {}
             // Compile-only arm authorized for the schema-2 variant: the M5
             // schema-1 gate path never produces opponent rows.
             TraceEvent::OpponentHit { .. } => {}
@@ -1037,7 +1103,8 @@ fn serialize_trace(trace: &[TraceEvent]) -> Result<Vec<u8>, String> {
 
 fn input_time_us(event: &TraceEvent) -> f64 {
     match event {
-        TraceEvent::Hit { input_time_us, .. }
+        TraceEvent::Choreography { input_time_us, .. }
+        | TraceEvent::Hit { input_time_us, .. }
         | TraceEvent::Miss { input_time_us, .. }
         | TraceEvent::GhostPress { input_time_us, .. }
         | TraceEvent::HoldStart { input_time_us, .. }
@@ -1058,7 +1125,10 @@ fn input_time_us(event: &TraceEvent) -> f64 {
 
 fn input_sim(input: &InputEvent) -> u64 {
     match input {
-        InputEvent::Press { sim_ms, .. } | InputEvent::Release { sim_ms, .. } => *sim_ms,
+        InputEvent::Press { sim_ms, .. }
+        | InputEvent::Release { sim_ms, .. }
+        // The advance transition shares the sim grid (dialogue family).
+        | InputEvent::Advance { sim_ms } => *sim_ms,
     }
 }
 
@@ -2527,6 +2597,8 @@ fn note_events(trace: &[TraceEvent], note_id: u32) -> Vec<String> {
         .iter()
         .filter_map(|event| {
             let (kind, sim, judgement, event_note_id) = match event {
+                // Choreography rows never reference notes.
+                TraceEvent::Choreography { .. } => None,
                 TraceEvent::Hit {
                     kind,
                     sim,
@@ -3362,6 +3434,98 @@ mod tests {
         assert!(prepare_chart_stream(&[]).is_err());
     }
 
+    #[test]
+    fn dialogue_plan_is_chart_taps_plus_the_fixed_advance_cadence() {
+        assert_eq!(
+            dialogue_advance_ticks(),
+            vec![4250, 8250, 12250, 16250, 20250, 24250]
+        );
+        let notes = vec![
+            note(0, 1000.0, 0.0),
+            note(1, 2000.0, 500.0),
+            // Beyond the dialogue replay end: the tap is truncated, not left
+            // for `replay_ticks` to reject as an unprocessed input.
+            note(2, 31_000.0, 0.0),
+        ];
+        let (inputs, end_ms) = EventInputPlan::Dialogue(&notes)
+            .prepare()
+            .expect("dialogue plan");
+        assert_eq!(end_ms, DIALOGUE_REPLAY_END_MS);
+        assert_eq!(
+            inputs,
+            vec![
+                InputEvent::Press {
+                    sim_ms: 1000,
+                    direction: 0
+                },
+                InputEvent::Release {
+                    sim_ms: 1000,
+                    direction: 0
+                },
+                InputEvent::Press {
+                    sim_ms: 2000,
+                    direction: 1
+                },
+                InputEvent::Release {
+                    sim_ms: 2500,
+                    direction: 1
+                },
+                InputEvent::Advance { sim_ms: 4250 },
+                InputEvent::Advance { sim_ms: 8250 },
+                InputEvent::Advance { sim_ms: 12250 },
+                InputEvent::Advance { sim_ms: 16250 },
+                InputEvent::Advance { sim_ms: 20250 },
+                InputEvent::Advance { sim_ms: 24250 },
+            ]
+        );
+    }
+
+    #[test]
+    fn dialogue_replay_keeps_the_senpai_gameplay_live() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let notes = load_verified_notes_for_chart(&root, "senpai", "normal").unwrap();
+        let replay = canonical_event_replay(
+            &root,
+            "senpai",
+            "normal",
+            EventInputPlan::Dialogue(&notes),
+            true,
+        )
+        .expect("dialogue replay");
+        let mut advances = 0usize;
+        let mut trigger = false;
+        for tick in &replay.ticks {
+            for event in &tick.events {
+                assert!(
+                    !matches!(event, TraceEvent::GameOver { .. }),
+                    "dialogue replay reached game_over at {} ms; the chart taps must keep the \
+                     gameplay alive under the conversation",
+                    tick.sim_ms
+                );
+                if let TraceEvent::Choreography { sim, event, .. } = event
+                    && *sim == 0
+                    && event == "dialogue:senpai"
+                {
+                    trigger = true;
+                }
+            }
+            advances += tick
+                .inputs
+                .iter()
+                .filter(|input| matches!(input, InputEvent::Advance { .. }))
+                .count();
+        }
+        assert!(trigger, "the tick-0 dialogue:senpai trigger row is missing");
+        assert_eq!(advances, dialogue_advance_ticks().len());
+        assert_eq!(
+            replay.ticks.last().map(|tick| tick.sim_ms),
+            Some(DIALOGUE_REPLAY_END_MS)
+        );
+    }
+
     fn has_schema3_hit(ticks: &[CanonicalTick]) -> bool {
         ticks
             .iter()
@@ -3384,6 +3548,7 @@ mod tests {
             "bopeebo",
             "easy",
             EventInputPlan::ChartTaps(&notes),
+            false,
         )
         .expect("first event replay");
         let second = canonical_event_replay(
@@ -3391,6 +3556,7 @@ mod tests {
             "bopeebo",
             "easy",
             EventInputPlan::ChartTaps(&notes),
+            false,
         )
         .expect("second event replay");
         assert_eq!(first.digest, second.digest);
@@ -3467,6 +3633,9 @@ mod tests {
                 let (kind, direction, input_ms) = match input {
                     InputEvent::Press { sim_ms, direction } => ("press", *direction, *sim_ms),
                     InputEvent::Release { sim_ms, direction } => ("release", *direction, *sim_ms),
+                    InputEvent::Advance { .. } => {
+                        panic!("the exported note stream must not carry an advance input")
+                    }
                 };
                 assert_eq!(event["kind"], kind);
                 assert_eq!(event["direction"].as_i64(), Some(direction));
@@ -3652,6 +3821,7 @@ mod tests {
             judgement,
             raw_note_diff: f64::from(note_diff_int),
             note_diff_int,
+            note_kind: None,
             score_delta,
             health_before,
             health_after,

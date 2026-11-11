@@ -2,17 +2,22 @@
 //!
 //! Implements the ADR-0020 / `tools/oracle/RENDER-BEHAVIOR.md` §7 gate:
 //!
-//! 1. Two chart-id families are driven through the schema-3 event-enabled
+//! 1. Three chart-id families are driven through the schema-3 event-enabled
 //!    canonical replay (`docs/M6-CONTRACT.md` §12.7): `bopeebo` keeps the
 //!    frozen scripted negative-phase input stream, `school` uses the exact
 //!    `senpai` chart taps (that chart cannot satisfy the scripted-phase
-//!    boundary preconditions). The shared 1 ms tick loop, `record()`
-//!    cross-check and trace sha256 live in [`crate::gameplay_sim`].
+//!    boundary preconditions), and `dialogue` adds the fixed
+//!    `CUTSCENE_ADVANCE` playthrough for the `senpai` normal conversation
+//!    (M6-CONTRACT §14.3). The shared 1 ms tick loop, `record()` cross-check
+//!    and trace sha256 live in [`crate::gameplay_sim`].
 //! 2. The canonical ticks are replayed through
-//!    [`oxide_game::render::SliceRenderer::build_for_song`] on the software
-//!    adapter. A deterministic per-difficulty sample list is computed from the
-//!    family metadata beat grid and the canonical trace's scripted-phase event
-//!    kinds; schema-3 chart rows and opponent rows add no sample classes.
+//!    [`oxide_game::render::SliceRenderer::build_for_song`] (the dialogue
+//!    family uses `build_for_song_with_dialogue`) on the software adapter. A
+//!    deterministic per-difficulty sample list is computed from the family
+//!    metadata beat grid and the canonical trace's scripted-phase event
+//!    kinds; schema-3 chart rows, opponent rows and choreography trigger rows
+//!    add no sample classes. The dialogue family freezes a fixed
+//!    trigger-relative recipe instead.
 //!    Each sample position renders one frame, writes a PNG and a per-frame
 //!    sha256 under `target/render-diff/<family>/<difficulty>/`, and the whole
 //!    pipeline runs twice. Per-frame digests and the whole-run digest must be
@@ -21,9 +26,9 @@
 //!    `render-slice-2` schema, adapter token (`llvmpipe`), per-family
 //!    chart-id/difficulty lists, sample lists, per-frame digests, whole-run
 //!    digests, canonical trace digests and structural geometry are verified
-//!    fail-closed. A missing/unknown family section, a difficulty subset
-//!    mismatch or any drift makes the gate exit nonzero; it never writes under
-//!    `tests/` and never regenerates expectations.
+//!    fail-closed. A missing/unknown family section, a difficulty authority or
+//!    fixture-subset mismatch, or any drift makes the gate exit nonzero; it
+//!    never writes under `tests/` and never regenerates expectations.
 //!
 //! Sample positions are frozen by the first establishment run (owned by the
 //! orchestrator, like ADR-0019), not by this gate:
@@ -36,12 +41,18 @@
 //!   presses), each with one follow-up at `+250 ms` clamped to song bounds;
 //! - the first tick past the last note end.
 //!
+//! The dialogue family instead freezes the approved trigger-relative recipe
+//! (250/2250/2450 overlay + conversation start, each 4 s advance press with a
+//! `+250 ms` follow-up, and 29000 for the outro), clamped to its 30000 ms
+//! replay end.
+//!
 //! Schema-3 chart song-event rows (FocusCamera/ZoomCamera/SetCameraBop/
-//! PlayAnimation/ScrollSpeed/SetHealthIcon/unknown) and schema-2 opponent rows
-//! are consumed by the scene but carry no scripted-phase sample category. The
-//! list is sorted and deduplicated. `song_end` is the grid-rounded last
-//! player-note end (`ceil(t + l)`) that the canonical stream covers; the
-//! canonical replay then continues for its frozen 2 s tail.
+//! PlayAnimation/ScrollSpeed/SetHealthIcon/unknown), schema-2 opponent rows
+//! and schema-3 choreography trigger rows are consumed by the scene but carry
+//! no scripted-phase sample category. The list is sorted and deduplicated.
+//! `song_end` is the grid-rounded last player-note end (`ceil(t + l)`) that the
+//! canonical stream covers; the canonical replay then continues for its frozen
+//! 2 s tail.
 //!
 //! Geometry is recomputed here from the frozen spec numbers and the real
 //! assets because `oxide-game::render`'s geometry module is private. This is
@@ -50,7 +61,9 @@
 //! prop world rects and the initial camera scroll. Stage/atlas path candidate
 //! order mirrors the renderer's frozen asset-key resolution so the same files
 //! are inspected. The `bopeebo` family keeps the frozen mainStage checks and
-//! character bounds; `school` checks the `senpai` Sparrow first-frame bounds.
+//! character bounds; `school` checks the `senpai` Sparrow first-frame bounds,
+//! and `dialogue` reuses the same senpai chart/stage computation for its
+//! single normal difficulty.
 //!
 //! Honesty: frame digests are OUR renderer's output frozen once (an engine
 //! fixture). They are NOT native pixel parity; a native-game rendered-output
@@ -122,6 +135,9 @@ enum FamilyStream {
     Scripted,
     /// Exact chart taps/releases (no scripted-phase preconditions).
     ChartTaps,
+    /// Dialogue family: exact chart taps plus the fixed `CUTSCENE_ADVANCE`
+    /// playthrough, rendered through `build_for_song_with_dialogue`.
+    Dialogue,
 }
 
 /// The independent geometry check that is family-specific.
@@ -136,6 +152,9 @@ enum CharacterBoundsCheck {
 struct Family {
     name: &'static str,
     chart_id: &'static str,
+    /// The metadata's declared difficulty list (the chart authority).
+    declared_difficulties: &'static [&'static str],
+    /// The fixture difficulty subset this family captures.
     difficulties: &'static [&'static str],
     stream: FamilyStream,
     required_props: &'static [&'static str],
@@ -145,6 +164,7 @@ struct Family {
 const BOPEEBO_FAMILY: Family = Family {
     name: "bopeebo",
     chart_id: "bopeebo",
+    declared_difficulties: &["easy", "normal", "hard"],
     difficulties: &["easy", "normal", "hard"],
     stream: FamilyStream::Scripted,
     required_props: &["stageback", "stagefront", "stagecurtains"],
@@ -156,6 +176,7 @@ const SCHOOL_FAMILY: Family = Family {
     chart_id: "senpai",
     // Observed `senpai-metadata.json` playData.difficulties (2026-11-08);
     // capture re-reads the metadata and fails closed on any mismatch.
+    declared_difficulties: &["easy", "normal", "hard"],
     difficulties: &["easy", "normal", "hard"],
     // A read-only scan of `senpai-chart.json` found no sustain satisfying
     // either mandatory scripted boundary case (see `EventInputPlan::ChartTaps`),
@@ -165,7 +186,22 @@ const SCHOOL_FAMILY: Family = Family {
     character_bounds: CharacterBoundsCheck::OpponentContent,
 };
 
-const FAMILIES: [&Family; 2] = [&BOPEEBO_FAMILY, &SCHOOL_FAMILY];
+const DIALOGUE_FAMILY: Family = Family {
+    name: "dialogue",
+    chart_id: "senpai",
+    // The same senpai metadata authority as the school family; the dialogue
+    // fixture captures only the single `normal` playthrough approved for the
+    // third ADR-0020 establishment.
+    declared_difficulties: &["easy", "normal", "hard"],
+    difficulties: &["normal"],
+    stream: FamilyStream::Dialogue,
+    // The senpai chart/stage geometry is shared with the school family; no
+    // separate geometry computation is introduced.
+    required_props: &[],
+    character_bounds: CharacterBoundsCheck::OpponentContent,
+};
+
+const FAMILIES: [&Family; 3] = [&BOPEEBO_FAMILY, &SCHOOL_FAMILY, &DIALOGUE_FAMILY];
 
 /// Typed failure for the fixture-boundary case called out by the gate brief.
 #[derive(Debug, thiserror::Error)]
@@ -227,17 +263,26 @@ pub fn run(rest: &[String]) -> ExitCode {
         };
         match declared_difficulties(&assets_root, family.chart_id) {
             Ok(declared) => {
-                let matches = declared.len() == family.difficulties.len()
+                let matches = declared.len() == family.declared_difficulties.len()
                     && declared
                         .iter()
-                        .zip(family.difficulties)
+                        .zip(family.declared_difficulties)
                         .all(|(actual, expected)| actual.as_str() == *expected);
                 if !matches {
                     failures.push(format!(
-                        "{}: metadata declares difficulties {:?}, but the gate family requires \
-                         {:?}; refusing a difficulty subset mismatch",
-                        family.name, declared, family.difficulties
+                        "{}: metadata declares difficulties {:?}, but the gate family's \
+                         declared list is {:?}; refusing a difficulty authority mismatch",
+                        family.name, declared, family.declared_difficulties
                     ));
+                }
+                for difficulty in family.difficulties {
+                    if !family.declared_difficulties.contains(difficulty) {
+                        failures.push(format!(
+                            "{}: fixture difficulty {difficulty:?} is not declared by the \
+                             metadata authority {:?}",
+                            family.name, family.declared_difficulties
+                        ));
+                    }
                 }
             }
             Err(error) => failures.push(format!("{}: {error}", family.name)),
@@ -420,15 +465,30 @@ fn capture_once(
     let plan = match family.stream {
         FamilyStream::Scripted => EventInputPlan::Scripted(notes),
         FamilyStream::ChartTaps => EventInputPlan::ChartTaps(notes),
+        FamilyStream::Dialogue => EventInputPlan::Dialogue(notes),
     };
-    let replay =
-        gameplay_sim::canonical_event_replay(assets_root, family.chart_id, difficulty, plan)?;
-    let samples = sample_positions(assets_root, family.chart_id, notes, &replay.ticks)?;
+    let story_entry = matches!(family.stream, FamilyStream::Dialogue);
+    let replay = gameplay_sim::canonical_event_replay(
+        assets_root,
+        family.chart_id,
+        difficulty,
+        plan,
+        story_entry,
+    )?;
+    let replay_end = replay.ticks.last().map_or(0, |tick| tick.sim_ms);
+    let samples = match family.stream {
+        // The dialogue family freezes the approved trigger-relative recipe,
+        // not the conductor/event-derived plan: the conversation is content
+        // timing, not a scripted-phase trace category.
+        FamilyStream::Dialogue => dialogue_sample_positions(replay_end),
+        FamilyStream::Scripted | FamilyStream::ChartTaps => {
+            sample_positions(assets_root, family.chart_id, notes, &replay.ticks)?
+        }
+    };
     let last_sample = samples
         .last()
         .copied()
         .ok_or_else(|| format!("{difficulty}: the sample plan is empty"))?;
-    let replay_end = replay.ticks.last().map_or(0, |tick| tick.sim_ms);
     if last_sample > replay_end {
         return Err(format!(
             "{difficulty}: sample tick {last_sample} lies after the canonical replay end \
@@ -436,8 +496,15 @@ fn capture_once(
         ));
     }
 
-    let mut renderer = SliceRenderer::build_for_song(assets_root, family.chart_id, difficulty)
-        .map_err(|error| format!("{difficulty}: renderer build failed: {error}"))?;
+    let mut renderer = match family.stream {
+        FamilyStream::Dialogue => {
+            SliceRenderer::build_for_song_with_dialogue(assets_root, family.chart_id, difficulty)
+        }
+        FamilyStream::Scripted | FamilyStream::ChartTaps => {
+            SliceRenderer::build_for_song(assets_root, family.chart_id, difficulty)
+        }
+    }
+    .map_err(|error| format!("{difficulty}: renderer build failed: {error}"))?;
     let sample_set: BTreeSet<u64> = samples.iter().copied().collect();
     let mut frames = Vec::with_capacity(samples.len());
     let mut frame_metadata = Vec::with_capacity(samples.len());
@@ -656,11 +723,12 @@ fn event_categories(event: &TraceEvent) -> Result<Vec<EventCategory>, String> {
              live trace"
                 .to_string(),
         ),
-        // Schema-2 opponent rows and schema-3 chart-event rows are consumed by
-        // the scene but are not scripted-phase sample classes: the frozen
-        // sample plan keeps its eight beats, end margin, scripted categories
-        // and last-note tick.
+        // Schema-2 opponent rows, schema-3 chart-event rows and the 6E
+        // choreography trigger rows are consumed by the scene but are not
+        // scripted-phase sample classes: the frozen sample plan keeps its
+        // eight beats, end margin, scripted categories and last-note tick.
         TraceEvent::OpponentHit { .. }
+        | TraceEvent::Choreography { .. }
         | TraceEvent::CameraFocus { .. }
         | TraceEvent::CameraZoom { .. }
         | TraceEvent::CameraBop { .. }
@@ -682,6 +750,7 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HoldEnd { sim, .. }
         | TraceEvent::GameOver { sim, .. }
         | TraceEvent::OpponentHit { sim, .. }
+        | TraceEvent::Choreography { sim, .. }
         | TraceEvent::CameraFocus { sim, .. }
         | TraceEvent::CameraZoom { sim, .. }
         | TraceEvent::CameraBop { sim, .. }
@@ -690,6 +759,31 @@ fn trace_sim(event: &TraceEvent) -> u64 {
         | TraceEvent::HealthIcon { sim, .. }
         | TraceEvent::UnknownEvent { sim, .. } => *sim,
     }
+}
+
+/// The dialogue family's fixed trigger-relative sample recipe (ms).
+///
+/// The `dialogue:senpai` trigger row is emitted at tick 0 and the scene's
+/// conversation starts on that tick (the native overlay/opening tween is
+/// the scripted play-flow transition, not a scene state). The samples walk
+/// the conversation timeline: the early ticks capture the box opening, the
+/// 4 s `CUTSCENE_ADVANCE` cadence (4250, 8250, ...) is sampled together with
+/// one follow-up 250 ms later (typing/advance states), and 29000 ms
+/// captures the conversation outro. The list is deduplicated, sorted and
+/// clamped to the canonical replay end.
+const DIALOGUE_SAMPLE_PLAN_MS: [u64; 16] = [
+    250, 2250, 2450, 4250, 4500, 8250, 8500, 12250, 12500, 16250, 16500, 20250, 20500, 24250,
+    24500, 29000,
+];
+
+fn dialogue_sample_positions(replay_end: u64) -> Vec<u64> {
+    DIALOGUE_SAMPLE_PLAN_MS
+        .iter()
+        .copied()
+        .filter(|sample| *sample <= replay_end)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 /// Deterministic sample plan for one family difficulty.
@@ -2036,6 +2130,7 @@ mod tests {
             "families": {
                 "bopeebo": family_section(&BOPEEBO_FAMILY),
                 "school": family_section(&SCHOOL_FAMILY),
+                "dialogue": family_section(&DIALOGUE_FAMILY),
             }
         })
     }
@@ -2189,6 +2284,42 @@ mod tests {
     }
 
     #[test]
+    fn dialogue_sample_plan_is_the_trigger_relative_recipe() {
+        assert_eq!(
+            dialogue_sample_positions(30_000),
+            vec![
+                250, 2250, 2450, 4250, 4500, 8250, 8500, 12250, 12500, 16250, 16500, 20250, 20500,
+                24250, 24500, 29000
+            ]
+        );
+        // Clamped to a shorter replay end, still sorted and deduplicated.
+        assert_eq!(
+            dialogue_sample_positions(4_250),
+            vec![250, 2250, 2450, 4250]
+        );
+        assert!(dialogue_sample_positions(0).is_empty());
+        let full_plan = dialogue_sample_positions(30_000);
+        for tick in gameplay_sim::dialogue_advance_ticks() {
+            assert!(
+                full_plan.contains(&tick),
+                "dialogue advance tick {tick} is not sampled"
+            );
+        }
+    }
+
+    #[test]
+    fn dialogue_family_is_single_normal_difficulty() {
+        assert_eq!(DIALOGUE_FAMILY.name, "dialogue");
+        assert_eq!(DIALOGUE_FAMILY.chart_id, "senpai");
+        assert_eq!(DIALOGUE_FAMILY.difficulties, &["normal"]);
+        assert_eq!(
+            DIALOGUE_FAMILY.declared_difficulties,
+            &["easy", "normal", "hard"]
+        );
+        assert_eq!(DIALOGUE_FAMILY.stream, FamilyStream::Dialogue);
+    }
+
+    #[test]
     fn only_the_first_event_of_each_class_is_sampled() {
         let categories = [
             (2000, EventCategory::HoldTick),
@@ -2228,6 +2359,7 @@ mod tests {
             judgement: "sick",
             raw_note_diff: 0.0,
             note_diff_int: 0,
+            note_kind: None,
             score_delta: 350,
             health_before: 1.0,
             health_after: 1.0,
@@ -2254,6 +2386,7 @@ mod tests {
             judgement: "sick",
             raw_note_diff: 0.0,
             note_diff_int: 0,
+            note_kind: None,
         }
     }
 
@@ -2368,10 +2501,23 @@ mod tests {
         }
     }
 
+    fn choreography_row() -> TraceEvent {
+        TraceEvent::Choreography {
+            schema: "3",
+            kind: "choreography",
+            sim: 0,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event: "dialogue:senpai".into(),
+            arg: None,
+        }
+    }
+
     #[test]
-    fn event_categories_ignore_opponent_and_schema3_rows() {
+    fn event_categories_ignore_opponent_schema3_and_choreography_rows() {
         for event in [
             opponent_hit_row(),
+            choreography_row(),
             camera_focus_row(),
             camera_zoom_row(),
             camera_bop_row(),
@@ -2405,7 +2551,12 @@ mod tests {
     fn schema3_rows_do_not_change_the_sample_plan() {
         let hit = hit_sick(2000);
         let mut categories = Vec::new();
-        for event in [&hit, &camera_focus_row(), &opponent_hit_row()] {
+        for event in [
+            &hit,
+            &camera_focus_row(),
+            &opponent_hit_row(),
+            &choreography_row(),
+        ] {
             for category in event_categories(event).unwrap() {
                 categories.push((trace_sim(event), category));
             }
@@ -2542,6 +2693,22 @@ mod tests {
             errors
                 .iter()
                 .any(|error| error.contains("school") && error.contains("lacks the family")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn missing_dialogue_family_section_fails_closed() {
+        let mut manifest = full_manifest();
+        manifest["families"]
+            .as_object_mut()
+            .unwrap()
+            .remove("dialogue");
+        let errors = compare_manifest(&manifest, &full_evidence());
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("dialogue") && error.contains("lacks the family")),
             "{errors:?}"
         );
     }
@@ -2739,6 +2906,7 @@ mod tests {
             "south-pico",
             "hard",
             gameplay_sim::EventInputPlan::ChartTaps(&notes),
+            false,
         )
         .unwrap();
         let mut renderer =
