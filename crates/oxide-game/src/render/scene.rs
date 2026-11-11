@@ -652,6 +652,12 @@ pub(crate) struct Scene {
     /// Weekend-1 can/explosion choreography (`None` outside the weekend-1
     /// chart ids; M6-CONTRACT §14.2).
     weekend1: Option<super::choreography::Weekend1Runtime>,
+    /// The darnell in-game can-cutscene chain (`None` outside the darnell
+    /// family; M6-CONTRACT §14.2).
+    cutscene: Option<super::choreography::DarnellCutscene>,
+    /// The cutscene overlay layer (registered only with a cutscene payload;
+    /// its color is the folded black surface alpha).
+    cutscene_overlay_layer: Option<usize>,
     /// The native `darkenStageProps`/fade-back tint pass over the eligible
     /// prop layer colors (`None` until a darken timer fires).
     prop_tint: Option<PropTint>,
@@ -693,6 +699,7 @@ impl Scene {
             hud,
             dialogue,
             weekend1_props,
+            cutscene_changes,
         } = loaded;
         // The HUD state is built before the character rigs consume the loaded
         // characters (it needs their normalized `healthIcon` data).
@@ -813,6 +820,18 @@ impl Scene {
             _ => None,
         };
 
+        // M6-CONTRACT §14.2: the darnell cutscene overlay layer joins the
+        // same top-of-stack region (the camCutscene equivalent; [D] the
+        // native overlay removal + camera fadeBlack fold into one surface).
+        let cutscene_overlay_layer = cutscene_changes.as_ref().map(|_| {
+            let layer = layer_specs.len();
+            layer_specs.push(LayerSpec {
+                page: None,
+                color: [0.0, 0.0, 0.0, 0.0],
+            });
+            layer
+        });
+
         // M6-CONTRACT §14.2: the camCutscene group is appended after the HUD
         // group, so its quads draw above the gameplay HUD. The runtime bakes
         // every line's glyph pages into the same page store before `pages`
@@ -887,6 +906,10 @@ impl Scene {
                 conversation_start,
                 weekend1,
                 prop_tint: None,
+                cutscene: cutscene_changes
+                    .as_ref()
+                    .map(|changes| super::choreography::DarnellCutscene::new(changes.clone())),
+                cutscene_overlay_layer,
             },
             pages,
         ))
@@ -955,6 +978,164 @@ impl Scene {
                     spec.color = color;
                 }
             }
+        }
+    }
+
+    /// The scene's camera-focus anchors for the cutscene step table
+    /// (resolved from the scene's own rigs; the 6C finding-1 rule).
+    fn cutscene_focus(&self) -> super::choreography::CutsceneFocus {
+        let focus_for = |role: Role| {
+            self.characters
+                .iter()
+                .find(|character| character.role == role)
+                .map(|character| character.camera_focus)
+        };
+        super::choreography::CutsceneFocus {
+            player: focus_for(Role::Player),
+            opponent: focus_for(Role::Opponent),
+            girlfriend: focus_for(Role::Girlfriend),
+        }
+    }
+
+    /// The animation-finished state the cutscene per-beat dance rule reads.
+    fn cutscene_dance_state(&self) -> super::choreography::CutsceneDanceState {
+        let state_for = |role: Role| {
+            self.characters
+                .iter()
+                .find(|character| character.role == role)
+                .and_then(|character| character.scheduler.current_name())
+                .map(str::to_owned)
+        };
+        let finished_for = |role: Role| {
+            self.characters
+                .iter()
+                .find(|character| character.role == role)
+                .is_none_or(|character| character.scheduler.current_finished())
+        };
+        super::choreography::CutsceneDanceState {
+            opponent_finished: finished_for(Role::Opponent),
+            opponent_animation: state_for(Role::Opponent),
+            girlfriend_finished: finished_for(Role::Girlfriend),
+        }
+    }
+
+    /// Applies one cutscene step-table action through the 6C camera algebra
+    /// and the animation surface.
+    fn apply_cutscene_action(
+        &mut self,
+        action: super::choreography::CutsceneAction,
+    ) -> Result<(), RenderError> {
+        use super::choreography::CutsceneAction;
+        match action {
+            CutsceneAction::CameraTo {
+                target,
+                duration_ms,
+                ease,
+            } => {
+                // Native `tweenCameraToPosition(x, y, duration, ease)`: the
+                // follow-tween path (duration 0 snaps and re-follows).
+                self.start_follow_tween(
+                    target,
+                    duration_ms,
+                    crate::eases::resolve_ease(ease)
+                        .map(|(_, function)| function)
+                        .unwrap_or(crate::eases::linear_ease),
+                )?;
+            }
+            CutsceneAction::CameraZoom {
+                zoom,
+                duration_ms,
+                ease,
+            } => {
+                // Native `tweenCameraZoom(zoom, duration, direct=true, ease)`:
+                // direct mode against `FlxCamera.defaultZoom = 1`.
+                self.apply_cutscene_zoom(zoom, duration_ms, ease)?;
+            }
+            CutsceneAction::Character {
+                role,
+                animation,
+                ignore_other,
+            } => {
+                if let Some(character) = self.character_mut(role) {
+                    character
+                        .scheduler
+                        .play_with_ignore_other(animation, true, ignore_other);
+                }
+            }
+            CutsceneAction::Dance(role) => {
+                if let Some(character) = self.character_mut(role) {
+                    character.scheduler.dance(true);
+                }
+            }
+            CutsceneAction::CanClip(clip) => {
+                if let Some(runtime) = &mut self.weekend1 {
+                    runtime.play_cutscene_can(clip);
+                }
+            }
+            CutsceneAction::CanShotProp => {
+                if let Some(runtime) = &mut self.weekend1 {
+                    runtime.play_can_shot_prop(self.sim_ms);
+                }
+            }
+            CutsceneAction::CutsceneMusic => {
+                // [D] Headless seam: the cutscene music start lives in the
+                // play session's audio surface; the scene records no state.
+            }
+            CutsceneAction::End => {
+                // [D] The native `startCountdown()` re-entry is the play
+                // session's flow; the scene marks the cutscene consumed and
+                // gameplay continues.
+            }
+        }
+        Ok(())
+    }
+
+    /// The direct-mode zoom tween for the cutscene step table (the row
+    /// consumer computes `resolved_target_zoom` from the stage; the step
+    /// table carries the direct zoom directly).
+    fn apply_cutscene_zoom(
+        &mut self,
+        target: f64,
+        duration_ms: f64,
+        ease: &'static str,
+    ) -> Result<(), RenderError> {
+        if !target.is_finite() || !duration_ms.is_finite() || duration_ms < 0.0 {
+            return Err(RenderError::Unsupported {
+                detail: format!("cutscene zoom ({target}, {duration_ms}) is invalid"),
+            });
+        }
+        if duration_ms <= 0.0 {
+            self.camera_events.zoom_tween = None;
+            self.camera.current_zoom = target;
+            return Ok(());
+        }
+        let Some((_, function)) = crate::eases::resolve_ease(ease) else {
+            return Ok(());
+        };
+        self.camera_events.zoom_tween = None;
+        self.camera_events.zoom_tween = Some(ZoomTween {
+            from: self.camera.current_zoom,
+            to: target,
+            start_ms: self.sim_ms,
+            duration_ms,
+            ease: function,
+        });
+        Ok(())
+    }
+
+    /// The cutscene overlay layer color sync (`None` color when absent).
+    fn sync_cutscene_overlay(&mut self) {
+        let Some(alpha) = self
+            .cutscene
+            .as_ref()
+            .map(super::choreography::DarnellCutscene::overlay_alpha)
+        else {
+            return;
+        };
+        if let Some(layer) = self.cutscene_overlay_layer
+            && let Some(spec) = self.layer_specs.get_mut(layer)
+        {
+            spec.color = [0.0, 0.0, 0.0, alpha as f32];
         }
     }
 
@@ -1110,6 +1291,22 @@ impl Scene {
             self.start_prop_darken();
         }
         self.advance_prop_tint();
+
+        // Darnell can-cutscene per-tick advance (M6-CONTRACT §14.2): the
+        // step table's camera/character/can actions apply in order; the
+        // overlay alpha syncs into the cutscene layer color.
+        let focus = self.cutscene_focus();
+        let dance = self.cutscene_dance_state();
+        let actions = self
+            .cutscene
+            .as_mut()
+            .map(|cutscene| cutscene.advance(self.sim_ms, &focus, &dance));
+        if let Some(actions) = actions {
+            for action in actions {
+                self.apply_cutscene_action(action)?;
+            }
+        }
+        self.sync_cutscene_overlay();
 
         self.trigger_opponent_notes();
         // Strumline.hx:653-669: an opponent hold that reached its end no
@@ -1639,6 +1836,19 @@ impl Scene {
                         });
                     };
                     conversation.start(id)?;
+                } else if event == "can_cutscene" {
+                    let Some(cutscene) = &mut self.cutscene else {
+                        return Err(RenderError::Unsupported {
+                            detail: "can_cutscene trigger fired but the scene loaded no \
+                                     cutscene payload"
+                                .to_string(),
+                        });
+                    };
+                    cutscene.start(self.sim_ms);
+                } else if event == "ending_video" {
+                    // The video player is the media phase deliverable ([D]
+                    // M6-CONTRACT §14.2); the story-retry path runs a normal
+                    // song end.
                 }
             }
             TraceEvent::OpponentHit {
@@ -3146,6 +3356,7 @@ mod tests {
             hud: None,
             dialogue: None,
             weekend1_props: None,
+            cutscene_changes: None,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
     }

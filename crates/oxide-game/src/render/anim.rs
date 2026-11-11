@@ -306,7 +306,10 @@ impl CharacterScheduler {
         Some((animation, frame))
     }
 
-    fn current_finished(&self) -> bool {
+    /// Whether the current non-looped animation has reached its last frame.
+    /// The darnell cutscene's per-beat `dance(true)` rule consults this before
+    /// forcing a dance (M6-CONTRACT §14.1).
+    pub(crate) fn current_finished(&self) -> bool {
         match (&self.current, self.current_animation()) {
             (Some(playing), Some(animation)) => animation.finished(playing.elapsed_seconds),
             _ => false,

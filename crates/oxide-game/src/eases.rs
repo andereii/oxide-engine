@@ -67,7 +67,10 @@ const B6: f64 = 2.625 / 2.75;
 
 const PI2: f64 = std::f64::consts::PI / 2.0;
 
-fn linear(t: f64) -> f64 {
+/// The identity ease (the flixel `FlxTween` default); pub(crate) for the
+/// cutscene step table's fallback.
+pub(crate) use self::linear as linear_ease;
+pub(crate) fn linear(t: f64) -> f64 {
     t
 }
 

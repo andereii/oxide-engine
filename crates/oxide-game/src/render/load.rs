@@ -139,7 +139,7 @@ impl SpriteSheet {
     }
 
     /// Document-order prefix matches (native `addByPrefix` over frame names).
-    fn prefix_indices(&self, prefix: &str) -> Vec<usize> {
+    pub(crate) fn prefix_indices(&self, prefix: &str) -> Vec<usize> {
         self.frames
             .iter()
             .enumerate()
@@ -358,6 +358,10 @@ pub(crate) struct LoadedSlice {
     /// ids fill this (`weekend1_prop_pages`); every other chart leaves it
     /// `None`, so the frozen bopeebo/school page sets are untouched.
     pub(crate) weekend1_props: Option<Weekend1Props>,
+    /// `darnellCanCutscene` conductor time changes (M6-CONTRACT §14.1).
+    /// Only the darnell family fills this; the scene's cutscene-local
+    /// conductor consumes it.
+    pub(crate) cutscene_changes: Option<Vec<oxide_audio::conductor::TimeChange>>,
 }
 
 /// Observed character renderType dispatch (M6-CONTRACT §11.1).
@@ -421,6 +425,7 @@ pub(crate) fn load_slice_for_song(
         difficulty,
         None,
         weekend1_prop_pages(chart_id),
+        darnell_cutscene_chart(chart_id),
     )
 }
 
@@ -444,6 +449,7 @@ pub(crate) fn load_slice_for_song_with_dialogue(
         difficulty,
         dialogue_id,
         weekend1_prop_pages(chart_id),
+        darnell_cutscene_chart(chart_id),
     )
 }
 
@@ -531,12 +537,21 @@ fn weekend1_prop_pages(chart_id: &str) -> bool {
     matches!(song, "2hot" | "darnell" | "lit-up")
 }
 
+/// The darnell second-story-entry in-game cutscene (`can_cutscene` trigger).
+/// Only the darnell family loads the `wked1_cutscene_1_can` sheet and the
+/// `darnellCanCutscene` conductor metadata; 2hot/lit-up keep their page sets.
+fn darnell_cutscene_chart(chart_id: &str) -> bool {
+    let (song, _) = split_song_variant(chart_id);
+    song == "darnell"
+}
+
 /// Shared chart/metadata loader. Stage, characters and note style come from
 /// the metadata; only the song file pair is selected by the caller.
 ///
 /// `dialogue_id` is the explicit 6E conversation to load, or `None` for the
 /// frozen render-fixture path. `weekend1` selects the weekend-1 can/explosion
-/// pages (see [`weekend1_prop_pages`]).
+/// pages (see [`weekend1_prop_pages`]); `darnell_cutscene` additionally loads
+/// the cutscene can sheet and the `darnellCanCutscene` conductor metadata.
 pub(crate) fn load_slice_from_paths(
     assets_root: &Path,
     chart_path: &str,
@@ -544,6 +559,7 @@ pub(crate) fn load_slice_from_paths(
     difficulty: &str,
     dialogue_id: Option<&str>,
     weekend1: bool,
+    darnell_cutscene: bool,
 ) -> Result<LoadedSlice, RenderError> {
     if difficulty.is_empty() {
         return Err(RenderError::UnknownDifficulty(difficulty.to_string()));
@@ -771,33 +787,7 @@ pub(crate) fn load_slice_from_paths(
         level_dir.as_deref(),
     )?;
 
-    let conductor_changes = metadata
-        .time_changes
-        .as_ref()
-        .map(|changes| {
-            changes
-                .iter()
-                .map(|change| {
-                    if !change.time.is_finite() || !change.bpm.is_finite() || change.bpm <= 0.0 {
-                        return Err(RenderError::Unsupported {
-                            detail: format!(
-                                "metadata time change at {} ms has bpm {}",
-                                change.time, change.bpm
-                            ),
-                        });
-                    }
-                    Ok(oxide_audio::conductor::TimeChange {
-                        time_stamp: change.time,
-                        beat_time: 0.0,
-                        bpm: change.bpm,
-                        time_signature_num: change.time_signature_num.unwrap_or(4) as i32,
-                        time_signature_den: change.time_signature_den.unwrap_or(4) as i32,
-                    })
-                })
-                .collect::<Result<Vec<_>, RenderError>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
+    let conductor_changes = metadata_conductor_changes(&metadata)?;
 
     // M6-CONTRACT §13: the deterministic scene composes the play HUD core, so
     // the HUD pages/font join the same page store. Missing HUD assets fail
@@ -810,7 +800,8 @@ pub(crate) fn load_slice_from_paths(
         .transpose()?;
     // Weekend-1 (2hot) can/explosion pages. Loaded after every existing page
     // so non-family page indices stay exactly where they were; the family ids
-    // fail closed when any page is missing.
+    // fail closed when any page is missing. The darnell cutscene can sheet
+    // loads only for the darnell family (only that chart emits the trigger).
     let weekend1_props = if weekend1 {
         Some(load_weekend1_props(
             &vfs,
@@ -819,7 +810,16 @@ pub(crate) fn load_slice_from_paths(
             level_dir.as_deref(),
             &props,
             chart_notes,
+            darnell_cutscene,
         )?)
+    } else {
+        None
+    };
+    // The cutscene-local conductor's metadata is the shipped music metadata
+    // (`weekend1/music/darnellCanCutscene/darnellCanCutscene-metadata.json`),
+    // not a `preload/data` document. Loaded only for the darnell family.
+    let cutscene_changes = if darnell_cutscene {
+        Some(load_cutscene_changes(&vfs)?)
     } else {
         None
     };
@@ -838,6 +838,7 @@ pub(crate) fn load_slice_from_paths(
         hud: Some(hud),
         dialogue,
         weekend1_props,
+        cutscene_changes,
     })
 }
 
@@ -863,11 +864,20 @@ fn load_weekend1_props(
     stage_dir: Option<&str>,
     props: &[LoadedStageProp],
     chart_notes: &[oxide_data::chart::NoteData],
+    darnell_cutscene: bool,
 ) -> Result<Weekend1Props, RenderError> {
     let can_sheet = load_atlas_sheet(vfs, pages, "weekend1:spraycanAtlas", stage_dir, false)?;
     let can_start = weekend1_clip(&can_sheet, "Can Start")?;
     let can_shot = weekend1_clip(&can_sheet, "Can Shot")?;
     let hit_pico = weekend1_clip(&can_sheet, "Hit Pico")?;
+    // The darnell in-game cutscene can (`wked1_cutscene_1_can` Sparrow with
+    // the kick clips); loaded only for the darnell family (only that chart
+    // emits the `can_cutscene` trigger).
+    let cutscene = if darnell_cutscene {
+        Some(load_cutscene_can(vfs, pages)?)
+    } else {
+        None
+    };
 
     let big_sheet = load_sparrow_sheet(vfs, pages, "SpraypaintExplosion", stage_dir, false)?;
     let big_frames = require_frames(
@@ -910,8 +920,85 @@ fn load_weekend1_props(
         big_frames,
         ez_sheet,
         ez_frames,
+        cutscene_can_sheet: cutscene.as_ref().map(|cutscene| cutscene.sheet.clone()),
+        cutscene_can_up: cutscene.as_ref().and_then(|cutscene| cutscene.up.clone()),
+        cutscene_can_forward: cutscene
+            .as_ref()
+            .and_then(|cutscene| cutscene.forward.clone()),
         pile,
     })
+}
+
+/// The darnell in-game cutscene can: the `wked1_cutscene_1_can` Sparrow sheet
+/// with the kick clips (`can kicked up0` / `can kick quick0`).
+struct CutsceneCan {
+    sheet: SpriteSheet,
+    up: Option<CanClip>,
+    forward: Option<CanClip>,
+}
+
+fn load_cutscene_can(vfs: &Vfs, pages: &mut PageStore) -> Result<CutsceneCan, RenderError> {
+    let sheet = load_sparrow_sheet(vfs, pages, "weekend1:wked1_cutscene_1_can", None, false)?;
+    let up = CanClip {
+        frames: sheet.prefix_indices("can kicked up0"),
+    };
+    let forward = CanClip {
+        frames: sheet.prefix_indices("can kick quick0"),
+    };
+    Ok(CutsceneCan {
+        sheet,
+        up: Some(up),
+        forward: Some(forward),
+    })
+}
+
+/// The metadata time changes as conductor `TimeChange`s (the M4 units).
+fn metadata_conductor_changes(
+    metadata: &oxide_data::metadata::Metadata,
+) -> Result<Vec<oxide_audio::conductor::TimeChange>, RenderError> {
+    metadata
+        .time_changes
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|change| {
+            if !change.time.is_finite() || !change.bpm.is_finite() || change.bpm <= 0.0 {
+                return Err(RenderError::Unsupported {
+                    detail: format!(
+                        "metadata time change at {} ms has bpm {}",
+                        change.time, change.bpm
+                    ),
+                });
+            }
+            Ok(oxide_audio::conductor::TimeChange {
+                time_stamp: change.time,
+                beat_time: 0.0,
+                bpm: change.bpm,
+                time_signature_num: change.time_signature_num.unwrap_or(4) as i32,
+                time_signature_den: change.time_signature_den.unwrap_or(4) as i32,
+            })
+        })
+        .collect()
+}
+
+/// The shipped cutscene-local music metadata
+/// (`weekend1/music/darnellCanCutscene/darnellCanCutscene-metadata.json`).
+fn load_cutscene_changes(
+    vfs: &Vfs,
+) -> Result<Vec<oxide_audio::conductor::TimeChange>, RenderError> {
+    let path = "weekend1/music/darnellCanCutscene/darnellCanCutscene-metadata.json";
+    let _source = vfs.resolve(path).ok_or_else(|| RenderError::MissingAsset {
+        path: path.to_string(),
+    })?;
+    let document = read_data_document(vfs, path)?;
+    let oxide_data::Typed::Metadata(metadata) = document.typed else {
+        return Err(RenderError::WrongKind {
+            path: path.to_string(),
+            expected: "metadata",
+            actual: document.kind,
+        });
+    };
+    metadata_conductor_changes(&metadata)
 }
 
 /// One named main-timeline label as a can clip (the native `animation.play`
