@@ -660,6 +660,9 @@ impl Scene {
             player_vocals: _,
             opponent_vocals: _,
             hud,
+            // The scene-integration slice wires the conversation runtime
+            // (M6-CONTRACT §14.2); temporary allow until that lands.
+            dialogue: _unused_dialogue,
         } = loaded;
         // The HUD state is built before the character rigs consume the loaded
         // characters (it needs their normalized `healthIcon` data).
@@ -2927,6 +2930,7 @@ mod tests {
             player_vocals: Vec::new(),
             opponent_vocals: Vec::new(),
             hud: None,
+            dialogue: None,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
     }

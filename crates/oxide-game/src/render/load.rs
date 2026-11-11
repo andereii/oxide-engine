@@ -28,7 +28,7 @@ use super::anim::{
 
 /// Upper bound for any single slice asset read, matching the M5 slice VFS
 /// read contract. The largest shipped page in the slice is a few MiB.
-const ASSET_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
+pub(crate) const ASSET_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
 
 const BOPEEBO_CHART_ID: &str = "bopeebo-default";
 
@@ -299,6 +299,10 @@ pub(crate) struct LoadedSlice {
     /// Loaded HUD core (M6-CONTRACT §13). Synthetic scene tests pass `None`;
     /// the real load path always carries it (missing assets fail closed).
     pub(crate) hud: Option<super::hud::LoadedHud>,
+    /// Loaded 6E dialogue payload. The frozen render-fixture path leaves this
+    /// `None` (bopeebo/school frame digests must not change); the explicit
+    /// dialogue-enabled loader fills it for the senpai family.
+    pub(crate) dialogue: Option<super::dialogue::LoadedDialogue>,
 }
 
 /// Observed character renderType dispatch (M6-CONTRACT §11.1).
@@ -346,24 +350,46 @@ pub(crate) fn load_slice(assets_root: &Path, difficulty: &str) -> Result<LoadedS
 
 /// Builds the same scene surface for any `corpus.txt`-style chart id
 /// (`<song>`, `<song>-default`, or a known `<song>-<variation>`).
+///
+/// This is the frozen render-fixture path: dialogue stays unloaded so the
+/// established bopeebo/school frame digests are byte-identical.
 pub(crate) fn load_slice_for_song(
     assets_root: &Path,
     chart_id: &str,
     difficulty: &str,
 ) -> Result<LoadedSlice, RenderError> {
     let (chart_path, metadata_path) = song_paths(chart_id)?;
-    load_slice_from_paths(assets_root, &chart_path, &metadata_path, difficulty)
+    load_slice_from_paths(assets_root, &chart_path, &metadata_path, difficulty, None)
+}
+
+/// Dialogue-enabled variant of [`load_slice_for_song`] (6E). The chart id is
+/// consumed by the scene-integration slice (M6-CONTRACT §14.2); temporary
+/// dead-code allow until it lands.
+#[allow(dead_code)]
+/// mapped through the shipped senpai-family table; ids outside that table
+/// simply load without a dialogue payload. The frozen fixture entry point
+/// above deliberately never calls this.
+pub(crate) fn load_slice_for_song_with_dialogue(
+    assets_root: &Path,
+    chart_id: &str,
+    difficulty: &str,
+) -> Result<LoadedSlice, RenderError> {
+    let (chart_path, metadata_path) = song_paths(chart_id)?;
+    let dialogue_id = dialogue_load_id(chart_id, true);
+    load_slice_from_paths(
+        assets_root,
+        &chart_path,
+        &metadata_path,
+        difficulty,
+        dialogue_id,
+    )
 }
 
 /// Maps a corpus-style chart id to its chart/metadata paths. Mirrors the 6A
 /// `build_chart` iding: only the known corpus variations are split off, so
 /// hyphenated song names stay intact.
 fn song_paths(chart_id: &str) -> Result<(String, String), RenderError> {
-    const VARIATIONS: [&str; 4] = ["default", "erect", "pico", "bf"];
-    let (song, variant) = chart_id
-        .rsplit_once('-')
-        .filter(|(_, variant)| VARIATIONS.contains(variant))
-        .unwrap_or((chart_id, "default"));
+    let (song, variant) = split_song_variant(chart_id);
     let valid_part = |part: &str| {
         !part.is_empty()
             && part
@@ -392,13 +418,55 @@ fn song_paths(chart_id: &str) -> Result<(String, String), RenderError> {
     ))
 }
 
+/// Splits a chart id into `(song, variation)`. Only the known corpus
+/// variations are recognised, so hyphenated song names stay intact.
+fn split_song_variant(chart_id: &str) -> (&str, &str) {
+    const VARIATIONS: [&str; 4] = ["default", "erect", "pico", "bf"];
+    chart_id
+        .rsplit_once('-')
+        .filter(|(_, variant)| VARIATIONS.contains(variant))
+        .unwrap_or((chart_id, "default"))
+}
+
+/// Shipped week-6 dialogue family (uncensored only): the same song/variant
+/// table the choreography triggers use (`slice/choreography.rs`).
+/// Consumed by the scene-integration slice; temporary allow.
+#[allow(dead_code)]
+fn dialogue_conversation_id(chart_id: &str) -> Option<&'static str> {
+    let (song, variant) = split_song_variant(chart_id);
+    match song {
+        "senpai" if variant == "pico" => Some("senpai-pico"),
+        "senpai" => Some("senpai"),
+        "roses" if variant == "pico" => Some("roses-pico"),
+        "roses" => Some("roses"),
+        "thorns" => Some("thorns"),
+        _ => None,
+    }
+}
+
+/// Dialogue id for a loader call. `enabled == false` is the frozen render
+/// fixture path and always yields `None`. Consumed by the scene-integration
+/// slice; temporary allow.
+#[allow(dead_code)]
+fn dialogue_load_id(chart_id: &str, enabled: bool) -> Option<&'static str> {
+    if enabled {
+        dialogue_conversation_id(chart_id)
+    } else {
+        None
+    }
+}
+
 /// Shared chart/metadata loader. Stage, characters and note style come from
 /// the metadata; only the song file pair is selected by the caller.
+///
+/// `dialogue_id` is the explicit 6E conversation to load, or `None` for the
+/// frozen render-fixture path.
 pub(crate) fn load_slice_from_paths(
     assets_root: &Path,
     chart_path: &str,
     metadata_path: &str,
     difficulty: &str,
+    dialogue_id: Option<&str>,
 ) -> Result<LoadedSlice, RenderError> {
     if difficulty.is_empty() {
         return Err(RenderError::UnknownDifficulty(difficulty.to_string()));
@@ -658,6 +726,11 @@ pub(crate) fn load_slice_from_paths(
     // the HUD pages/font join the same page store. Missing HUD assets fail
     // closed (a partial HUD would silently change frozen frame pixels).
     let hud = super::hud::load_hud(&vfs, &mut pages)?;
+    // 6E: the dialogue payload joins the same store when the caller enables
+    // it (the frozen render-fixture path passes None and stays byte-stable).
+    let dialogue = dialogue_id
+        .map(|id| super::dialogue::load_dialogue(&vfs, &mut pages, id))
+        .transpose()?;
 
     Ok(LoadedSlice {
         pages: pages.pages,
@@ -671,6 +744,7 @@ pub(crate) fn load_slice_from_paths(
         player_vocals,
         opponent_vocals,
         hud: Some(hud),
+        dialogue,
     })
 }
 
@@ -736,7 +810,7 @@ fn read_text_in_dirs(
 /// - explicit `<lib>:<key>` -> `<lib>/images/<key>`, then shared, then preload;
 /// - plain `<key>` -> `<level directory>/images/<key>`, then shared, then
 ///   preload (`getLibraryPath` fallbacks).
-fn image_file_bases(key: &str, level_dir: Option<&str>) -> Vec<String> {
+pub(crate) fn image_file_bases(key: &str, level_dir: Option<&str>) -> Vec<String> {
     if let Some((library, rest)) = key.split_once(':') {
         let mut bases = vec![format!("{library}/images/{rest}")];
         for fallback in ["shared", "preload"] {
