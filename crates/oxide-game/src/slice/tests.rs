@@ -134,7 +134,9 @@ fn release(sim_ms: u64, direction: i64) -> InputEvent {
 
 fn event_ms(event: &InputEvent) -> u64 {
     match event {
-        InputEvent::Press { sim_ms, .. } | InputEvent::Release { sim_ms, .. } => *sim_ms,
+        InputEvent::Press { sim_ms, .. }
+        | InputEvent::Release { sim_ms, .. }
+        | InputEvent::Advance { sim_ms } => *sim_ms,
     }
 }
 
@@ -1687,6 +1689,7 @@ fn opponent_notes_auto_hit_at_the_first_tick_at_or_after_their_time() {
             judgement,
             raw_note_diff,
             note_diff_int,
+            ..
         } = event
         else {
             unreachable!("opponent_hits() returns opponent variants");

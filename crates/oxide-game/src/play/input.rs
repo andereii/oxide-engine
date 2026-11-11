@@ -186,6 +186,16 @@ impl TickPlanner {
         self.pending.push(event);
     }
 
+    /// Appends the `CUTSCENE_ADVANCE` transition ([Z, ENTER]) on `tick`.
+    /// Ignored while paused/terminal like lane transitions; no autorepeat is
+    /// synthesized by this planner (the window forwards real keydowns only).
+    pub(crate) fn queue_advance(&mut self, tick: u64) {
+        if self.paused || self.terminal {
+            return;
+        }
+        self.pending.push(InputEvent::Advance { sim_ms: tick });
+    }
+
     /// Inclusive last tick to step for the current song position.
     ///
     /// `None` means there is no new complete millisecond (paused, terminal, or
@@ -219,7 +229,9 @@ impl TickPlanner {
         let mut future = Vec::new();
         for event in self.pending.drain(..) {
             let event_ms = match &event {
-                InputEvent::Press { sim_ms, .. } | InputEvent::Release { sim_ms, .. } => *sim_ms,
+                InputEvent::Press { sim_ms, .. }
+                | InputEvent::Release { sim_ms, .. }
+                | InputEvent::Advance { sim_ms } => *sim_ms,
             };
             if event_ms == tick {
                 current.push(event);

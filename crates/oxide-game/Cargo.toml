@@ -12,6 +12,10 @@ oxide-audio = { path = "../oxide-audio" }
 oxide-data = { path = "../oxide-data" }
 oxide-font = { path = "../oxide-font" }
 oxide-vfs = { path = "../oxide-vfs" }
+# 6E dialogue text rasterizer (M6-CONTRACT §14.3 approved item): pure Rust,
+# MIT/Apache-2.0, zero C dependencies; rasterizes assets/fonts/pixel.otf
+# ("Pixel Arial 11 Bold", size 32) into glyph pages for the conversation text.
+ab_glyph = "0.2.32"
 serde = { workspace = true }
 thiserror = { workspace = true }
 

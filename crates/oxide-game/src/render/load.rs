@@ -265,13 +265,15 @@ impl LoadedNoteStyle {
 /// One chart note (both chart sides; `note_id` matches the sim's per-
 /// strumline convention: player notes carry the compacted player id, opponent
 /// notes the compacted opponent id; exactly one side is `Some`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct LoadedNote {
     pub(crate) time: f64,
     pub(crate) direction: usize,
     pub(crate) sustain_ms: f64,
     pub(crate) opponent: bool,
     pub(crate) note_id: Option<u32>,
+    /// Chart note kind (`k`), preserved for the 6E choreography consumers.
+    pub(crate) kind: Option<String>,
 }
 
 /// Everything the scene builder and headless harness need.
@@ -486,6 +488,7 @@ pub(crate) fn load_slice_from_paths(
             sustain_ms,
             opponent,
             note_id: Some(id),
+            kind: note.kind.clone(),
         });
     }
 

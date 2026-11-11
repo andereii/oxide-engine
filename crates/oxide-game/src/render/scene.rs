@@ -842,7 +842,9 @@ impl Scene {
         }
         for input in inputs {
             let event_ms = match input {
-                InputEvent::Press { sim_ms, .. } | InputEvent::Release { sim_ms, .. } => *sim_ms,
+                InputEvent::Press { sim_ms, .. }
+                | InputEvent::Release { sim_ms, .. }
+                | InputEvent::Advance { sim_ms } => *sim_ms,
             };
             if event_ms != sim_ms {
                 return Err(RenderError::OutOfGridEvent {
@@ -928,6 +930,10 @@ impl Scene {
                         self.player_line.release(direction);
                     }
                 }
+                // M6-CONTRACT §14: while a conversation is active the advance
+                // key drives its state machine; the gameplay scene itself has
+                // no advance effect.
+                InputEvent::Advance { .. } => {}
             }
         }
 
@@ -1309,7 +1315,7 @@ impl Scene {
                 ..
             } => {
                 let index = self.player_note_index(*note_id, self.last_tick.unwrap_or(0))?;
-                let note = self.notes[index].note;
+                let note = self.notes[index].note.clone();
                 if let Ok(direction) = usize::try_from(*note_direction)
                     && direction < 4
                     && note.sustain_ms > 0.0
@@ -1449,7 +1455,7 @@ impl Scene {
                         note_id: *note_id,
                     });
                 }
-                let note = self.notes[index].note;
+                let note = self.notes[index].note.clone();
                 self.notes[index].hit = true;
                 let direction = *note_direction;
                 if let Ok(direction) = usize::try_from(direction)
@@ -1479,7 +1485,7 @@ impl Scene {
     fn trigger_opponent_notes(&mut self) {
         let now = self.sim_ms;
         for index in 0..self.notes.len() {
-            let note = self.notes[index].note;
+            let note = self.notes[index].note.clone();
             if !note.opponent || self.notes[index].hit || note.time > now {
                 continue;
             }
@@ -3615,6 +3621,7 @@ mod tests {
                 sustain_ms: 3000.0,
                 opponent: true,
                 note_id: Some(0),
+                kind: None,
             }],
         );
         let opponent_hit = TraceEvent::OpponentHit {
@@ -3628,6 +3635,7 @@ mod tests {
             judgement: "sick",
             raw_note_diff: 0.0,
             note_diff_int: 0,
+            note_kind: None,
         };
         scene
             .step(0, &[opponent_hit], &[])

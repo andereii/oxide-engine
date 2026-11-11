@@ -131,6 +131,12 @@ const PBOT1_SHIT_THRESHOLD: f64 = 160.0;
 pub enum InputEvent {
     Press { sim_ms: u64, direction: i64 },
     Release { sim_ms: u64, direction: i64 },
+    /// M6-CONTRACT §14: the `CUTSCENE_ADVANCE` transition ([Z, ENTER]).
+    ///
+    /// The gameplay sim has no gameplay effect for it (the dialogue state
+    /// machine lives in the scene); accepting the variant keeps one shared
+    /// input surface for the play window and the deterministic scene.
+    Advance { sim_ms: u64 },
 }
 
 /// Per-judgement tallies in the §2 wire order.
@@ -172,6 +178,10 @@ pub enum TraceEvent {
         judgement: &'static str,
         raw_note_diff: f64,
         note_diff_int: i32,
+        /// Chart note kind (`k`), serialized only when present so kind-free
+        /// fixture streams stay byte-identical (M6-CONTRACT §14.2).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note_kind: Option<String>,
         score_delta: i32,
         health_before: f64,
         health_after: f64,
@@ -191,6 +201,9 @@ pub enum TraceEvent {
         judgement: &'static str,
         raw_note_diff: f64,
         note_diff_int: i32,
+        /// Chart note kind (`k`), present only when the chart declares one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note_kind: Option<String>,
         score_delta: i32,
         health_before: f64,
         health_after: f64,
@@ -296,6 +309,9 @@ pub enum TraceEvent {
         judgement: &'static str,
         raw_note_diff: f64,
         note_diff_int: i32,
+        /// Chart note kind (`k`), present only when the chart declares one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note_kind: Option<String>,
     },
     /// `FocusCamera` (`docs/M6-CONTRACT.md` §12.4.1).
     CameraFocus {
@@ -568,7 +584,7 @@ pub struct GameplaySimState {
     trace: Vec<TraceEvent>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct SimNote {
     id: u32,
     /// Strum time in milliseconds, exactly as stored on the wire.
@@ -576,6 +592,8 @@ struct SimNote {
     direction: i64,
     /// Sustain length in milliseconds (`0.0` for a tap).
     sustain_length: f64,
+    /// Chart note kind (`k`); `None` on the frozen schema-1 path.
+    kind: Option<String>,
     hit: bool,
     missed: bool,
     may_hit: bool,
@@ -835,6 +853,11 @@ impl GameplaySimState {
                     time: note.time,
                     direction: note.direction % 4,
                     sustain_length,
+                    kind: if opponent_side {
+                        note.kind.clone()
+                    } else {
+                        None
+                    },
                     hit: false,
                     missed: false,
                     may_hit: false,
@@ -845,6 +868,11 @@ impl GameplaySimState {
                     time: note.time,
                     direction: note.direction,
                     sustain_length,
+                    kind: if opponent_side {
+                        note.kind.clone()
+                    } else {
+                        None
+                    },
                     hit: false,
                     missed: false,
                     may_hit: false,
@@ -951,6 +979,9 @@ impl GameplaySimState {
                     sim_ms: event_ms,
                     direction,
                 } => self.release(*event_ms, *direction),
+                // M6-CONTRACT §14: the scene owns the dialogue state machine;
+                // the deterministic gameplay sim has no advance effect.
+                InputEvent::Advance { .. } => {}
             }
         }
 
@@ -1026,7 +1057,7 @@ impl GameplaySimState {
         step_ms: u64,
         dispatched: &mut Vec<TraceEvent>,
     ) {
-        let note = self.notes[index];
+        let note = self.notes[index].clone();
         let raw_note_diff = step_ms as f64 - note.time;
         let note_diff_int = raw_note_diff.trunc() as i32;
         let abs_timing = f64::from(note_diff_int).abs();
@@ -1058,6 +1089,7 @@ impl GameplaySimState {
             Hit,
             "hit",
             header,
+            note_kind: note.kind.clone(),
             score_delta: score_delta,
             health_before: health_before,
             health_after: health_after,
@@ -1106,7 +1138,7 @@ impl GameplaySimState {
 
         let position = sim_ms as f64;
         for index in 0..self.notes.len() {
-            let note = self.notes[index];
+            let note = self.notes[index].clone();
             if note.hit || note.missed {
                 continue;
             }
@@ -1128,7 +1160,7 @@ impl GameplaySimState {
     fn process_opponent_notes(&mut self, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
         let position = sim_ms as f64;
         for index in 0..self.opponent_notes.len() {
-            let note = self.opponent_notes[index];
+            let note = self.opponent_notes[index].clone();
             if note.hit || position < note.time {
                 continue;
             }
@@ -1139,12 +1171,13 @@ impl GameplaySimState {
                 Header::new(sim_ms, self.schema)
                     .with_note(note.id, note.direction)
                     .with_diff("perfect", 0.0, 0),
+                note_kind: note.kind.clone(),
             ));
         }
     }
 
     fn miss_window_note(&mut self, index: usize, sim_ms: u64, dispatched: &mut Vec<TraceEvent>) {
-        let note = self.notes[index];
+        let note = self.notes[index].clone();
         let raw_note_diff = sim_ms as f64 - note.time;
         let note_diff_int = raw_note_diff.trunc() as i32;
         let health_before = self.health;
@@ -1164,6 +1197,7 @@ impl GameplaySimState {
             Miss,
             "miss",
             header,
+            note_kind: note.kind.clone(),
             score_delta: PBOT1_MISS_SCORE,
             health_before: health_before,
             health_after: self.health,
@@ -1221,7 +1255,7 @@ impl GameplaySimState {
             return;
         }
         if hold.dropped {
-            let note = self.notes[hold.note_index];
+            let note = self.notes[hold.note_index].clone();
             let stale_ms = hold.snapshot_ms;
             let combo_before = self.combo;
             let is_combo_break = stale_ms > HOLD_DROP_PENALTY_THRESHOLD_MS;
@@ -1267,7 +1301,7 @@ impl GameplaySimState {
                 self.active_holds[lane] = None;
             }
         }
-        let note = self.notes[hold.note_index];
+        let note = self.notes[hold.note_index].clone();
         dispatched.push(trace_event!(
             HoldEnd,
             "hold_end",
@@ -1280,7 +1314,7 @@ impl GameplaySimState {
         let score_delta = SCORE_HOLD_BONUS_PER_MS;
         self.health += health_delta;
         self.song_score += score_delta;
-        let note = self.notes[hold.note_index];
+        let note = self.notes[hold.note_index].clone();
         let header = Header::new(sim_ms, self.schema).with_note(note.id, note.direction);
         dispatched.push(trace_event!(
             HoldTick,
