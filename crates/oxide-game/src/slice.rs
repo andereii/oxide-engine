@@ -58,6 +58,14 @@
 //!   first integer tick `>= end + 2`; no fractional partial row exists.
 //! - Ghost presses, hit-path scores and hold penalties are not rounded: the
 //!   trace records the observed f64 arithmetic.
+//! - Weekend-1 note kinds (`docs/M6-CONTRACT.md` §14.1, schema "2"/"3" only):
+//!   a cockgun HIT opens the native 1 s `gunCocked` window; a firegun HIT
+//!   inside it is a normal hit and closes the window, while an un-cocked
+//!   firegun HIT is consumed silently (`event.cancelEvent()`, no row and no
+//!   score/health/combo/tallies). A firegun MISS keeps the normal miss
+//!   score/combo but replaces the health change with `takeCanDamage()`
+//!   (-0.5); a cockgun MISS replaces it with 0.0. Kinds are never present on
+//!   the frozen schema-1 path, so its stream is byte-identical.
 
 use std::path::Path;
 
@@ -69,7 +77,7 @@ use oxide_vfs::Vfs;
 
 mod choreography;
 mod events;
-use choreography::ChoreographyState;
+use choreography::{ChoreographyState, Weekend1Hit, Weekend1State};
 use events::EventState;
 
 /// The frozen phase-1 player-only wire schema (`docs/M5-CONTRACT.md` §2).
@@ -607,6 +615,9 @@ pub struct GameplaySimState {
     /// Story-entry trigger table; present only when the selected song has a
     /// 6E choreography entry (never on bopeebo).
     choreography: Option<ChoreographyState>,
+    /// Weekend-1 note-kind state (`2hot`); present on the schema-2/3 paths
+    /// only. Kind-free charts never observe a difference.
+    weekend1: Option<Weekend1State>,
     trace: Vec<TraceEvent>,
 }
 
@@ -912,6 +923,9 @@ impl GameplaySimState {
         } else {
             None
         };
+        // Weekend-1 note-kind rules are add-only schema-2/3 behavior: the
+        // schema-1 path never carries kinds, so it keeps no state at all.
+        let weekend1 = opponent_side.then(Weekend1State::default);
 
         let mut state = Self {
             notes,
@@ -934,6 +948,7 @@ impl GameplaySimState {
             active_holds: [None; 4],
             events,
             choreography,
+            weekend1,
             trace: Vec::new(),
         };
         // The first processed frame always follows a previous window pass in
@@ -1086,6 +1101,16 @@ impl GameplaySimState {
         dispatched: &mut Vec<TraceEvent>,
     ) {
         let note = self.notes[index].clone();
+        // Native `2hot.hxc` `onNoteHit`: an un-cocked firegun hit calls
+        // `event.cancelEvent()`, so the note is consumed without a row and
+        // without score/health/combo/tally side effects.
+        if let Some(weekend1) = &mut self.weekend1
+            && weekend1.on_hit(note.kind.as_deref(), step_ms) == Weekend1Hit::Cancelled
+        {
+            self.notes[index].hit = true;
+            self.notes[index].may_hit = false;
+            return;
+        }
         let raw_note_diff = step_ms as f64 - note.time;
         let note_diff_int = raw_note_diff.trunc() as i32;
         let abs_timing = f64::from(note_diff_int).abs();
@@ -1210,10 +1235,20 @@ impl GameplaySimState {
         let note_diff_int = raw_note_diff.trunc() as i32;
         let health_before = self.health;
         let combo_before = self.combo;
+        // `2hot.hxc` `onNoteMiss`: cockgun zeroes the health change; firegun
+        // (all variants) zeroes it and then `takeCanDamage()` applies -0.5.
+        // Score/combo keep the normal miss rules. A can-damage death uses the
+        // native pico-explode game-over variants, which are out of 6E scope
+        // ([D] M6-CONTRACT §14.3), so the normal next-tick death check applies.
+        let health_change = self
+            .weekend1
+            .as_mut()
+            .and_then(|weekend1| weekend1.on_miss(note.kind.as_deref()))
+            .unwrap_or(HEALTH_MISS_BONUS);
 
         self.notes[index].missed = true;
         self.notes[index].may_hit = false;
-        self.health += HEALTH_MISS_BONUS;
+        self.health += health_change;
         self.song_score += f64::from(PBOT1_MISS_SCORE);
         self.tallies.missed += 1;
         self.combo = 0;
@@ -1464,3 +1499,15 @@ fn read_asset(vfs: &Vfs, path: &str) -> Result<Vec<u8>, SliceError> {
 
 #[cfg(test)]
 mod tests;
+
+impl TraceEvent {
+    /// The chart note kind a schema-2/3 note row carries (`k`), if any.
+    pub(crate) fn note_kind(&self) -> Option<&str> {
+        match self {
+            TraceEvent::Hit { note_kind, .. }
+            | TraceEvent::OpponentHit { note_kind, .. }
+            | TraceEvent::Miss { note_kind, .. } => note_kind.as_deref(),
+            _ => None,
+        }
+    }
+}

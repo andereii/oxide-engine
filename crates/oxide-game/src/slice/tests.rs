@@ -2945,3 +2945,115 @@ fn unknown_scroll_strumline_value_records_no_row() {
         "an unknown strumline target must not invent a row: {events:?}"
     );
 }
+
+/// Weekend-1 note-kind rules (M6-CONTRACT §14.2; `2hot.hxc`): a cockgun hit
+/// opens the 1 s window, a firegun hit inside it takes the normal path, an
+/// un-cocked firegun hit is consumed silently (native `cancelEvent`), a
+/// firegun miss applies `takeCanDamage()` (-0.5), and a cockgun miss zeroes
+/// the health change. Rows carry the `note_kind` add-only.
+#[test]
+fn weekend1_note_kind_rules_apply() {
+    let notes = r#"{"t":1000,"d":0,"k":"weekend-1-cockgun"},
+        {"t":1200,"d":1,"k":"weekend-1-firegun"},
+        {"t":3000,"d":2,"k":"weekend-1-firegun"},
+        {"t":4000,"d":3,"k":"weekend-1-cockgun"}"#;
+    let fixture = Fixture::with_notes(notes);
+    let inputs = [
+        InputEvent::Press {
+            sim_ms: 1000,
+            direction: 0,
+        },
+        InputEvent::Release {
+            sim_ms: 1100,
+            direction: 0,
+        },
+        InputEvent::Press {
+            sim_ms: 1200,
+            direction: 1,
+        },
+        InputEvent::Release {
+            sim_ms: 1300,
+            direction: 1,
+        },
+    ];
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 5000, &inputs);
+
+    let hit_notes: Vec<i64> = event_rows(&events, "hit")
+        .iter()
+        .filter_map(|event| match event {
+            TraceEvent::Hit {
+                note_direction,
+                note_kind,
+                ..
+            } => {
+                assert!(note_kind.is_some(), "kinded notes carry note_kind");
+                Some(*note_direction)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        hit_notes,
+        vec![0, 1],
+        "the cockgun hit lands and the in-window firegun hit lands; the \
+         un-cocked firegun is consumed silently: {hit_notes:?}"
+    );
+
+    // The 3000 ms firegun auto-misses un-cocked: takeCanDamage (-0.5).
+    let firegun_miss = event_rows(&events, "miss")
+        .iter()
+        .find_map(|event| match event {
+            TraceEvent::Miss {
+                note_direction,
+                health_before,
+                health_after,
+                ..
+            } if *note_direction == 2 => Some((*health_before, *health_after)),
+            _ => None,
+        });
+    let (health_before, health_after) = firegun_miss.expect("the firegun miss row exists");
+    assert!(
+        (health_after - (health_before - 0.5)).abs() < 1e-12,
+        "a missed can costs half a health bar: {health_before} -> {health_after}"
+    );
+
+    // The 4000 ms cockgun miss zeroes the health change.
+    let cockgun_miss = event_rows(&events, "miss")
+        .iter()
+        .find_map(|event| match event {
+            TraceEvent::Miss {
+                note_direction,
+                health_after,
+                health_before,
+                ..
+            } if *note_direction == 3 => Some((*health_before, *health_after)),
+            _ => None,
+        });
+    let (before, after) = cockgun_miss.expect("the cockgun miss row exists");
+    assert!(
+        (before - after).abs() < 1e-12,
+        "a cockgun miss does not change health: {before} -> {after}"
+    );
+}
+
+/// Kind-free rows must not gain a `note_kind` key in the wire format
+/// (add-only-if-present; the frozen fixture streams stay byte-identical).
+#[test]
+fn note_kind_serializes_only_when_present() {
+    let fixture = Fixture::with_notes(r#"{"t":1000,"d":0}"#);
+    let inputs = [InputEvent::Press {
+        sim_ms: 1000,
+        direction: 0,
+    }];
+    let (_, events) = run_chart_events(&fixture, "bopeebo", "easy", 1200, &inputs);
+    let hits = event_rows(&events, "hit");
+    assert_eq!(hits.len(), 1, "the plain note hits");
+    let bytes = serialize_trace(&events);
+    assert!(
+        !bytes
+            .windows("note_kind".len())
+            .any(|window| window == b"note_kind"),
+        "kind-free rows must not emit the note_kind key: {}",
+        String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
+    );
+}

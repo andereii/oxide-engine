@@ -26,6 +26,7 @@ use super::RenderError;
 use super::anim::{
     AnimationDef, DEFAULT_ANIMATION_FPS, DEFAULT_DANCE_EVERY, DEFAULT_SING_TIME_STEPS,
 };
+use super::choreography::{CanClip, Weekend1Props};
 
 /// Upper bound for any single slice asset read, matching the M5 slice VFS
 /// read contract. The largest shipped page in the slice is a few MiB.
@@ -321,7 +322,9 @@ pub(crate) struct LoadedNote {
     pub(crate) opponent: bool,
     pub(crate) note_id: Option<u32>,
     /// Chart note kind (`k`), preserved for the 6E choreography consumers
-    /// (M6-CONTRACT §14.2; temporary allow until the 2hot slice lands).
+    /// (M6-CONTRACT §14.2). The SIM reads the kind from its own note model;
+    /// the scene reads the kind from the row, so this field's consumer is
+    /// the choreography side of a later slice.
     #[allow(dead_code)]
     pub(crate) kind: Option<String>,
 }
@@ -351,6 +354,10 @@ pub(crate) struct LoadedSlice {
     /// `None` (bopeebo/school frame digests must not change); the explicit
     /// dialogue-enabled loader fills it for the senpai family.
     pub(crate) dialogue: Option<super::dialogue::LoadedDialogue>,
+    /// Loaded weekend-1 (2hot) can/explosion pages. Only the weekend-1 family
+    /// ids fill this (`weekend1_prop_pages`); every other chart leaves it
+    /// `None`, so the frozen bopeebo/school page sets are untouched.
+    pub(crate) weekend1_props: Option<Weekend1Props>,
 }
 
 /// Observed character renderType dispatch (M6-CONTRACT §11.1).
@@ -407,7 +414,14 @@ pub(crate) fn load_slice_for_song(
     difficulty: &str,
 ) -> Result<LoadedSlice, RenderError> {
     let (chart_path, metadata_path) = song_paths(chart_id)?;
-    load_slice_from_paths(assets_root, &chart_path, &metadata_path, difficulty, None)
+    load_slice_from_paths(
+        assets_root,
+        &chart_path,
+        &metadata_path,
+        difficulty,
+        None,
+        weekend1_prop_pages(chart_id),
+    )
 }
 
 /// Dialogue-enabled variant of [`load_slice_for_song`] (6E). The chart id is
@@ -429,6 +443,7 @@ pub(crate) fn load_slice_for_song_with_dialogue(
         &metadata_path,
         difficulty,
         dialogue_id,
+        weekend1_prop_pages(chart_id),
     )
 }
 
@@ -504,17 +519,31 @@ fn dialogue_load_id(chart_id: &str, enabled: bool) -> Option<&'static str> {
     }
 }
 
+/// Weekend-1 family chart ids that carry the 2hot can/explosion pages.
+///
+/// The shipped pages live under `weekend1/images/` for the whole family
+/// (`2hot`, `darnell`, `lit-up`), so the loader fails closed when they are
+/// missing for those ids only. Charts outside the family never load them and
+/// keep their frozen page sets. `lit-up`/`darnell` ship no note kinds; their
+/// payload is loaded but inert.
+fn weekend1_prop_pages(chart_id: &str) -> bool {
+    let (song, _) = split_song_variant(chart_id);
+    matches!(song, "2hot" | "darnell" | "lit-up")
+}
+
 /// Shared chart/metadata loader. Stage, characters and note style come from
 /// the metadata; only the song file pair is selected by the caller.
 ///
 /// `dialogue_id` is the explicit 6E conversation to load, or `None` for the
-/// frozen render-fixture path.
+/// frozen render-fixture path. `weekend1` selects the weekend-1 can/explosion
+/// pages (see [`weekend1_prop_pages`]).
 pub(crate) fn load_slice_from_paths(
     assets_root: &Path,
     chart_path: &str,
     metadata_path: &str,
     difficulty: &str,
     dialogue_id: Option<&str>,
+    weekend1: bool,
 ) -> Result<LoadedSlice, RenderError> {
     if difficulty.is_empty() {
         return Err(RenderError::UnknownDifficulty(difficulty.to_string()));
@@ -779,6 +808,21 @@ pub(crate) fn load_slice_from_paths(
     let dialogue = dialogue_id
         .map(|id| super::dialogue::load_dialogue(&vfs, &mut pages, id))
         .transpose()?;
+    // Weekend-1 (2hot) can/explosion pages. Loaded after every existing page
+    // so non-family page indices stay exactly where they were; the family ids
+    // fail closed when any page is missing.
+    let weekend1_props = if weekend1 {
+        Some(load_weekend1_props(
+            &vfs,
+            &mut pages,
+            &stage_path,
+            level_dir.as_deref(),
+            &props,
+            chart_notes,
+        )?)
+    } else {
+        None
+    };
 
     Ok(LoadedSlice {
         pages: pages.pages,
@@ -793,6 +837,7 @@ pub(crate) fn load_slice_from_paths(
         opponent_vocals,
         hud: Some(hud),
         dialogue,
+        weekend1_props,
     })
 }
 
@@ -802,6 +847,86 @@ fn read_data_document(vfs: &Vfs, path: &str) -> Result<oxide_data::ParsedDocumen
         path: path.to_string(),
         source,
     })
+}
+
+/// Loads the weekend-1 (2hot) can/explosion payload through the same VFS and
+/// page store as every other slice asset.
+///
+/// Native precache (`2hot.hxc onCreate`): `spraycanAtlas/spritemap1`,
+/// `SpraypaintExplosion`, `spraypaintExplosionEZ`. The atlas key uses the
+/// script's `weekend1` library; the Sparrow keys resolve through the stage
+/// directory (`weekend1/images/...`).
+fn load_weekend1_props(
+    vfs: &Vfs,
+    pages: &mut PageStore,
+    stage_path: &str,
+    stage_dir: Option<&str>,
+    props: &[LoadedStageProp],
+    chart_notes: &[oxide_data::chart::NoteData],
+) -> Result<Weekend1Props, RenderError> {
+    let can_sheet = load_atlas_sheet(vfs, pages, "weekend1:spraycanAtlas", stage_dir, false)?;
+    let can_start = weekend1_clip(&can_sheet, "Can Start")?;
+    let can_shot = weekend1_clip(&can_sheet, "Can Shot")?;
+    let hit_pico = weekend1_clip(&can_sheet, "Hit Pico")?;
+
+    let big_sheet = load_sparrow_sheet(vfs, pages, "SpraypaintExplosion", stage_dir, false)?;
+    let big_frames = require_frames(
+        &big_sheet,
+        "Explosion 1 movie0",
+        "weekend1/images/SpraypaintExplosion",
+    )?;
+    let ez_sheet = load_sparrow_sheet(vfs, pages, "spraypaintExplosionEZ", stage_dir, false)?;
+    let ez_frames = require_frames(
+        &ez_sheet,
+        "explosion round 1 short0",
+        "weekend1/images/spraypaintExplosionEZ",
+    )?;
+
+    let pile = props
+        .iter()
+        .find(|prop| prop.name == "spraycanPile")
+        .map(|prop| (prop.position.0, prop.position.1, prop.z_index));
+    let chart_carries_kinds = chart_notes.iter().any(|note| {
+        note.kind
+            .as_deref()
+            .is_some_and(|kind| kind.starts_with("weekend-1-"))
+    });
+    if chart_carries_kinds && pile.is_none() {
+        // The native script dereferences `getNamedProp('spraycanPile')` on a
+        // kickcan hit; a chart with kinds on a stage without the pile would
+        // crash there, so fail closed at load instead.
+        return Err(RenderError::MissingField {
+            path: stage_path.to_string(),
+            field: "props.spraycanPile",
+        });
+    }
+
+    Ok(Weekend1Props {
+        can_sheet,
+        can_start,
+        can_shot,
+        hit_pico,
+        big_sheet,
+        big_frames,
+        ez_sheet,
+        ez_frames,
+        pile,
+    })
+}
+
+/// One named main-timeline label as a can clip (the native `animation.play`
+/// names). The BTA labels are `Can Start` / `Hit Pico` / `Can Shot`.
+fn weekend1_clip(sheet: &AtlasSheet, label: &str) -> Result<CanClip, RenderError> {
+    let frames =
+        sheet
+            .stage
+            .label_frames(label)
+            .ok_or_else(|| RenderError::MissingAnimationLabel {
+                character: "weekend1:spraycanAtlas".to_string(),
+                animation: label.to_string(),
+                prefix: label.to_string(),
+            })?;
+    Ok(CanClip { frames })
 }
 
 pub(crate) fn read_asset(vfs: &Vfs, path: &str) -> Result<Vec<u8>, RenderError> {

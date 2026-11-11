@@ -61,6 +61,14 @@ struct StageItem {
 enum StageItemKind {
     Prop(usize),
     Character(usize),
+    /// The pre-registered weekend-1 can layer (`spraycanPile.zIndex - 1`);
+    /// draws nothing until a kickcan row spawns a can.
+    Weekend1Can,
+    /// One-shot `SpraypaintExplosion` layer (native stage member appended
+    /// after the loaded props, above the stage group).
+    Weekend1BigExplosion,
+    /// One-shot `spraypaintExplosionEZ` layer (same append position).
+    Weekend1EzExplosion,
 }
 
 /// Per-character runtime state: scheduler plus the loaded sheet set.
@@ -641,6 +649,22 @@ pub(crate) struct Scene {
     conversation: Option<ConversationRuntime>,
     /// Index of the first conversation layer in `layer_specs`.
     conversation_start: usize,
+    /// Weekend-1 can/explosion choreography (`None` outside the weekend-1
+    /// chart ids; M6-CONTRACT §14.2).
+    weekend1: Option<super::choreography::Weekend1Runtime>,
+    /// The native `darkenStageProps`/fade-back tint pass over the eligible
+    /// prop layer colors (`None` until a darken timer fires).
+    prop_tint: Option<PropTint>,
+}
+
+/// One active tint pass over the eligible prop layers
+/// (native `darkenStageProps`: `0xFF111111`, then after 1/24 s `0xFF222222`,
+/// then a 1.4 s `FlxTween.color` back to white).
+struct PropTint {
+    /// The layer-spec indices the tint mutates (all pages of every eligible
+    /// prop).
+    layers: Vec<usize>,
+    started_ms: f64,
 }
 
 /// One scene-owned HUD: loaded assets + runtime state + layer registry.
@@ -668,6 +692,7 @@ impl Scene {
             opponent_vocals: _,
             hud,
             dialogue,
+            weekend1_props,
         } = loaded;
         // The HUD state is built before the character rigs consume the loaded
         // characters (it needs their normalized `healthIcon` data).
@@ -680,6 +705,11 @@ impl Scene {
             characters.push(CharacterRig::from_loaded(character));
         }
         let props: Vec<PropRig> = props.into_iter().map(PropRig::from_loaded).collect();
+        // M6-CONTRACT §14.2 (weekend-1): the can joins the z-sorted stage
+        // surface at `spraycanPile.zIndex - 1`; the explosions draw at the
+        // native stage-member default zIndex 0. The pages exist only for
+        // the weekend-1 chart ids (bopeebo/school stay byte-stable).
+        let weekend1 = weekend1_props.map(super::choreography::Weekend1Runtime::new);
         let follow_focus = characters
             .iter()
             .find(|character| character.role == Role::Opponent)
@@ -701,6 +731,11 @@ impl Scene {
                 StageItemKind::Character(index),
             ));
         }
+        if let Some(runtime) = &weekend1 {
+            sorted.push((runtime.can_z(), sorted.len(), StageItemKind::Weekend1Can));
+            sorted.push((0.0, sorted.len(), StageItemKind::Weekend1BigExplosion));
+            sorted.push((0.0, sorted.len(), StageItemKind::Weekend1EzExplosion));
+        }
         sorted.sort_by(|left, right| {
             left.0
                 .total_cmp(&right.0)
@@ -716,6 +751,24 @@ impl Scene {
                 }
                 StageItemKind::Character(index) => {
                     (characters[index].pages(), [1.0, 1.0, 1.0, 1.0])
+                }
+                StageItemKind::Weekend1Can => {
+                    let page = weekend1
+                        .as_ref()
+                        .map_or(usize::MAX, |runtime| runtime.can_page());
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                }
+                StageItemKind::Weekend1BigExplosion => {
+                    let page = weekend1
+                        .as_ref()
+                        .map_or(usize::MAX, |runtime| runtime.big_page());
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                }
+                StageItemKind::Weekend1EzExplosion => {
+                    let page = weekend1
+                        .as_ref()
+                        .map_or(usize::MAX, |runtime| runtime.ez_page());
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
                 }
             };
             let mut layers = Vec::with_capacity(pages.len());
@@ -832,6 +885,8 @@ impl Scene {
                 hud_start,
                 conversation,
                 conversation_start,
+                weekend1,
+                prop_tint: None,
             },
             pages,
         ))
@@ -839,6 +894,68 @@ impl Scene {
 
     pub(crate) fn layer_specs(&self) -> &[LayerSpec] {
         &self.layer_specs
+    }
+
+    /// Native `darkenStageProps` (`2hot.hxc`/`darnell.hxc`): darken every
+    /// eligible stage prop to `0xFF111111` (the bf/dad/gf-named props, the
+    /// native `picoFade` zIndex term `bf.zIndex - 3` and the spawned cans
+    /// are excluded), then finish the pass through [`Self::advance_prop_tint`].
+    fn start_prop_darken(&mut self) {
+        let bf_z = self
+            .characters
+            .iter()
+            .find(|character| character.role == Role::Player)
+            .map(|character| character.z_index);
+        let mut layers = Vec::new();
+        for item in &self.stage_items {
+            let StageItemKind::Prop(index) = item.kind else {
+                continue;
+            };
+            let prop = &self.props[index].prop;
+            if !super::choreography::prop_darken_eligible(&prop.name, prop.z_index, bf_z) {
+                continue;
+            }
+            layers.extend(item.layers.iter().map(|(_, layer)| *layer));
+        }
+        if layers.is_empty() {
+            return;
+        }
+        self.prop_tint = Some(PropTint {
+            layers: layers.clone(),
+            started_ms: self.sim_ms,
+        });
+        for &layer in &layers {
+            if let Some(spec) = self.layer_specs.get_mut(layer) {
+                spec.color = super::choreography::darken_first_color();
+            }
+        }
+    }
+
+    /// Advances the tint pass: `0xFF111111` holds 1/24 s, becomes
+    /// `0xFF222222`, then lerps back to white over 1.4 s (native
+    /// `FlxTween.color`); the pass clears when it completes.
+    fn advance_prop_tint(&mut self) {
+        let Some(tint) = &self.prop_tint else {
+            return;
+        };
+        let elapsed = self.sim_ms - tint.started_ms;
+        let color = if elapsed <= super::choreography::DARKEN_HOLD_MS {
+            super::choreography::darken_second_color()
+        } else if elapsed
+            >= super::choreography::DARKEN_HOLD_MS + super::choreography::DARKEN_FADE_MS
+        {
+            self.prop_tint = None;
+            return;
+        } else {
+            super::choreography::darken_fade_color(elapsed - super::choreography::DARKEN_HOLD_MS)
+        };
+        if let Some(tint) = &self.prop_tint {
+            for &layer in &tint.layers {
+                if let Some(spec) = self.layer_specs.get_mut(layer) {
+                    spec.color = color;
+                }
+            }
+        }
     }
 
     /// Whether the loaded conversation is currently running (the native
@@ -983,6 +1100,16 @@ impl Scene {
             conversation.begin_tick(self.sim_ms);
             conversation.sync_layer_specs(&mut self.layer_specs)?;
         }
+
+        // Weekend-1 choreography per-tick advance (M6-CONTRACT §14.2): the
+        // cans/explosions advance on the 1 ms grid and the native 1/24 s
+        // darken timer starts the tint pass when due.
+        if let Some(runtime) = &mut self.weekend1
+            && runtime.advance(self.sim_ms)
+        {
+            self.start_prop_darken();
+        }
+        self.advance_prop_tint();
 
         self.trigger_opponent_notes();
         // Strumline.hx:653-669: an opponent hold that reached its end no
@@ -1308,6 +1435,20 @@ impl Scene {
         if let Some(hud) = &mut self.hud {
             hud.state.observe_event(event, &hud.assets)?;
         }
+        // Weekend-1 note-kind choreography (M6-CONTRACT §14.2): the rows
+        // carry the chart `k` kinds; lightcan/kneecan/cockgun are timing
+        // anchors, kickcan spawns the can, firegun fires the ARcing one.
+        if let Some(kind) = event.note_kind()
+            && let Some(runtime) = &mut self.weekend1
+        {
+            match event {
+                TraceEvent::Miss { .. } => runtime.on_miss(kind),
+                TraceEvent::Hit { .. } | TraceEvent::OpponentHit { .. } => {
+                    runtime.on_hit(kind, self.sim_ms)
+                }
+                _ => {}
+            }
+        }
         match event {
             TraceEvent::Hit {
                 note_id,
@@ -1604,6 +1745,18 @@ impl Scene {
             let quads = match item.kind {
                 StageItemKind::Prop(index) => Scene::draw_prop(&self.camera, &self.props[index])?,
                 StageItemKind::Character(index) => self.characters[index].draw(&self.camera)?,
+                StageItemKind::Weekend1Can => match &self.weekend1 {
+                    Some(runtime) => runtime.draw_can(&self.camera)?,
+                    None => Vec::new(),
+                },
+                StageItemKind::Weekend1BigExplosion => match &self.weekend1 {
+                    Some(runtime) => runtime.draw_big_explosion(&self.camera)?,
+                    None => Vec::new(),
+                },
+                StageItemKind::Weekend1EzExplosion => match &self.weekend1 {
+                    Some(runtime) => runtime.draw_ez_explosion(&self.camera)?,
+                    None => Vec::new(),
+                },
             };
             for (page, quad) in quads {
                 let Some((_, layer)) = item.layers.iter().find(|(item_page, _)| *item_page == page)
@@ -2132,7 +2285,7 @@ fn character_world_matrix(
 /// Stage-prop variant of [`character_world_matrix`]: independent x/y scale,
 /// optional `flipY`, and the sprite top-left (not a feet anchor). Props use
 /// `x/y = position` directly (Stage.hx L262-282).
-fn prop_world_matrix(
+pub(crate) fn prop_world_matrix(
     bounds: [f64; 4],
     scale: Vec2,
     flip_x: bool,
@@ -2208,7 +2361,7 @@ fn sprite_content_top_left(
 /// sprite's unrotated top-left (a feet-adjusted point for characters,
 /// `position` for stage props).
 #[allow(clippy::too_many_arguments)]
-fn sprite_frame_matrix(
+pub(crate) fn sprite_frame_matrix(
     sprite_top_left: Vec2,
     frame: &SpriteFrame,
     scale: Vec2,
@@ -2425,7 +2578,7 @@ fn apply(matrix: [f64; 6], x: f64, y: f64) -> [f64; 2] {
 
 /// Projects a world point through the camera into game-screen coordinates,
 /// expressed as a composed matrix (used before applying a quad matrix).
-fn camera_projection_matrix(camera: &Camera, scroll_factor: Vec2) -> [f64; 6] {
+pub(crate) fn camera_projection_matrix(camera: &Camera, scroll_factor: Vec2) -> [f64; 6] {
     let tx = HALF_WIDTH - camera.zoom * (camera.scroll[0] * scroll_factor[0] + HALF_WIDTH);
     let ty = HALF_HEIGHT - camera.zoom * (camera.scroll[1] * scroll_factor[1] + HALF_HEIGHT);
     [camera.zoom, 0.0, 0.0, camera.zoom, tx, ty]
@@ -2992,6 +3145,7 @@ mod tests {
             opponent_vocals: Vec::new(),
             hud: None,
             dialogue: None,
+            weekend1_props: None,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
     }
