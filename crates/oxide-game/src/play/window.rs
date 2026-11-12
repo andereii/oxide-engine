@@ -6,28 +6,36 @@
 //! reads keyboard/window messages, polls the playback clock, steps every
 //! complete sim millisecond, then uploads the current scene + HUD layers.
 
+use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use bevy::sprite_render::AlphaMode2d;
 use bevy::window::{PresentMode, Window, WindowCloseRequested, WindowPlugin, WindowResolution};
 use bevy::winit::WinitPlugin;
 
 use super::input::{direction_for, is_advance_key};
 use super::session::PlayRuntime;
 use super::{PlayConfig, PlayError, QuitReason, WindowConfig};
-use crate::render::harness::{build_mesh, placeholder_mesh, sync_material_specs};
+use crate::render::harness::{
+    LayerMaterialHandle, build_material_handles, build_mesh, game_target_image, placeholder_mesh,
+    screen_rain_layer_index, spawn_layer_entity, sync_material_specs,
+};
 use crate::render::load::PageImage;
 use crate::render::scene::{LayerSpec, Quad};
+use crate::render::shaders::{self, LayerShaderMaterial};
 
 /// One persistent mesh/material entity per draw layer.
 #[derive(Resource)]
 struct WindowLayers {
     mesh_handles: Vec<Handle<Mesh>>,
-    material_handles: Vec<Handle<ColorMaterial>>,
+    material_handles: Vec<LayerMaterialHandle>,
     page_handles: Vec<Handle<Image>>,
     entities: Vec<Entity>,
+    /// Offscreen game target for a screen-rain stage (M6-CONTRACT §15.2.2);
+    /// `None` keeps the single-camera setup.
+    screen_rain_target: Option<Handle<Image>>,
     /// F6 debug-overlay text entity (top layer, hidden until toggled).
     overlay: Entity,
 }
@@ -77,6 +85,7 @@ pub(crate) fn build(
             .disable::<bevy::gilrs::GilrsPlugin>(),
     );
     app.insert_resource(ClearColor(Color::BLACK));
+    shaders::register(&mut app)?;
 
     let page_handles: Vec<Handle<Image>> = {
         let mut images = app.world_mut().resource_mut::<Assets<Image>>();
@@ -86,20 +95,26 @@ pub(crate) fn build(
             .collect()
     };
 
-    let material_handles: Vec<Handle<ColorMaterial>> = {
-        let mut materials = app.world_mut().resource_mut::<Assets<ColorMaterial>>();
-        specs
-            .iter()
-            .map(|spec| {
-                materials.add(ColorMaterial {
-                    color: Color::srgba(spec.color[0], spec.color[1], spec.color[2], spec.color[3]),
-                    alpha_mode: AlphaMode2d::Blend,
-                    texture: spec.page.map(|index| page_handles[index].clone()),
-                    ..default()
-                })
-            })
-            .collect()
+    // Screen-rain stages render the stage/character layers into an offscreen
+    // image, then composite the rain pass plus the unfiltered HUD above it.
+    let rain_index = screen_rain_layer_index(specs);
+    let screen_rain_target = {
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        rain_index.map(|_| images.add(game_target_image()))
     };
+
+    let material_handles: Vec<LayerMaterialHandle> =
+        app.world_mut()
+            .resource_scope(|world, mut materials: Mut<Assets<ColorMaterial>>| {
+                let mut shader_materials = world.resource_mut::<Assets<LayerShaderMaterial>>();
+                build_material_handles(
+                    &mut materials,
+                    &mut shader_materials,
+                    &page_handles,
+                    specs,
+                    screen_rain_target.as_ref(),
+                )
+            })?;
 
     let mesh_handles: Vec<Handle<Mesh>> = {
         let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -111,21 +126,34 @@ pub(crate) fn build(
 
     let mut entities = Vec::with_capacity(specs.len());
     for (index, (mesh, material)) in mesh_handles.iter().zip(material_handles.iter()).enumerate() {
-        let entity = app
-            .world_mut()
-            .spawn((
-                Mesh2d(mesh.clone()),
-                MeshMaterial2d(material.clone()),
-                Transform::from_xyz(0.0, 0.0, index as f32),
-                Visibility::Hidden,
-            ))
-            .id();
+        let entity = spawn_layer_entity(app.world_mut(), mesh.clone(), material, index as f32);
+        if let Some(rain_index) = rain_index
+            && index < rain_index
+        {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(RenderLayers::layer(1));
+        }
         entities.push(entity);
     }
 
     // Default Camera2d projection at a 1280x720 scale-1 window maps one world
     // unit to one game pixel, matching the headless target.
     app.world_mut().spawn((Camera2d, Msaa::Off));
+    if let Some(target) = &screen_rain_target {
+        // Order -1 draws the stage/character layers into the offscreen image
+        // before the main camera composites the rain post pass.
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                order: -1,
+                ..default()
+            },
+            RenderTarget::from(target.clone()),
+            Msaa::Off,
+            RenderLayers::layer(1),
+        ));
+    }
 
     // The crate's Bevy feature set (`2d`, no `ui` feature) makes `Text2d` the
     // minimal working top-layer text API (recorded deviation from the UI
@@ -156,6 +184,7 @@ pub(crate) fn build(
         material_handles,
         page_handles,
         entities,
+        screen_rain_target,
         overlay,
     });
     app.add_systems(Update, play_frame);
@@ -171,6 +200,7 @@ fn play_frame(
     layers: Res<WindowLayers>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut shader_materials: ResMut<Assets<LayerShaderMaterial>>,
     mut visibility: Query<&mut Visibility>,
     mut overlay_text: Query<&mut Text2d, With<DebugOverlayText>>,
     time: Res<Time>,
@@ -273,6 +303,7 @@ fn play_frame(
         runtime.layer_specs(),
         &mut meshes,
         &mut materials,
+        &mut shader_materials,
         &mut visibility,
         &quads,
     ) {
@@ -319,6 +350,7 @@ fn upload_layers(
     specs: &[LayerSpec],
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
+    shader_materials: &mut Assets<LayerShaderMaterial>,
     visibility: &mut Query<&mut Visibility>,
     quads: &[Vec<Quad>],
 ) -> Result<(), PlayError> {
@@ -334,9 +366,11 @@ fn upload_layers(
 
     sync_material_specs(
         materials,
+        shader_materials,
         &layers.material_handles,
         &layers.page_handles,
         specs,
+        layers.screen_rain_target.as_ref(),
     )
     .map_err(|error| PlayError::Session {
         detail: format!("could not refresh layer materials: {error}"),

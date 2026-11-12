@@ -31,7 +31,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::{CameraMainTextureUsages, RenderTarget};
+use bevy::camera::CameraMainTextureUsages;
+use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
 use bevy::image::Image;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
@@ -55,6 +57,7 @@ use bevy::winit::WinitPlugin;
 
 use super::load::PageImage;
 use super::scene::{LayerSpec, Quad};
+use super::shaders::{self, LayerShaderMaterial};
 use super::{AdapterPolicy, RenderError};
 
 /// Frozen slice render size (`RENDER-BEHAVIOR.md` §2/§7).
@@ -160,6 +163,31 @@ impl ReadbackFailure {
 
 type ReadbackSlot = Arc<Mutex<Option<(u64, Result<Vec<u8>, ReadbackFailure>)>>>;
 
+/// Finds the screen-mode rain post layer (M6-CONTRACT §15.2.2). Sprite-mode
+/// rain layers sample their own prop page and do not need the extra camera.
+pub(crate) fn screen_rain_layer_index(specs: &[LayerSpec]) -> Option<usize> {
+    specs.iter().position(|spec| spec.shader.is_screen_rain())
+}
+
+/// The 1280x720 offscreen game target of the screen-rain pass. It is both a
+/// render attachment (offscreen camera) and a sampled texture (rain material).
+pub(crate) fn game_target_image() -> Image {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: RENDER_WIDTH,
+            height: RENDER_HEIGHT,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage |=
+        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
+    image
+}
+
 /// Render-world state for the persistent target -> buffer readback.
 #[derive(Resource)]
 struct ReadbackState {
@@ -177,13 +205,25 @@ struct ReadbackState {
 pub(crate) struct Harness {
     app: App,
     mesh_handles: Vec<Handle<Mesh>>,
-    material_handles: Vec<Handle<ColorMaterial>>,
+    material_handles: Vec<LayerMaterialHandle>,
     page_handles: Vec<Handle<Image>>,
     entities: Vec<Entity>,
     requested: Arc<AtomicU64>,
     result: ReadbackSlot,
     adapter_name: String,
+    /// Offscreen game-render target backing a screen-mode rain post layer
+    /// (`phillyStreets` family, M6-CONTRACT §15.2.2). `None` on every other
+    /// stage so the single-camera setup is untouched.
+    screen_rain_target: Option<Handle<Image>>,
     failed: Option<String>,
+}
+
+/// One layer material asset. Plain layers keep the frozen `ColorMaterial`
+/// path; shader layers use [`LayerShaderMaterial`] (M6-CONTRACT §15).
+#[derive(Clone)]
+pub(crate) enum LayerMaterialHandle {
+    Color(Handle<ColorMaterial>),
+    Shader(Handle<LayerShaderMaterial>),
 }
 
 impl Harness {
@@ -229,6 +269,7 @@ impl Harness {
                 .disable::<WinitPlugin>(),
         );
         app.insert_resource(ClearColor(Color::BLACK));
+        shaders::register(&mut app)?;
         app.finish();
 
         let adapter_name = app
@@ -279,6 +320,12 @@ impl Harness {
             images.add(image)
         };
 
+        let rain_index = screen_rain_layer_index(specs);
+        let game_target = {
+            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+            rain_index.map(|_| images.add(game_target_image()))
+        };
+
         let page_handles: Vec<Handle<Image>> = {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
             pages
@@ -287,25 +334,18 @@ impl Harness {
                 .collect()
         };
 
-        let material_handles: Vec<Handle<ColorMaterial>> = {
-            let mut materials = app.world_mut().resource_mut::<Assets<ColorMaterial>>();
-            specs
-                .iter()
-                .map(|spec| {
-                    materials.add(ColorMaterial {
-                        color: Color::srgba(
-                            spec.color[0],
-                            spec.color[1],
-                            spec.color[2],
-                            spec.color[3],
-                        ),
-                        alpha_mode: AlphaMode2d::Blend,
-                        texture: spec.page.map(|index| page_handles[index].clone()),
-                        ..default()
-                    })
-                })
-                .collect()
-        };
+        let material_handles: Vec<LayerMaterialHandle> = app.world_mut().resource_scope(
+            |world, mut materials: Mut<Assets<ColorMaterial>>| {
+                let mut shader_materials = world.resource_mut::<Assets<LayerShaderMaterial>>();
+                build_material_handles(
+                    &mut materials,
+                    &mut shader_materials,
+                    &page_handles,
+                    specs,
+                    game_target.as_ref(),
+                )
+            },
+        )?;
 
         let mesh_handles: Vec<Handle<Mesh>> = {
             let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -319,15 +359,16 @@ impl Harness {
         for (index, (mesh, material)) in
             mesh_handles.iter().zip(material_handles.iter()).enumerate()
         {
-            let entity = app
-                .world_mut()
-                .spawn((
-                    Mesh2d(mesh.clone()),
-                    MeshMaterial2d(material.clone()),
-                    Transform::from_xyz(0.0, 0.0, index as f32),
-                    Visibility::Hidden,
-                ))
-                .id();
+            let entity = spawn_layer_entity(app.world_mut(), mesh.clone(), material, index as f32);
+            // Screen-rain stages split the scene into the offscreen game
+            // camera (indices below the post layer) and the main camera.
+            if let Some(rain_index) = rain_index
+                && index < rain_index
+            {
+                app.world_mut()
+                    .entity_mut(entity)
+                    .insert(RenderLayers::layer(1));
+            }
             entities.push(entity);
         }
 
@@ -337,6 +378,21 @@ impl Harness {
             CameraMainTextureUsages::default().with(TextureUsages::COPY_SRC),
             Msaa::Off,
         ));
+        if let Some(game_target) = &game_target {
+            // Camera order -1 renders the stage into the offscreen image
+            // before the main camera (order 0) composites the rain pass and
+            // the unfiltered overlay/HUD/dialogue layers.
+            app.world_mut().spawn((
+                Camera2d,
+                Camera {
+                    order: -1,
+                    ..default()
+                },
+                RenderTarget::from(game_target.clone()),
+                Msaa::Off,
+                RenderLayers::layer(1),
+            ));
+        }
 
         // Persistent GPU -> host readback state (ADR-0020 addendum 2). The
         // buffer is written by a custom RenderGraph node after the main-pass
@@ -390,6 +446,7 @@ impl Harness {
             requested,
             result,
             adapter_name,
+            screen_rain_target: game_target,
             failed: None,
         })
     }
@@ -432,15 +489,19 @@ impl Harness {
             });
         }
 
-        {
-            let mut materials = self.app.world_mut().resource_mut::<Assets<ColorMaterial>>();
-            sync_material_specs(
-                &mut materials,
-                &self.material_handles,
-                &self.page_handles,
-                specs,
-            )?;
-        }
+        self.app.world_mut().resource_scope(
+            |world, mut materials: Mut<Assets<ColorMaterial>>| {
+                let mut shader_materials = world.resource_mut::<Assets<LayerShaderMaterial>>();
+                sync_material_specs(
+                    &mut materials,
+                    &mut shader_materials,
+                    &self.material_handles,
+                    &self.page_handles,
+                    specs,
+                    self.screen_rain_target.as_ref(),
+                )
+            },
+        )?;
 
         {
             let mut meshes = self.app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -736,18 +797,131 @@ fn store_readback_failure(state: &ReadbackState, generation: u64, failure: Readb
     state.reported.store(generation, Ordering::Release);
 }
 
+/// Builds one material asset per layer spec. Plain layers keep the frozen
+/// `ColorMaterial`; shader layers get a [`LayerShaderMaterial`]. A screen-mode
+/// rain layer samples the offscreen `screen_rain_texture` instead of a page.
+pub(crate) fn build_material_handles(
+    color_materials: &mut Assets<ColorMaterial>,
+    shader_materials: &mut Assets<LayerShaderMaterial>,
+    page_handles: &[Handle<Image>],
+    specs: &[LayerSpec],
+    screen_rain_texture: Option<&Handle<Image>>,
+) -> Result<Vec<LayerMaterialHandle>, RenderError> {
+    let mut handles = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let texture = layer_texture(spec, page_handles, screen_rain_texture)?;
+        if spec.shader.is_shader() {
+            let uniforms =
+                spec.shader
+                    .uniforms(spec.color)
+                    .ok_or_else(|| RenderError::Renderer {
+                        detail: "shader layer produced no uniform block".to_string(),
+                    })?;
+            let mask = spec
+                .shader
+                .mask_page()
+                .map(|page| resolve_page(Some(page), page_handles))
+                .transpose()?
+                .flatten();
+            handles.push(LayerMaterialHandle::Shader(shader_materials.add(
+                LayerShaderMaterial {
+                    uniforms,
+                    texture,
+                    mask_texture: mask,
+                },
+            )));
+        } else {
+            handles.push(LayerMaterialHandle::Color(color_materials.add(
+                ColorMaterial {
+                    color: Color::srgba(spec.color[0], spec.color[1], spec.color[2], spec.color[3]),
+                    alpha_mode: AlphaMode2d::Blend,
+                    texture,
+                    ..default()
+                },
+            )));
+        }
+    }
+    Ok(handles)
+}
+
+/// Spawns one hidden layer entity with the matching material component type.
+pub(crate) fn spawn_layer_entity(
+    world: &mut World,
+    mesh: Handle<Mesh>,
+    material: &LayerMaterialHandle,
+    z: f32,
+) -> Entity {
+    match material {
+        LayerMaterialHandle::Color(handle) => world
+            .spawn((
+                Mesh2d(mesh),
+                MeshMaterial2d(handle.clone()),
+                Transform::from_xyz(0.0, 0.0, z),
+                Visibility::Hidden,
+            ))
+            .id(),
+        LayerMaterialHandle::Shader(handle) => world
+            .spawn((
+                Mesh2d(mesh),
+                MeshMaterial2d(handle.clone()),
+                Transform::from_xyz(0.0, 0.0, z),
+                Visibility::Hidden,
+            ))
+            .id(),
+    }
+}
+
+/// The base texture of one layer material. Screen-mode rain layers sample the
+/// offscreen game target; every other layer resolves its page.
+fn layer_texture(
+    spec: &LayerSpec,
+    page_handles: &[Handle<Image>],
+    screen_rain_texture: Option<&Handle<Image>>,
+) -> Result<Option<Handle<Image>>, RenderError> {
+    if spec.shader.is_screen_rain() {
+        return screen_rain_texture
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| RenderError::Renderer {
+                detail: "screen-rain layer has no offscreen game target".to_string(),
+            });
+    }
+    resolve_page(spec.page, page_handles)
+}
+
+fn resolve_page(
+    page: Option<usize>,
+    page_handles: &[Handle<Image>],
+) -> Result<Option<Handle<Image>>, RenderError> {
+    match page {
+        Some(index) => page_handles
+            .get(index)
+            .map(|handle| Some(handle.clone()))
+            .ok_or_else(|| RenderError::Renderer {
+                detail: format!(
+                    "layer spec references page {index} but only {} pages were uploaded",
+                    page_handles.len()
+                ),
+            }),
+        None => Ok(None),
+    }
+}
+
 /// Rewrites every material from the current scene layer specs.
 ///
 /// [D] The windowed and headless harnesses both build materials once at app
 /// construction. The 6E conversation changes a layer's color alpha and its
 /// text page index at runtime, so each frame upload re-reads the specs. Only
 /// conversation layers actually change; the loop is bounded by the scene's
-/// fixed layer count and allocates nothing.
+/// fixed layer count and allocates nothing. Shader layers additionally carry
+/// the frame-dependent DropShadow uniforms and `EnableMask` state.
 pub(crate) fn sync_material_specs(
-    materials: &mut Assets<ColorMaterial>,
-    handles: &[Handle<ColorMaterial>],
+    color_materials: &mut Assets<ColorMaterial>,
+    shader_materials: &mut Assets<LayerShaderMaterial>,
+    handles: &[LayerMaterialHandle],
     page_handles: &[Handle<Image>],
     specs: &[LayerSpec],
+    screen_rain_texture: Option<&Handle<Image>>,
 ) -> Result<(), RenderError> {
     if handles.len() != specs.len() {
         return Err(RenderError::Renderer {
@@ -759,27 +933,57 @@ pub(crate) fn sync_material_specs(
         });
     }
     for (handle, spec) in handles.iter().zip(specs) {
-        let texture = match spec.page {
-            Some(index) => Some(
-                page_handles
-                    .get(index)
-                    .ok_or_else(|| RenderError::Renderer {
-                        detail: format!(
-                            "layer spec references page {index} but only {} pages were uploaded",
-                            page_handles.len()
-                        ),
-                    })?
-                    .clone(),
-            ),
-            None => None,
-        };
-        let Some(mut material) = materials.get_mut(handle) else {
-            return Err(RenderError::Renderer {
-                detail: "layer material handle is missing from Assets<ColorMaterial>".to_string(),
-            });
-        };
-        material.color = Color::srgba(spec.color[0], spec.color[1], spec.color[2], spec.color[3]);
-        material.texture = texture;
+        let texture = layer_texture(spec, page_handles, screen_rain_texture)?;
+        match (handle, spec.shader.is_shader()) {
+            (LayerMaterialHandle::Color(handle), false) => {
+                let Some(mut material) = color_materials.get_mut(handle) else {
+                    return Err(RenderError::Renderer {
+                        detail: "layer material handle is missing from Assets<ColorMaterial>"
+                            .to_string(),
+                    });
+                };
+                material.color =
+                    Color::srgba(spec.color[0], spec.color[1], spec.color[2], spec.color[3]);
+                material.texture = texture;
+            }
+            (LayerMaterialHandle::Shader(handle), true) => {
+                let Some(mut material) = shader_materials.get_mut(handle) else {
+                    return Err(RenderError::Renderer {
+                        detail: "layer material handle is missing from \
+                                 Assets<LayerShaderMaterial>"
+                            .to_string(),
+                    });
+                };
+                let uniforms =
+                    spec.shader
+                        .uniforms(spec.color)
+                        .ok_or_else(|| RenderError::Renderer {
+                            detail: "shader layer produced no uniform block".to_string(),
+                        })?;
+                material.uniforms = uniforms;
+                material.texture = texture;
+                material.mask_texture = spec
+                    .shader
+                    .mask_page()
+                    .map(|page| resolve_page(Some(page), page_handles))
+                    .transpose()?
+                    .flatten();
+            }
+            (LayerMaterialHandle::Color(_), true) => {
+                return Err(RenderError::Renderer {
+                    detail: "layer changed from a plain material to a shader material at \
+                             runtime; shader attachments are build-time frozen"
+                        .to_string(),
+                });
+            }
+            (LayerMaterialHandle::Shader(_), false) => {
+                return Err(RenderError::Renderer {
+                    detail: "layer changed from a shader material to a plain material at \
+                             runtime; shader attachments are build-time frozen"
+                        .to_string(),
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -821,4 +1025,75 @@ pub(crate) fn build_mesh(quads: &[Quad]) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::shaders::{LayerShader, RAIN_COLOR_DEFAULT, Rain};
+
+    fn rain_spec(sprite_mode: bool) -> LayerSpec {
+        LayerSpec {
+            page: if sprite_mode { Some(0) } else { None },
+            color: [1.0, 1.0, 1.0, 1.0],
+            shader: LayerShader::Rain(Rain {
+                time: 1.0,
+                scale: 3.6,
+                intensity: 0.5,
+                color: RAIN_COLOR_DEFAULT,
+                sprite_mode,
+                resolution: [1280.0, 720.0],
+                camera_bounds: [0.0, 0.0, 1280.0, 720.0],
+                frame_bounds: [0.0, 0.0, 1.0, 1.0],
+            }),
+        }
+    }
+
+    #[test]
+    fn screen_rain_layer_detection_ignores_sprite_mode_and_plain_layers() {
+        assert_eq!(screen_rain_layer_index(&[]), None);
+        assert_eq!(
+            screen_rain_layer_index(&[
+                LayerSpec::plain(None, [1.0, 1.0, 1.0, 1.0]),
+                LayerSpec::plain(None, [1.0, 1.0, 1.0, 1.0]),
+            ]),
+            None
+        );
+        assert_eq!(
+            screen_rain_layer_index(&[
+                LayerSpec::plain(None, [1.0, 1.0, 1.0, 1.0]),
+                rain_spec(false),
+                LayerSpec::plain(None, [1.0, 1.0, 1.0, 1.0]),
+            ]),
+            Some(1)
+        );
+        assert_eq!(
+            screen_rain_layer_index(&[rain_spec(true)]),
+            None,
+            "sprite-mode rain samples the prop page, not the game target"
+        );
+    }
+
+    #[test]
+    fn game_target_image_is_a_samplable_render_attachment() {
+        let image = game_target_image();
+        assert_eq!(image.texture_descriptor.size.width, RENDER_WIDTH);
+        assert_eq!(image.texture_descriptor.size.height, RENDER_HEIGHT);
+        assert_eq!(
+            image.texture_descriptor.format,
+            TextureFormat::Rgba8UnormSrgb
+        );
+        assert!(
+            image
+                .texture_descriptor
+                .usage
+                .contains(TextureUsages::RENDER_ATTACHMENT)
+        );
+        assert!(
+            image
+                .texture_descriptor
+                .usage
+                .contains(TextureUsages::TEXTURE_BINDING)
+        );
+    }
 }

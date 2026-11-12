@@ -1901,8 +1901,10 @@ pass-through (identity). ZERO consumers. Dead code.
   (uSpeed 1.6, uFrequency 1.6, amplitude 0.011) on `backTrees`;
   `wiggleSchool = (2, 4, 0.017)` on `school`;
   `wiggleGround`/`wiggleTrees` = (2, 4, 0.007) on `street`/`trees`.
-  schoolEvilErect.hxc:24-32 — `wiggleBack` (backspikes) and `wiggleSpike`
-  (backspike), amplitudes 0.011/0.01.
+  schoolEvilErect.hxc:24-32 — `wiggleBack = (2*0.8, 4*0.4, 0.011)` on
+  `backspikes`, `wiggleSchool = (2, 4, 0.017)` on `school`,
+  `wiggleSpike = (2, 4, 0.01)` on `backspike`, and
+  `wiggleGround = (2, 4, 0.007)` on `evilstreet`.
 - Cadence: ONLY `uTime` advances, per frame via `update(event.elapsed)`
   (schoolEvil.hxc:44-50, schoolEvilErect.hxc:44-50). uSpeed/uFrequency/
   uWaveAmplitude/effectType are set ONCE at construction and never re-set
@@ -1949,20 +1951,26 @@ only sserafim `sserafimPulseLights` backlight selection.
    the stage/character/overlay layers and NOT the HUD / dialogue layers
    (HUD layers start at the existing HUD index; dialogue/cutscene layers sit
    above and are likewise outside the game camera in native).
-3. **Time driver (DER).** `uTime` accumulates in SECONDS from the same 1 ms
-   sim ticks (`TICK_SECONDS`) the scene already consumes — deterministic
+3. **Time driver (DER + [D]).** `uTime` accumulates in SECONDS from the same
+   1 ms sim ticks (`TICK_SECONDS`) the scene already consumes — deterministic
    fixed-step accumulation replaces the native `update(elapsed)`. Rain
    intensity derives from the conductor's song position in ms via the same
-   `remapToRange(start, end)` formula (0 = song start, full length = song
-   end); phillyBlazin's `rainTimeScale` lerps toward 0.02 and gains 0.7 per
-   note hit. Rain filter clears on game over and restores on retry.
-4. **Frame-change uniform sync (DER).** Wherever the anim scheduler already
-   processes frame changes, that hook must re-emit the frame-dependent
+   `remapToRange(start, end)` formula; `[D]` because the headless/scene
+   renderer does not decode audio streams, `rain_duration_ms` uses the
+   deterministic chart-end timestamp `max(note.time + note.sustain_ms).max(1.0)`
+   in place of native `FlxG.sound.music.length`. phillyBlazin's `rainTimeScale`
+   lerps toward 0.02 and gains 0.7 per note hit. On game over, the screen-rain
+   pass sets `u_intensity = 0.0` (an identity pass over the offscreen game
+   target so the unfiltered stage remains visible).
+4. **Frame-change uniform sync (DER + [D]).** Wherever the anim scheduler
+   already processes frame changes, that hook must re-emit the frame-dependent
    uniforms (rain sprite-mode frame info; DropShadow `uFrameBounds` +
-   `angleOffset = frame.angle`). Animate-atlas limb characters under a
-   shader need the native `useRenderTexture = true` equivalence — in Oxide
-   the shader binds per final composed layer, which is the same single-pass
-   result (engine decision, see 15.3).
+   `angleOffset = frame.angle`). `[D]` For multi-limb animate-atlas characters
+   under `DropShadowShader`, binding the shader per page layer samples the
+   atlas page directly (`uFrameBounds = [0, 0, 1, 1]`); this is an engine
+   approximation rather than an offscreen per-character render texture
+   (`useRenderTexture = true`), so rim/shadow sampling across adjacent limb
+   boundaries is a named limitation alongside native rendered-output parity.
 5. **EnableMask (DER).** `EnableMask` remains a trace-recorded event whose
    only gameplay effect is setting the tankman DropShadow layer's
    `useMask` flag true (applies to the saved `tankmanRim` shader state),
@@ -1999,10 +2007,13 @@ only sserafim `sserafimPulseLights` backlight selection.
    MosaicEffect, AngleMask, StrokeShader, LeftMaskShader, ColorSwap): their
    integration is deferred to the meta/UI phases; no 6G work is spent on
    them.
-4. **`useRenderTexture` equivalence.** Native erect stages force a
-   render texture so all limbs share one shader pass; Oxide already composes
-   characters as layer groups, so binding the shader at the composed layer
-   is the simplest equivalent (no intermediate render texture).
+4. **`useRenderTexture` approximation (`[D]`).** Native erect stages force a
+   render texture so all limbs share one shader pass; Oxide binds the shader
+   at each character page layer without introducing an intermediate per-
+   character render texture. For `AdjustColor` and `Sserafim` (point operations)
+   this is single-pass equivalent where limbs do not overlap; for `DropShadow`
+   on animate-atlas characters, sampling the atlas page (`uFrameBounds =
+   [0, 0, 1, 1]`) is an engine approximation recorded as a named limitation.
 5. **No new dependencies** (Bevy 0.20 custom materials are built-in); no
    `oxide-vfs` change needed since shaders are source-level WGSL, not
    resolved assets.
@@ -2025,8 +2036,75 @@ only sserafim `sserafimPulseLights` backlight selection.
   fixtures on llvmpipe, NOT native pixel parity — native rendered-output
   traces stay a standing deferred obligation (§14.x / 6F record).
 - **Approval items:** (a) the fixture-establishment ADR for the 6G shader
-  families (no pre-authorization exists); (b) none other — no new
+  families (HUMAN-APPROVED 2026-11-11); (b) none other — no new
   dependencies, no tolerance changes, no asset changes are requested.
   Implementation of the WGSL families may proceed after this freeze on the
   approved write set (`crates/oxide-game/src/render*`), with review before
   integration.
+
+### 15.5 Phase 6G implementation record & review resolutions (2026-11-11)
+
+- **Delivered (`crates/oxide-game/src/render/shaders.rs`, `layer_shader.wgsl`,
+  `scene.rs`, `harness.rs`, `load.rs`, `play/window.rs`, `xtask/src/render_diff.rs`):**
+  one private `LayerShaderMaterial` (`Material2d`) with a synchronously
+  registered embedded WGSL fragment (`layer_shader.wgsl`) covering all six
+  in-scope gameplay shader families while keeping un-shadered layers on the
+  frozen `ColorMaterial` pipeline:
+  - Kind 0 (`AdjustColor`): W3C hue matrix, Rec.709 saturation (positive ×3),
+    brightness `/255`, contrast exponential curve above 1.0, fixed composition
+    order brightness → hue → contrast → saturation.
+  - Kind 1 (`DropShadow`): HSBC + texture-space rim offset + difference-based
+    AA luma threshold + blue-channel `altMask` (`gfTankmen_mask`,
+    `neneTankmen_mask`, `tankmanCaptainBloody_mask`, `bfPixel_mask`,
+    `picoPixel_mask`, `gfPixel_mask`, `nenePixel_mask`, `senpai_mask`) +
+    per-frame `uFrameBounds` sync + `EnableMask` event toggling
+    `tankman-bloody`'s `use_alt_mask = true` at `61982` ms on `stress-pico` +
+    `tankmanBattlefieldErect` `GameOver` clearing the player's shader.
+  - Kind 2 (note `HSV`): multiplicative HSV factors (`1.0, 0.2, 1.0`, tint
+    alpha `0.5`) on a dedicated overlay layer for player notes hit with
+    combo-breaking `Bad`/`Shit` judgements. `[D]` Because the frozen `bopeebo`
+    negative-phase replay injects threshold `Bad`/`Shit` hits,
+    `fixture_note_desaturation(chart_id)` is `chart_id != "bopeebo"` on the
+    `SliceRenderer::build_for_song` path (`false` on `SliceRenderer::build`),
+    keeping the frozen `bopeebo` frame digests byte-identical while enabling
+    the layer for `PlaySession` and all non-bopeebo songs (verified on
+    `llvmpipe` by `hsv_desaturated_note_layer_renders_through_the_material_pipeline`).
+  - Kind 3 (`WiggleEffectRuntime`): `DREAMY` pixel-quantized sine displacement
+    (plus `WAVY`, `HEAT_WAVE_HORIZONTAL`, `HEAT_WAVE_VERTICAL`, `FLAG`),
+    `u_time` advancing by `TICK_SECONDS` per 1 ms tick across `schoolEvil`
+    and `schoolEvilErect` props.
+  - Kind 4 (`RuntimeRainShader`): screen mode via a full-screen post layer
+    immediately before `overlay_start` sampling an offscreen `Camera { order: -1 }`
+    `game_target` (`RenderLayers::layer(1)`) so `camHUD`/strumline/dialogue/
+    cutscene remain unfiltered (`phillyStreets`, `phillyStreetsErect`,
+    `phillyBlazin`), plus sprite mode on `spookyMansionErect` `bgTrees`;
+    deterministic `u_time` accumulation (starting at `1.0`), per-song
+    intensity remap over `[0, rain_duration_ms]`, `phillyBlazin` `rainTimeScale`
+    note-hit `+0.7` boost and `smoothLerpPrecision` decay, and game-over
+    `u_intensity = 0.0` identity pass.
+  - Kind 5 (`SserafimShader`): in-shader HSBC (with positive saturation ×3) +
+    dark/light divisors (`5/3` for characters, `1/2` for stage props) +
+    HSL-scaled pulse light; light/cover prop exemptions (`truckLight1/2`,
+    `backLightColor/White`, `truckTest`, `solidCover`); `sserafimDark`
+    (`sineInOut`), `sserafimLights` (`cubeInOut` + `truckLight1/2` alphas),
+    `sserafimPulseLights` (per-beat `cubeInOut` + `backLightColor/White` tints
+    with 8-digit `0xAARRGGBB` `FlxColor.fromString` parsing), and
+    `sserafimCover` (`solidCover` alpha).
+- **Review resolutions:** (1) `parse_sserafim_color` fixed to skip the first
+  two alpha hex digits on 8-digit `0xAARRGGBB` strings (`0xFF6D43FF` → RGB
+  `6D43FF`), refreshing the `sserafim/hard` `39000` ms pulse-light frame and
+  run digest; (2) `sserafim_saturation_rows` triples positive saturation
+  values before `1 + val/100`; (3) `schoolEvilErect` 4-prop wiggle table
+  (`school`, `evilstreet`, `backspikes`, `backspike`) confirmed against
+  `schoolEvilErect.hxc:24-32` and recorded in §15.1; (4) `rain_duration_ms`
+  chart-end proxy and per-page-layer `DropShadow` atlas sampling explicitly
+  labelled `[D]`; (5) `tankmanBattlefieldErect` `GameOver` player shader clear
+  implemented and tested; (6) 6G establishment provenance appended to
+  `_manifest.json` `honesty`; (7) `llvmpipe` end-to-end render test added for
+  the `LayerShader::Hsv` desaturated-note pipeline.
+- **Named limitations:** llvmpipe engine fixtures are NOT native pixel parity;
+  WGSL runs on Bevy's linearized sRGB samples; animate-atlas `DropShadow`
+  samples per page layer rather than a composed character render texture;
+  sserafim stage-scripted extra characters (`yunjin`/`chaewon`/`eunchae`),
+  perspective floor, dust backdrops and cutscene HSBC tweens remain outside
+  the data-driven stage loader; retry resets are implicit via scene rebuild.

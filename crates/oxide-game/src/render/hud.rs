@@ -544,7 +544,7 @@ impl HudLayers {
         let base = specs.len();
         let mut push = |page: Option<usize>, color: [f32; 4]| {
             let index = specs.len() - base;
-            specs.push(LayerSpec { page, color });
+            specs.push(LayerSpec::plain(page, color));
             index
         };
         let bar_bg = push(Some(assets.bar_page), [1.0, 1.0, 1.0, 1.0]);

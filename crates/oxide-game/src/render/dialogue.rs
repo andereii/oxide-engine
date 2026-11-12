@@ -240,10 +240,7 @@ impl DialogueLayers {
             let index = specs.len() - base;
             // Inactive conversations contribute no pixels; the scene tick
             // writes the per-frame alpha before the first active draw.
-            specs.push(LayerSpec {
-                page,
-                color: [color[0], color[1], color[2], 0.0],
-            });
+            specs.push(LayerSpec::plain(page, [color[0], color[1], color[2], 0.0]));
             base_colors.push(color);
             index
         };
@@ -1918,13 +1915,7 @@ mod tests {
         // The synced specs carry the per-frame alpha into the layer colors.
         let mut specs = Vec::new();
         let count = runtime.layers().count;
-        specs.resize(
-            count,
-            LayerSpec {
-                page: None,
-                color: [0.0, 0.0, 0.0, 0.0],
-            },
-        );
+        specs.resize(count, LayerSpec::plain(None, [0.0, 0.0, 0.0, 0.0]));
         runtime.sync_layer_specs(&mut specs).expect("specs sync");
         assert!(
             specs.iter().any(|spec| spec.color[3] > 0.0),

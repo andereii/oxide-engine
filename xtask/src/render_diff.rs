@@ -2,14 +2,17 @@
 //!
 //! Implements the ADR-0020 / `tools/oracle/RENDER-BEHAVIOR.md` §7 gate:
 //!
-//! 1. Three chart-id families are driven through the schema-3 event-enabled
+//! 1. Seven chart-id families are driven through the schema-3 event-enabled
 //!    canonical replay (`docs/M6-CONTRACT.md` §12.7): `bopeebo` keeps the
 //!    frozen scripted negative-phase input stream, `school` uses the exact
 //!    `senpai` chart taps (that chart cannot satisfy the scripted-phase
-//!    boundary preconditions), and `dialogue` adds the fixed
+//!    boundary preconditions), `dialogue` adds the fixed
 //!    `CUTSCENE_ADVANCE` playthrough for the `senpai` normal conversation
-//!    (M6-CONTRACT §14.3). The shared 1 ms tick loop, `record()` cross-check
-//!    and trace sha256 live in [`crate::gameplay_sim`].
+//!    (M6-CONTRACT §14.3), and the four M6-CONTRACT §15.4 shader-active
+//!    families (`philly_streets_erect`, `school_evil`, `tankman_erect`,
+//!    `sserafim`) use exact chart taps plus their frozen shader-event sample
+//!    positions. The shared 1 ms tick loop, `record()` cross-check and trace
+//!    sha256 live in [`crate::gameplay_sim`].
 //! 2. The canonical ticks are replayed through
 //!    [`oxide_game::render::SliceRenderer::build_for_song`] (the dialogue
 //!    family uses `build_for_song_with_dialogue`) on the software adapter. A
@@ -63,7 +66,9 @@
 //! are inspected. The `bopeebo` family keeps the frozen mainStage checks and
 //! character bounds; `school` checks the `senpai` Sparrow first-frame bounds,
 //! and `dialogue` reuses the same senpai chart/stage computation for its
-//! single normal difficulty.
+//! single normal difficulty. The §15.4 shader families add solid-color
+//! (`makeSolidColor` unit base) and animate-atlas stage props plus Packer
+//! character bounds (`thorns` opponent `spirit`).
 //!
 //! Honesty: frame digests are OUR renderer's output frozen once (an engine
 //! fixture). They are NOT native pixel parity; a native-game rendered-output
@@ -159,6 +164,9 @@ struct Family {
     stream: FamilyStream,
     required_props: &'static [&'static str],
     character_bounds: CharacterBoundsCheck,
+    /// Extra shader-event sample positions (ms) merged into the derived plan.
+    /// Empty for families whose samples are fully conductor/trace derived.
+    extra_samples: &'static [u64],
 }
 
 const BOPEEBO_FAMILY: Family = Family {
@@ -169,6 +177,7 @@ const BOPEEBO_FAMILY: Family = Family {
     stream: FamilyStream::Scripted,
     required_props: &["stageback", "stagefront", "stagecurtains"],
     character_bounds: CharacterBoundsCheck::PinnedBopeebo,
+    extra_samples: &[],
 };
 
 const SCHOOL_FAMILY: Family = Family {
@@ -184,6 +193,7 @@ const SCHOOL_FAMILY: Family = Family {
     stream: FamilyStream::ChartTaps,
     required_props: &[],
     character_bounds: CharacterBoundsCheck::OpponentContent,
+    extra_samples: &[],
 };
 
 const DIALOGUE_FAMILY: Family = Family {
@@ -199,9 +209,72 @@ const DIALOGUE_FAMILY: Family = Family {
     // separate geometry computation is introduced.
     required_props: &[],
     character_bounds: CharacterBoundsCheck::OpponentContent,
+    extra_samples: &[],
 };
 
-const FAMILIES: [&Family; 3] = [&BOPEEBO_FAMILY, &SCHOOL_FAMILY, &DIALOGUE_FAMILY];
+/// M6-CONTRACT §15.4: phillyStreetsErect rain + adjust-color shader family.
+const PHILLY_STREETS_ERECT_FAMILY: Family = Family {
+    name: "philly_streets_erect",
+    chart_id: "darnell-erect",
+    declared_difficulties: &["erect", "nightmare"],
+    difficulties: &["erect"],
+    stream: FamilyStream::ChartTaps,
+    required_props: &["phillyskyline", "phillyforegroundcity"],
+    character_bounds: CharacterBoundsCheck::OpponentContent,
+    extra_samples: &[],
+};
+
+/// M6-CONTRACT §15.4: schoolEvil wiggle shader family.
+const SCHOOL_EVIL_FAMILY: Family = Family {
+    name: "school_evil",
+    chart_id: "thorns",
+    declared_difficulties: &["easy", "normal", "hard"],
+    difficulties: &["normal"],
+    stream: FamilyStream::ChartTaps,
+    required_props: &["backtrees", "school", "street", "trees"],
+    character_bounds: CharacterBoundsCheck::OpponentContent,
+    extra_samples: &[],
+};
+
+/// M6-CONTRACT §15.4: tankmanBattlefieldErect drop-shadow + `EnableMask`
+/// family. The extra positions freeze the event tick's neighbourhood: the
+/// tick before, the `EnableMask` tick (`61982` ms) and its `+250` ms
+/// follow-up (the derived plan's first-event classes do not cover chart
+/// events).
+const TANKMAN_ERECT_FAMILY: Family = Family {
+    name: "tankman_erect",
+    chart_id: "stress-pico",
+    declared_difficulties: &["easy", "normal", "hard"],
+    difficulties: &["hard"],
+    stream: FamilyStream::ChartTaps,
+    required_props: &["bg", "sniper", "guy", "tankbricks"],
+    character_bounds: CharacterBoundsCheck::OpponentContent,
+    extra_samples: &[61900, 61982, 62232],
+};
+
+/// M6-CONTRACT §15.4: sserafim event-driven light/dark shader family. The
+/// extra positions freeze `sserafimDark` (37800 ms), `sserafimPulseLights`
+/// (39000 ms) and `sserafimLights` (47500 ms).
+const SSERAFIM_FAMILY: Family = Family {
+    name: "sserafim",
+    chart_id: "spaghetti",
+    declared_difficulties: &["easy", "normal", "hard"],
+    difficulties: &["hard"],
+    stream: FamilyStream::ChartTaps,
+    required_props: &["bg", "truck", "trucklight1", "backlightcolor"],
+    character_bounds: CharacterBoundsCheck::OpponentContent,
+    extra_samples: &[37800, 39000, 47500],
+};
+
+const FAMILIES: [&Family; 7] = [
+    &BOPEEBO_FAMILY,
+    &SCHOOL_FAMILY,
+    &DIALOGUE_FAMILY,
+    &PHILLY_STREETS_ERECT_FAMILY,
+    &SCHOOL_EVIL_FAMILY,
+    &TANKMAN_ERECT_FAMILY,
+    &SSERAFIM_FAMILY,
+];
 
 /// Typed failure for the fixture-boundary case called out by the gate brief.
 #[derive(Debug, thiserror::Error)]
@@ -476,7 +549,7 @@ fn capture_once(
         story_entry,
     )?;
     let replay_end = replay.ticks.last().map_or(0, |tick| tick.sim_ms);
-    let samples = match family.stream {
+    let mut samples = match family.stream {
         // The dialogue family freezes the approved trigger-relative recipe,
         // not the conductor/event-derived plan: the conversation is content
         // timing, not a scripted-phase trace category.
@@ -485,6 +558,12 @@ fn capture_once(
             sample_positions(assets_root, family.chart_id, notes, &replay.ticks)?
         }
     };
+    if matches!(
+        family.stream,
+        FamilyStream::Scripted | FamilyStream::ChartTaps
+    ) {
+        samples = merge_extra_samples(samples, family.extra_samples, replay_end);
+    }
     let last_sample = samples
         .last()
         .copied()
@@ -786,6 +865,25 @@ fn dialogue_sample_positions(replay_end: u64) -> Vec<u64> {
         .collect()
 }
 
+/// Merges a family's frozen shader-event positions into the derived plan.
+///
+/// Positions past the canonical replay end are dropped (the replay cannot
+/// reach them); the result stays sorted and deduplicated. Empty
+/// `extra_samples` returns the derived plan unchanged.
+fn merge_extra_samples(samples: Vec<u64>, extra_samples: &[u64], replay_end: u64) -> Vec<u64> {
+    if extra_samples.is_empty() {
+        return samples;
+    }
+    let mut merged: BTreeSet<u64> = samples.into_iter().collect();
+    merged.extend(
+        extra_samples
+            .iter()
+            .copied()
+            .filter(|sample| *sample <= replay_end),
+    );
+    merged.into_iter().collect()
+}
+
 /// Deterministic sample plan for one family difficulty.
 pub(crate) fn sample_positions(
     assets_root: &Path,
@@ -1077,6 +1175,26 @@ fn camera_initial_scroll(
     [focus[0] - GAME_WIDTH / 2.0, focus[1] - GAME_HEIGHT / 2.0]
 }
 
+/// Chart scroll speed for the independent note-y geometry.
+///
+/// Charts declare a per-difficulty map. `easy` is the frozen base whenever it
+/// exists (preserving every pre-6G family); otherwise the family's first
+/// fixture difficulty is used (`erect` for `darnell-erect`, which declares no
+/// `easy`). A missing map keeps the 1.0 default.
+fn chart_scroll_speed(scroll_speed: Option<&Value>, family: &Family) -> f64 {
+    scroll_speed
+        .and_then(|scroll| {
+            scroll.get("easy").or_else(|| {
+                family
+                    .difficulties
+                    .first()
+                    .and_then(|difficulty| scroll.get(*difficulty))
+            })
+        })
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0)
+}
+
 fn compute_geometry(assets_root: &Path, family: &Family) -> Result<Geometry, String> {
     let (chart_path, metadata_path) = gameplay_sim::chart_asset_paths(family.chart_id)?;
     let metadata_document = read_data_document(assets_root, &metadata_path)?;
@@ -1116,14 +1234,19 @@ fn compute_geometry(assets_root: &Path, family: &Family) -> Result<Geometry, Str
             .asset_path
             .as_deref()
             .ok_or_else(|| format!("{stage_path} prop {:?} lacks assetPath", prop.name))?;
-        let image_size = image_size(assets_root, asset_path, level_dir)?;
+        let base_size = stage_prop_image_size(
+            assets_root,
+            asset_path,
+            prop.anim_type.as_deref(),
+            level_dir,
+        )?;
         let position = prop.position.unwrap_or((0.0, 0.0));
         let scale = prop.scale.unwrap_or((1.0, 1.0));
         let key = prop.name.to_ascii_lowercase();
         if props
             .insert(
                 key.clone(),
-                prop_rect([position.0, position.1], [scale.0, scale.1], image_size),
+                prop_rect([position.0, position.1], [scale.0, scale.1], base_size),
             )
             .is_some()
         {
@@ -1191,15 +1314,10 @@ fn compute_geometry(assets_root: &Path, family: &Family) -> Result<Geometry, Str
             chart_document.kind
         ));
     };
-    let scroll_speed = chart
-        .scroll_speed
-        .as_ref()
-        .and_then(|scroll| scroll.get("easy"))
-        .and_then(Value::as_f64)
-        .unwrap_or(1.0);
+    let scroll_speed = chart_scroll_speed(chart.scroll_speed.as_ref(), family);
     if !scroll_speed.is_finite() || scroll_speed <= 0.0 {
         return Err(format!(
-            "{chart_path} easy scrollSpeed {scroll_speed} must be finite and positive"
+            "{chart_path} scrollSpeed {scroll_speed} must be finite and positive"
         ));
     }
 
@@ -1223,8 +1341,8 @@ fn compute_geometry(assets_root: &Path, family: &Family) -> Result<Geometry, Str
 
 /// The opponent character's whole-sprite bounds at scale 1, mirroring the
 /// renderer's `Sheet::bounds` rule: animate atlases use the parsed stage
-/// bounds; Sparrow characters use the first document frame's destination size
-/// as `[0, 0, width, height]`.
+/// bounds; Sparrow and Packer characters use the first document frame's
+/// destination size as `[0, 0, width, height]`.
 fn character_content_bounds(
     assets_root: &Path,
     character: &oxide_data::character::CharacterData,
@@ -1234,6 +1352,7 @@ fn character_content_bounds(
         Some("animateatlas") | Some("multianimateatlas") => {
             atlas_bounds(assets_root, &character.asset_path, level_dir)
         }
+        Some("packer") => packer_bounds(assets_root, &character.asset_path, level_dir),
         None | Some("sparrow") | Some("multisparrow") => {
             sparrow_bounds(assets_root, &character.asset_path, level_dir)
         }
@@ -1278,6 +1397,47 @@ fn sparrow_bounds(
     }
     Err(format!(
         "sparrow atlas {asset_path:?} is missing from candidate directories {bases:?}"
+    ))
+}
+
+/// Packer character bounds from the shipped `{key}.txt` sibling format
+/// (`shared/images/characters/spirit.txt`). Mirrors [`sparrow_bounds`]: the
+/// first document frame's destination size is the whole-sprite bounds.
+/// `oxide_atlas::parse_packer_text` is the shipped Packer-text parser;
+/// `PackerFrame::source_size` is that frame's destination size.
+fn packer_bounds(
+    assets_root: &Path,
+    asset_path: &str,
+    level_dir: Option<&str>,
+) -> Result<[f64; 4], String> {
+    let bases = image_dir_candidates(asset_path, level_dir);
+    for base in &bases {
+        let path = assets_root.join(format!("{base}.txt"));
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("cannot read packer atlas {}: {error}", path.display()))?;
+        let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+        let text = String::from_utf8(bytes.to_vec())
+            .map_err(|error| format!("packer atlas {} is not UTF-8: {error}", path.display()))?;
+        let atlas = oxide_atlas::parse_packer_text(&text)
+            .map_err(|error| format!("packer atlas {} failed: {error}", path.display()))?;
+        let first = atlas
+            .frames
+            .first()
+            .ok_or_else(|| format!("packer atlas {} has no frames", path.display()))?;
+        let [width, height] = first.source_size;
+        if width <= 0 || height <= 0 {
+            return Err(format!(
+                "packer atlas {} first frame has empty content {width}x{height}",
+                path.display()
+            ));
+        }
+        return Ok([0.0, 0.0, f64::from(width), f64::from(height)]);
+    }
+    Err(format!(
+        "packer atlas {asset_path:?} is missing from candidate directories {bases:?}"
     ))
 }
 
@@ -1364,7 +1524,31 @@ fn resolve_in_dirs(assets_root: &Path, dirs: &[String], file: &str) -> Result<Pa
     ))
 }
 
+/// Stage prop base size for the independent rect computation.
+///
+/// Two observed non-PNG layouts are resolved here:
+/// - solid-color keys (`#RRGGBB`, native `makeSolidColor`): a unit base that
+///   [`prop_rect`] scales by the prop's `scale`;
+/// - animate-atlas props (`animType: "animateatlas"`): the spritemap page PNG
+///   (`{assetPath}/spritemap1.png`), as the renderer composes that page.
+fn stage_prop_image_size(
+    assets_root: &Path,
+    asset_path: &str,
+    anim_type: Option<&str>,
+    level_dir: Option<&str>,
+) -> Result<[f64; 2], String> {
+    if anim_type == Some("animateatlas") {
+        return image_size(assets_root, &format!("{asset_path}/spritemap1"), level_dir);
+    }
+    image_size(assets_root, asset_path, level_dir)
+}
+
 fn image_size(assets_root: &Path, key: &str, level_dir: Option<&str>) -> Result<[f64; 2], String> {
+    // Solid-color props have no image file; `makeSolidColor`'s base is the
+    // unit rect and the prop's own `scale` supplies the final size.
+    if key.starts_with('#') {
+        return Ok([1.0, 1.0]);
+    }
     let mut tried = Vec::new();
     for base in image_file_bases(key, level_dir) {
         let relative = format!("{base}.png");
@@ -2124,14 +2308,14 @@ mod tests {
     }
 
     fn full_manifest() -> Value {
+        let families = FAMILIES
+            .iter()
+            .map(|family| (family.name.to_string(), family_section(family)))
+            .collect::<serde_json::Map<_, _>>();
         json!({
             "schema": SCHEMA,
             "adapter": ADAPTER,
-            "families": {
-                "bopeebo": family_section(&BOPEEBO_FAMILY),
-                "school": family_section(&SCHOOL_FAMILY),
-                "dialogue": family_section(&DIALOGUE_FAMILY),
-            }
+            "families": families,
         })
     }
 
@@ -2317,6 +2501,146 @@ mod tests {
             &["easy", "normal", "hard"]
         );
         assert_eq!(DIALOGUE_FAMILY.stream, FamilyStream::Dialogue);
+    }
+
+    #[test]
+    fn family_table_covers_the_seven_slice_families() {
+        let names: Vec<&str> = FAMILIES.iter().map(|family| family.name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "bopeebo",
+                "school",
+                "dialogue",
+                "philly_streets_erect",
+                "school_evil",
+                "tankman_erect",
+                "sserafim"
+            ]
+        );
+        assert_eq!(PHILLY_STREETS_ERECT_FAMILY.chart_id, "darnell-erect");
+        assert_eq!(
+            PHILLY_STREETS_ERECT_FAMILY.declared_difficulties,
+            &["erect", "nightmare"]
+        );
+        assert_eq!(PHILLY_STREETS_ERECT_FAMILY.difficulties, &["erect"]);
+        assert_eq!(SCHOOL_EVIL_FAMILY.chart_id, "thorns");
+        assert_eq!(SCHOOL_EVIL_FAMILY.difficulties, &["normal"]);
+        assert_eq!(TANKMAN_ERECT_FAMILY.chart_id, "stress-pico");
+        assert_eq!(TANKMAN_ERECT_FAMILY.difficulties, &["hard"]);
+        assert_eq!(SSERAFIM_FAMILY.chart_id, "spaghetti");
+        assert_eq!(SSERAFIM_FAMILY.difficulties, &["hard"]);
+        // Shader-event positions are frozen, not derived from trace classes.
+        assert_eq!(TANKMAN_ERECT_FAMILY.extra_samples, &[61900, 61982, 62232]);
+        assert_eq!(SSERAFIM_FAMILY.extra_samples, &[37800, 39000, 47500]);
+        for family in [
+            &BOPEEBO_FAMILY,
+            &SCHOOL_FAMILY,
+            &DIALOGUE_FAMILY,
+            &PHILLY_STREETS_ERECT_FAMILY,
+            &SCHOOL_EVIL_FAMILY,
+        ] {
+            assert!(
+                family.extra_samples.is_empty(),
+                "{} must not add shader-event samples",
+                family.name
+            );
+        }
+    }
+
+    #[test]
+    fn extra_shader_samples_merge_sorted_deduplicated_and_clamped() {
+        let derived = vec![1200, 1800, 5001];
+        // Empty extra samples leave the derived plan byte-for-byte unchanged.
+        assert_eq!(
+            merge_extra_samples(derived.clone(), &[], 10_000),
+            derived.clone()
+        );
+        assert_eq!(
+            merge_extra_samples(derived, &[61982, 61900, 1800, 9999, 70_000], 65_000),
+            vec![1200, 1800, 5001, 9999, 61900, 61982]
+        );
+        assert_eq!(merge_extra_samples(Vec::new(), &[], 10), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn scroll_speed_uses_easy_then_the_first_family_difficulty() {
+        let easy_chart = json!({"easy": 1.7, "normal": 1.8, "hard": 2.0});
+        assert_eq!(
+            chart_scroll_speed(Some(&easy_chart), &SCHOOL_EVIL_FAMILY),
+            1.7
+        );
+        let erect_chart = json!({"erect": 3.0, "nightmare": 3.2});
+        assert_eq!(
+            chart_scroll_speed(Some(&erect_chart), &PHILLY_STREETS_ERECT_FAMILY),
+            3.0
+        );
+        assert_eq!(chart_scroll_speed(None, &PHILLY_STREETS_ERECT_FAMILY), 1.0);
+        assert_eq!(
+            chart_scroll_speed(Some(&json!("not-a-map")), &SCHOOL_EVIL_FAMILY),
+            1.0
+        );
+    }
+
+    #[test]
+    fn stage_prop_geometry_handles_solid_colors_and_animate_atlases() {
+        // Solid-color props use the unit `makeSolidColor` base; the prop's
+        // scale supplies the final rect (schoolEvil `solid` is 2400x2000).
+        assert_eq!(
+            stage_prop_image_size(Path::new("."), "#000000", None, Some("week6")).unwrap(),
+            [1.0, 1.0]
+        );
+        assert_eq!(
+            prop_rect(
+                [-500.0, -1000.0],
+                [2400.0, 2000.0],
+                stage_prop_image_size(Path::new("."), "#FFFFFF", None, None).unwrap()
+            ),
+            [-500.0, -1000.0, 2400.0, 2000.0]
+        );
+
+        // Animate-atlas stage props are sized by `{assetPath}/spritemap1.png`.
+        let assets = TempAssets::new();
+        let dir = assets.root.join("week7/images/erect/sniper");
+        fs::create_dir_all(&dir).expect("create animate prop dir");
+        fs::write(
+            dir.join("spritemap1.png"),
+            encode_png_rgba(3, 2, &[0u8; 3 * 2 * 4]).expect("encode spritemap png"),
+        )
+        .expect("write spritemap png");
+        assert_eq!(
+            stage_prop_image_size(
+                &assets.root,
+                "erect/sniper",
+                Some("animateatlas"),
+                Some("week7")
+            )
+            .unwrap(),
+            [3.0, 2.0]
+        );
+        assert!(
+            stage_prop_image_size(&assets.root, "erect/bg", None, Some("week7")).is_err(),
+            "plain props still require a real PNG"
+        );
+    }
+
+    #[test]
+    fn packer_character_bounds_use_the_first_document_frame() {
+        let assets = TempAssets::new();
+        let dir = assets.root.join("shared/images/characters");
+        fs::create_dir_all(&dir).expect("create packer dir");
+        // BOM-prefixed shipped Packer-text sibling (`spirit.txt`); the first
+        // document frame supplies `[0, 0, width, height]`.
+        fs::write(
+            dir.join("spirit.txt"),
+            b"\xEF\xBB\xBFidle spirit_0 = 0 0 128 96\nidle spirit_1 = 128 0 64 48\n",
+        )
+        .expect("write packer text");
+        assert_eq!(
+            packer_bounds(&assets.root, "characters/spirit", Some("week6")).unwrap(),
+            [0.0, 0.0, 128.0, 96.0]
+        );
+        assert!(packer_bounds(&assets.root, "characters/missing", Some("week6")).is_err());
     }
 
     #[test]

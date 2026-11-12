@@ -27,6 +27,7 @@ use super::anim::{
     AnimationDef, DEFAULT_ANIMATION_FPS, DEFAULT_DANCE_EVERY, DEFAULT_SING_TIME_STEPS,
 };
 use super::choreography::{CanClip, Weekend1Props};
+use super::shaders::ShaderMaskPages;
 
 /// Upper bound for any single slice asset read, matching the M5 slice VFS
 /// read contract. The largest shipped page in the slice is a few MiB.
@@ -323,6 +324,11 @@ pub(crate) struct LoadedNote {
 /// Everything the scene builder and headless harness need.
 pub(crate) struct LoadedSlice {
     pub(crate) pages: Vec<PageImage>,
+    /// Base song id (`<song>` before a known `-variant` suffix). The 6G
+    /// rain stages select their per-song intensity range from it.
+    pub(crate) song_id: String,
+    /// `playData.stage`: selects the frozen per-sprite shader attachments.
+    pub(crate) stage_id: String,
     pub(crate) stage_zoom: f64,
     pub(crate) props: Vec<LoadedStageProp>,
     /// Player and opponent are always loaded. Girlfriend is omitted when the
@@ -353,6 +359,15 @@ pub(crate) struct LoadedSlice {
     /// Only the darnell family fills this; the scene's cutscene-local
     /// conductor consumes it.
     pub(crate) cutscene_changes: Option<Vec<oxide_audio::conductor::TimeChange>>,
+    /// Alternate-mask pages for the two DropShadow stages (M6-CONTRACT
+    /// §15.1). Empty for every other stage, so their page sets stay frozen.
+    pub(crate) shader_masks: ShaderMaskPages,
+    /// Whether Bad/Shit player hits render the scrolling HSV-desaturated note
+    /// overlay. Enabled by the interactive play loader and by the generalized
+    /// non-bopeebo fixture path; disabled only by the frozen bopeebo
+    /// render-diff loader whose scripted negative phase deliberately contains
+    /// Bad/Shit threshold hits.
+    pub(crate) note_desaturation: bool,
 }
 
 /// Observed character renderType dispatch (M6-CONTRACT §11.1).
@@ -393,22 +408,59 @@ fn resolve_render_type(
 }
 
 /// Loads and parses every bopeebo slice asset for `difficulty` (the frozen M5
-/// default path).
+/// default path) with the interactive note-desaturation overlay enabled.
 pub(crate) fn load_slice(assets_root: &Path, difficulty: &str) -> Result<LoadedSlice, RenderError> {
-    load_slice_for_song(assets_root, BOPEEBO_CHART_ID, difficulty)
+    load_slice_for_song_mode(assets_root, BOPEEBO_CHART_ID, difficulty, true)
+}
+
+/// The headless [`crate::render::SliceRenderer`] bopeebo path: same assets as
+/// [`load_slice`], but with the note-desaturation overlay disabled so the
+/// frozen frame fixtures stay byte-identical.
+pub(crate) fn load_slice_for_fixture(
+    assets_root: &Path,
+    difficulty: &str,
+) -> Result<LoadedSlice, RenderError> {
+    load_slice_for_song_mode(assets_root, BOPEEBO_CHART_ID, difficulty, false)
 }
 
 /// Builds the same scene surface for any `corpus.txt`-style chart id
 /// (`<song>`, `<song>-default`, or a known `<song>-<variation>`).
 ///
 /// This is the frozen render-fixture path: dialogue stays unloaded so the
-/// established bopeebo/school frame digests are byte-identical.
+/// established bopeebo/school/dialogue frame digests are byte-identical.
+/// `bopeebo` keeps the interactive note-desaturation overlay disabled because
+/// its scripted negative phase deliberately contains Bad/Shit threshold hits;
+/// every other render-diff family uses chart taps with only Sick hits, so the
+/// overlay stays empty there and their digests are unchanged. The play path
+/// ([`load_slice`]) also enables it.
 pub(crate) fn load_slice_for_song(
     assets_root: &Path,
     chart_id: &str,
     difficulty: &str,
 ) -> Result<LoadedSlice, RenderError> {
+    load_slice_for_song_mode(
+        assets_root,
+        chart_id,
+        difficulty,
+        fixture_note_desaturation(chart_id),
+    )
+}
+
+/// The generalized fixture overlay rule: only the bare `bopeebo` chart id keeps
+/// the Bad/Shit HSV note overlay disabled. Other families never emit Bad/Shit
+/// hits in the frozen replay, so enabling it leaves their digests untouched.
+fn fixture_note_desaturation(chart_id: &str) -> bool {
+    chart_id != "bopeebo"
+}
+
+fn load_slice_for_song_mode(
+    assets_root: &Path,
+    chart_id: &str,
+    difficulty: &str,
+    note_desaturation: bool,
+) -> Result<LoadedSlice, RenderError> {
     let (chart_path, metadata_path) = song_paths(chart_id)?;
+    let (song_id, _) = split_song_variant(chart_id);
     load_slice_from_paths(
         assets_root,
         &chart_path,
@@ -417,6 +469,8 @@ pub(crate) fn load_slice_for_song(
         None,
         weekend1_prop_pages(chart_id),
         darnell_cutscene_chart(chart_id),
+        note_desaturation,
+        song_id,
     )
 }
 
@@ -431,6 +485,7 @@ pub(crate) fn load_slice_for_song_with_dialogue(
 ) -> Result<LoadedSlice, RenderError> {
     let (chart_path, metadata_path) = song_paths(chart_id)?;
     let dialogue_id = dialogue_load_id(chart_id, true);
+    let (song_id, _) = split_song_variant(chart_id);
     load_slice_from_paths(
         assets_root,
         &chart_path,
@@ -439,6 +494,8 @@ pub(crate) fn load_slice_for_song_with_dialogue(
         dialogue_id,
         weekend1_prop_pages(chart_id),
         darnell_cutscene_chart(chart_id),
+        false,
+        song_id,
     )
 }
 
@@ -536,6 +593,12 @@ fn darnell_cutscene_chart(chart_id: &str) -> bool {
 /// frozen render-fixture path. `weekend1` selects the weekend-1 can/explosion
 /// pages (see [`weekend1_prop_pages`]); `darnell_cutscene` additionally loads
 /// the cutscene can sheet and the `darnellCanCutscene` conductor metadata.
+/// `note_desaturation` enables the interactive Bad/Shit note overlay; the
+/// frozen bopeebo fixture path passes `false` because its scripted negative
+/// phase contains Bad/Shit threshold hits. Every other generalized fixture
+/// family passes `true` (its chart taps emit only Sick hits, so the overlay
+/// stays empty and the frozen digests are unchanged).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn load_slice_from_paths(
     assets_root: &Path,
     chart_path: &str,
@@ -544,6 +607,8 @@ pub(crate) fn load_slice_from_paths(
     dialogue_id: Option<&str>,
     weekend1: bool,
     darnell_cutscene: bool,
+    note_desaturation: bool,
+    song_id: &str,
 ) -> Result<LoadedSlice, RenderError> {
     if difficulty.is_empty() {
         return Err(RenderError::UnknownDifficulty(difficulty.to_string()));
@@ -673,6 +738,7 @@ pub(crate) fn load_slice_from_paths(
         .girlfriend
         .clone()
         .filter(|name| !name.is_empty());
+    let has_girlfriend = girlfriend_id_name.is_some();
     let player_vocals = characters.player_vocals.clone().unwrap_or_default();
     let opponent_vocals = characters.opponent_vocals.clone().unwrap_or_default();
     let stage_name = play_data
@@ -806,9 +872,25 @@ pub(crate) fn load_slice_from_paths(
     } else {
         None
     };
+    // DropShadow alternate-mask pages (M6-CONTRACT §15.1) are appended after
+    // every existing page, so the frozen bopeebo/school/dialogue page indices
+    // stay byte-identical. Only the two shipped DropShadow stages load pages.
+    let shader_masks = load_shader_masks(&vfs, &mut pages, &stage_name)?;
+
+    // `tankmanBattlefieldErect.hxc`: when the girlfriend is added, the
+    // `tankBricks` prop is repositioned to (445, 774).
+    let mut props = props;
+    if stage_name == "tankmanBattlefieldErect"
+        && has_girlfriend
+        && let Some(prop) = props.iter_mut().find(|prop| prop.name == "tankBricks")
+    {
+        prop.position = (445.0, 774.0);
+    }
 
     Ok(LoadedSlice {
         pages: pages.pages,
+        song_id: song_id.to_string(),
+        stage_id: stage_name,
         stage_zoom,
         props,
         characters,
@@ -822,7 +904,74 @@ pub(crate) fn load_slice_from_paths(
         dialogue,
         weekend1_props,
         cutscene_changes,
+        shader_masks,
+        note_desaturation,
     })
+}
+
+/// Loads the alternate-mask pages of the two frozen DropShadow stages.
+///
+/// These are plain linear-filtered PNGs (the native mask sheets are not
+/// pixel-style). Every other stage returns the empty set and appends no page.
+fn load_shader_masks(
+    vfs: &Vfs,
+    pages: &mut PageStore,
+    stage_id: &str,
+) -> Result<ShaderMaskPages, RenderError> {
+    let mut masks = ShaderMaskPages::default();
+    match stage_id {
+        "tankmanBattlefieldErect" => {
+            masks.tankman_gf = Some(load_mask_page(
+                vfs,
+                pages,
+                "week7/images/erect/masks/gfTankmen_mask.png",
+            )?);
+            masks.tankman_nene = Some(load_mask_page(
+                vfs,
+                pages,
+                "week7/images/erect/masks/neneTankmen_mask.png",
+            )?);
+            masks.tankman_captain_bloody = Some(load_mask_page(
+                vfs,
+                pages,
+                "week7/images/erect/masks/tankmanCaptainBloody_mask.png",
+            )?);
+        }
+        "schoolErect" => {
+            masks.school_bf = Some(load_mask_page(
+                vfs,
+                pages,
+                "week6/images/weeb/erect/masks/bfPixel_mask.png",
+            )?);
+            masks.school_pico = Some(load_mask_page(
+                vfs,
+                pages,
+                "week6/images/weeb/erect/masks/picoPixel_mask.png",
+            )?);
+            masks.school_gf = Some(load_mask_page(
+                vfs,
+                pages,
+                "week6/images/weeb/erect/masks/gfPixel_mask.png",
+            )?);
+            masks.school_nene = Some(load_mask_page(
+                vfs,
+                pages,
+                "week6/images/weeb/erect/masks/nenePixel_mask.png",
+            )?);
+            masks.school_senpai = Some(load_mask_page(
+                vfs,
+                pages,
+                "week6/images/weeb/erect/masks/senpai_mask.png",
+            )?);
+        }
+        _ => {}
+    }
+    Ok(masks)
+}
+
+/// One linear-filtered mask page through the shared page store.
+fn load_mask_page(vfs: &Vfs, pages: &mut PageStore, path: &str) -> Result<usize, RenderError> {
+    pages.load_png_file(vfs, path, false).map(|(page, _)| page)
 }
 
 fn read_data_document(vfs: &Vfs, path: &str) -> Result<oxide_data::ParsedDocument, RenderError> {
@@ -2328,6 +2477,13 @@ mod tests {
         assert!(!resolved_flip_x(Role::Girlfriend, None));
         assert!(resolved_flip_x(Role::Opponent, Some(true)));
         assert!(resolved_flip_x(Role::Girlfriend, Some(true)));
+    }
+
+    #[test]
+    fn generalized_fixture_note_desaturation_excludes_only_bopeebo() {
+        assert!(!fixture_note_desaturation("bopeebo"));
+        assert!(fixture_note_desaturation("senpai"));
+        assert!(fixture_note_desaturation("spaghetti-default"));
     }
 
     #[test]

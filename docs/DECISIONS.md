@@ -997,3 +997,44 @@ fail-closed (no auto-repair).
   The gate also fails closed on non-distinct corpus inventories (duplicate
   chart-id lines or (id, difficulty) plans) so count-preserving drift cannot
   produce a false green.
+
+## 2026-11-11 — 6G: WGSL gameplay shader pipeline + 6th ADR-0020 fixture establishment (human-approved)
+
+- **Behavior preserved:** the six shipped gameplay shader families frozen in
+  `docs/M6-CONTRACT.md` §15 (`AdjustColorShader`, `DropShadowShader` +
+  `useAltMask`/`EnableMask`, note `HSVShader`, `WiggleEffectRuntime`,
+  `RuntimeRainShader` in screen and sprite modes, and `SserafimShader` +
+  `sserafimDark`/`sserafimLights`/`sserafimPulseLights`/`sserafimCover`).
+  Dead native shaders (`MultiplyShader`, `WaveShader`, `PuddleShader`, rain
+  puddle/light blocks) are omitted; M7 UI shaders (`GaussianBlur`, `Mosaic`,
+  `LeftMask`, `Stroke`, `AngleMask`, `ColorSwap`) stay deferred to M7.
+- **Simpler option / selected approach:** instead of a runtime shader-registry
+  or multiple `Material2d` plugins, plain layers stay on Bevy's `ColorMaterial`
+  (preserving byte-identical `bopeebo`, `school`, and `dialogue` digests) and
+  shader-active layers bind a single private `LayerShaderMaterial` backed by
+  one embedded WGSL fragment (`layer_shader.wgsl`, registered synchronously via
+  a fixed asset UUID). Screen-mode rain renders stage/character layers (`0..rain_idx`)
+  on `RenderLayers::layer(1)` through an offscreen `Camera { order: -1 }`
+  `game_target` image, then composites the rain post quad plus unfiltered
+  strumline/HUD/dialogue/cutscene layers on `RenderLayers::layer(0)`. Non-rain
+  stages spawn no extra camera or target.
+- **Tradeoffs & model assumptions (`[D]`):** (a) `rain_duration_ms` uses the
+  deterministic chart last-note end `max(note.time + note.sustain_ms).max(1.0)`
+  because the scene renderer does not decode audio streams; (b) on game over,
+  screen-rain sets `u_intensity = 0.0` (an identity pass over `game_target` so
+  the offscreen stage stays visible without mutating `RenderLayers`); (c)
+  `fixture_note_desaturation` is disabled only for the legacy `bopeebo` fixture
+  entry point (whose scripted negative phase injects `Bad`/`Shit` hits) and
+  enabled for `PlaySession` and all non-bopeebo songs; (d) animate-atlas
+  `DropShadow` binds per page layer (`uFrameBounds = [0, 0, 1, 1]`) rather
+  than an intermediate per-character render texture.
+- **ADR-0020 6th establishment (human-approved 2026-11-11):** extended
+  `tests/fixtures/render-slice/_manifest.json` (`render-slice-2`, `llvmpipe`)
+  from 3 to 7 families by adding `philly_streets_erect` (`darnell-erect`
+  `erect`), `school_evil` (`thorns` `normal`), `tankman_erect` (`stress-pico`
+  `hard`, with extra samples `[61900, 61982, 62232]` pinning `EnableMask`),
+  and `sserafim` (`spaghetti` `hard`, with extra samples `[37800, 39000, 47500]`
+  pinning `sserafimDark`/`PulseLights`/`Lights`; `39000` refreshed after the
+  8-digit `0xAARRGGBB` `parse_sserafim_color` review fix). Two-run SHA-256
+  equality asserted at capture; `bopeebo`, `school`, and `dialogue` digests
+  remain byte-identical. Engine fixtures on `llvmpipe`, NOT native pixel parity.

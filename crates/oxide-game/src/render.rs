@@ -30,6 +30,7 @@ pub(crate) mod harness;
 pub(crate) mod hud;
 pub(crate) mod load;
 pub(crate) mod scene;
+pub(crate) mod shaders;
 
 use std::path::Path;
 
@@ -183,7 +184,7 @@ impl SliceRenderer {
         difficulty: &str,
         policy: AdapterPolicy,
     ) -> Result<SliceRenderer, RenderError> {
-        let loaded = load::load_slice(assets_root, difficulty)?;
+        let loaded = load::load_slice_for_fixture(assets_root, difficulty)?;
         Self::from_loaded(loaded, policy)
     }
 
@@ -252,5 +253,314 @@ impl SliceRenderer {
     pub fn frame(&mut self) -> Result<Vec<u8>, RenderError> {
         let layers = self.scene.draw()?;
         self.harness.render(&layers, self.scene.layer_specs())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn assets_root() -> PathBuf {
+        std::env::var_os("OXIDE_ASSETS_ROOT")
+            .map(PathBuf::from)
+            .expect("OXIDE_ASSETS_ROOT must point at the shipped assets directory")
+    }
+
+    /// Engine-level check (NOT a frozen fixture): a shader-active stage must
+    /// compile the 6G WGSL material pipeline and render through it. The
+    /// schoolErect `senpai-pico` scene gives all three characters DropShadow
+    /// layers with alternate masks, exercising the uniform, base-texture and
+    /// mask bindings end-to-end on the pinned llvmpipe adapter.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6G shader pipeline"]
+    fn shader_active_stage_renders_through_the_material_pipeline() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "senpai-pico", "easy")
+            .unwrap_or_else(|error| panic!("build senpai-pico renderer: {error}"));
+        for tick in 0..=2u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("shader scene step {tick}: {error}"));
+        }
+        let frame = renderer.frame().expect("shader material pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(
+            non_black > 0,
+            "the shader-active stage must draw visible pixels"
+        );
+    }
+
+    /// Engine-level 6G sub-slice 2 check (NOT a frozen fixture): the
+    /// phillyStreetsErect screen-rain post layer must build the offscreen game
+    /// target + second camera, sample it through `rain.frag`, and composite a
+    /// visible frame on the pinned llvmpipe adapter. The main camera still
+    /// renders the unfiltered overlay/HUD above the rain pass.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6G screen-rain pass"]
+    fn screen_rain_stage_renders_through_the_offscreen_camera() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "darnell-erect", "erect")
+            .unwrap_or_else(|error| panic!("build darnell-erect renderer: {error}"));
+        for tick in 0..=2u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("screen-rain scene step {tick}: {error}"));
+        }
+        let frame = renderer.frame().expect("screen-rain pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(
+            non_black > 0,
+            "the rain-filtered stage must composite visible pixels"
+        );
+        // The rain tint biases the darkened phillyStreetsErect stage toward
+        // the grey-blue `0xA8ADB5` color; the exact pixels remain an
+        // llvmpipe engine fixture obligation, not native parity.
+        let bluish = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[2] > pixel[0] && pixel[2] > 8)
+            .count();
+        assert!(bluish > 0, "the rain color must be visible in the frame");
+    }
+
+    /// Engine-level 6G sub-slice 2 check: the schoolEvil wiggle stage must
+    /// compile and render through the displaced-UV material path.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6G wiggle shader"]
+    fn wiggle_stage_renders_through_the_material_pipeline() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "thorns-default", "normal")
+            .unwrap_or_else(|error| panic!("build thorns-default renderer: {error}"));
+        for tick in 0..=2u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("wiggle scene step {tick}: {error}"));
+        }
+        let frame = renderer.frame().expect("wiggle pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(
+            non_black > 0,
+            "the wiggle-active stage must draw visible pixels"
+        );
+    }
+
+    /// Engine-level 6G sub-slice 3 check (NOT a frozen fixture): the
+    /// sserafim stage must compile the `SserafimShader` material and step
+    /// across the Dark / PulseLights / Lights event tween hooks on the pinned
+    /// llvmpipe adapter.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6G sserafim shader"]
+    fn sserafim_stage_renders_through_the_event_tween_hooks() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "spaghetti-default", "easy")
+            .unwrap_or_else(|error| panic!("build spaghetti-default renderer: {error}"));
+        let event = |sim: u64, kind: &str, payload: serde_json::Value| TraceEvent::UnknownEvent {
+            schema: "3",
+            kind: "unknown_event",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event_kind: kind.to_string(),
+            value: Some(oxide_data::chart::SongEvent {
+                time: sim as f64,
+                event: kind.to_string(),
+                value: Some(payload),
+            }),
+        };
+        renderer
+            .step(
+                0,
+                &[event(
+                    0,
+                    "sserafimDark",
+                    serde_json::json!({ "amount": 0.8, "duration": 1.0 }),
+                )],
+                &[],
+            )
+            .unwrap_or_else(|error| panic!("sserafimDark step: {error}"));
+        renderer
+            .step(
+                1,
+                &[event(
+                    1,
+                    "sserafimPulseLights",
+                    serde_json::json!({
+                        "enabled": true,
+                        "colors": ["0xFF6D43FF"],
+                        "durations": [1.0],
+                        "intensities": [1.0],
+                    }),
+                )],
+                &[],
+            )
+            .unwrap_or_else(|error| panic!("sserafimPulseLights step: {error}"));
+        renderer
+            .step(
+                2,
+                &[event(
+                    2,
+                    "sserafimLights",
+                    serde_json::json!({ "amount": 0.5, "duration": 0.5 }),
+                )],
+                &[],
+            )
+            .unwrap_or_else(|error| panic!("sserafimLights step: {error}"));
+        for tick in 3..=600u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("sserafim scene step {tick}: {error}"));
+        }
+        let frame = renderer
+            .frame()
+            .expect("sserafim material pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(non_black > 0, "the sserafim stage must draw visible pixels");
+    }
+
+    /// Engine-level 6G sub-slice 2 check: the spookyMansionErect `bgTrees`
+    /// sprite-mode rain material must compile and render through the
+    /// sprite-space displacement path (its own page, no offscreen camera).
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6G sprite rain shader"]
+    fn sprite_rain_stage_renders_through_the_material_pipeline() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "spookeez-erect", "erect")
+            .unwrap_or_else(|error| panic!("build spookeez-erect renderer: {error}"));
+        for tick in 0..=2u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("sprite-rain scene step {tick}: {error}"));
+        }
+        let frame = renderer.frame().expect("sprite-rain pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(
+            non_black > 0,
+            "the sprite-rain stage must draw visible pixels"
+        );
+    }
+
+    /// Engine-level 6G sub-slice 3 check (NOT a frozen fixture): the
+    /// generalized non-bopeebo fixture path enables the Bad/Shit HSV note
+    /// overlay, so a Bad hit on a visible player note must feed a non-empty
+    /// `LayerShader::Hsv` layer through the kind-2 WGSL branch on the pinned
+    /// llvmpipe adapter. The same frame rendered with that layer cleared must
+    /// differ, proving the material branch contributes to the output.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the 6G HSV note shader"]
+    fn hsv_desaturated_note_layer_renders_through_the_material_pipeline() {
+        let root = assets_root();
+        let loaded = load::load_slice_for_song(&root, "senpai", "easy")
+            .unwrap_or_else(|error| panic!("load senpai render fixture: {error}"));
+        assert!(
+            loaded.note_desaturation,
+            "the generalized non-bopeebo fixture path must enable the HSV overlay"
+        );
+        let note = loaded
+            .notes
+            .iter()
+            .filter(|note| !note.opponent && note.note_id == Some(0))
+            .min_by(|left, right| left.time.total_cmp(&right.time))
+            .expect("senpai chart has a player note");
+        let hit_tick = note.time.ceil() as u64;
+        let direction = note.direction as i64;
+
+        let (mut scene, pages) = scene::Scene::new(loaded).expect("scene builds");
+        let hsv_layer = scene
+            .layer_specs()
+            .iter()
+            .position(|spec| matches!(spec.shader, shaders::LayerShader::Hsv(_)))
+            .expect("the scene owns the Hsv note layer");
+        for tick in 0..hit_tick {
+            scene
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("scene step {tick}: {error}"));
+        }
+        let hit = TraceEvent::Hit {
+            schema: "3",
+            kind: "hit",
+            sim: hit_tick,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: direction,
+            judgement: "bad",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            note_kind: None,
+            score_delta: 0,
+            health_before: 1.0,
+            health_after: 1.0,
+            combo_before: 0,
+            combo_after: 0,
+            combo_max: 0,
+            tallies: Default::default(),
+        };
+        scene
+            .step(hit_tick, &[hit], &[])
+            .unwrap_or_else(|error| panic!("bad hit step: {error}"));
+        let mut harness =
+            harness::Harness::new(pages, scene.layer_specs()).expect("llvmpipe harness builds");
+        let layers = scene.draw().expect("scene draws");
+        assert_eq!(
+            layers[hsv_layer].len(),
+            1,
+            "the visible Bad hit must own one HSV note quad"
+        );
+        let with_hsv = harness
+            .render(&layers, scene.layer_specs())
+            .expect("HSV material pipeline renders");
+        assert_eq!(with_hsv.len(), harness::FRAME_BYTES, "frame byte length");
+        let mut identity_specs = scene.layer_specs().to_vec();
+        identity_specs[hsv_layer].shader =
+            shaders::LayerShader::Hsv(shaders::Hsv::new(1.0, 1.0, 1.0));
+        let with_identity_hsv = harness
+            .render(&layers, &identity_specs)
+            .expect("identity HSV material pipeline renders");
+        assert_ne!(
+            with_hsv, with_identity_hsv,
+            "the kind-2 Hsv saturation=0.2 WGSL transform must differ from identity saturation=1.0"
+        );
+        let mut without_hsv = layers;
+        without_hsv[hsv_layer].clear();
+        let without = harness
+            .render(&without_hsv, scene.layer_specs())
+            .expect("plain note pipeline renders");
+        assert_ne!(
+            with_hsv, without,
+            "the kind-2 Hsv WGSL branch must change the rendered frame"
+        );
     }
 }

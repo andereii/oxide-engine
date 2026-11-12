@@ -13,16 +13,17 @@ use super::anim::CharacterScheduler;
 use super::dialogue::{ConversationRuntime, SCREEN_PROJECTION};
 use super::geometry::{
     self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, BopConfig, Camera, DEFAULT_HUD_CAMERA_ZOOM,
-    GAME_HEIGHT, HALF_HEIGHT, HALF_WIDTH, OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X, STRUMLINE_Y,
-    SUSTAIN_CAP_BOTTOM_CLIP, SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP, TICK_SECONDS, Vec2,
-    hold_column_uv_for, hold_columns, note_top_left, note_y_offset, receptor_top_left,
-    render_distance_ms, sustain_height, sustain_held_top, sustain_top_left_x,
+    GAME_HEIGHT, GAME_WIDTH, HALF_HEIGHT, HALF_WIDTH, OPPONENT_STRUMLINE_X, PLAYER_STRUMLINE_X,
+    STRUMLINE_Y, SUSTAIN_CAP_BOTTOM_CLIP, SUSTAIN_HELD_HIDE_REMAINING, SUSTAIN_HIDE_CLIP,
+    TICK_SECONDS, Vec2, hold_column_uv_for, hold_columns, note_top_left, note_y_offset,
+    receptor_top_left, render_distance_ms, sustain_height, sustain_held_top, sustain_top_left_x,
 };
 use super::hud::{HudLayers, HudState, LoadedHud};
 use super::load::{
     LoadedCharacter, LoadedNote, LoadedNoteStyle, LoadedSlice, LoadedStageProp, PageImage,
     PropVisual, Role, Sheet, SpriteFrame,
 };
+use super::shaders::{Hsv, LayerShader, RainDriver};
 use crate::eases::{EaseFn, resolve_ease};
 use crate::slice::{InputEvent, TraceEvent};
 
@@ -43,11 +44,23 @@ pub(crate) struct Quad {
 
 /// Material description of one draw layer. Layers are created once at build;
 /// `page` is an index into the loaded image pages, `color` is the material
-/// tint (the strumline background uses an untextured black tint).
+/// tint (the strumline background uses an untextured black tint) and `shader`
+/// selects the per-sprite gameplay shader (`docs/M6-CONTRACT.md` §15).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LayerSpec {
     pub(crate) page: Option<usize>,
     pub(crate) color: [f32; 4],
+    pub(crate) shader: LayerShader,
+}
+
+impl LayerSpec {
+    pub(crate) fn plain(page: Option<usize>, color: [f32; 4]) -> Self {
+        Self {
+            page,
+            color,
+            shader: LayerShader::None,
+        }
+    }
 }
 
 /// One sorted stage-group member plus the draw layers it may write.
@@ -144,6 +157,35 @@ impl CharacterRig {
             }
         }
         pages
+    }
+
+    /// Current animation-frame normalized UV bounds for the DropShadow
+    /// `uFrameBounds` uniform: the Sparrow/Packer frame rect over the page
+    /// size; animate-atlas frames cover the whole page. The loader carries no
+    /// per-frame rotation, so `angleOffset` remains 0.0.
+    fn drop_shadow_frame_bounds(&self) -> [f64; 4] {
+        let Some((animation, frame_value)) = self.scheduler.current_visual_frame() else {
+            return [0.0, 0.0, 1.0, 1.0];
+        };
+        let Some(sheet) = self.sheets.get(animation.sheet) else {
+            return [0.0, 0.0, 1.0, 1.0];
+        };
+        match sheet {
+            Sheet::Atlas(_) => [0.0, 0.0, 1.0, 1.0],
+            Sheet::Sprite(sheet) => sheet
+                .frame(frame_value)
+                .map(|frame| {
+                    let [x, y, width, height] = frame.rect;
+                    let page = sheet.page_size;
+                    [
+                        x as f64 / page[0],
+                        y as f64 / page[1],
+                        (x + width) as f64 / page[0],
+                        (y + height) as f64 / page[1],
+                    ]
+                })
+                .unwrap_or([0.0, 0.0, 1.0, 1.0]),
+        }
     }
 
     fn draw(&self, camera: &Camera) -> Result<Vec<(Option<usize>, Quad)>, RenderError> {
@@ -286,6 +328,36 @@ impl PropRig {
             PropVisual::Atlas { sheet, .. } => vec![Some(sheet.page)],
         }
     }
+
+    /// Current animation-frame normalized UV bounds for the sprite-mode rain
+    /// `uFrameBounds` uniform (`spookyMansionErect` `bgTrees`). Static/solid
+    /// props cover their whole page; animate-atlas frames cover the whole
+    /// page (`RuntimeRainShader.updateFrameInfo`).
+    fn rain_frame_bounds(&self) -> [f64; 4] {
+        let frame_value = self
+            .scheduler
+            .as_ref()
+            .and_then(CharacterScheduler::current_visual_frame)
+            .map_or(0, |(_, frame)| frame);
+        match &self.prop.visual {
+            PropVisual::Sprite { sheet, .. } => sheet
+                .frame(frame_value)
+                .map(|frame| {
+                    let [x, y, width, height] = frame.rect;
+                    let page = sheet.page_size;
+                    [
+                        x as f64 / page[0],
+                        y as f64 / page[1],
+                        (x + width) as f64 / page[0],
+                        (y + height) as f64 / page[1],
+                    ]
+                })
+                .unwrap_or([0.0, 0.0, 1.0, 1.0]),
+            PropVisual::Atlas { .. } | PropVisual::Static { .. } | PropVisual::Solid { .. } => {
+                [0.0, 0.0, 1.0, 1.0]
+            }
+        }
+    }
 }
 
 /// Per-layer material tint for one stage prop. Solid colors carry their own
@@ -306,6 +378,9 @@ struct NoteState {
     note: LoadedNote,
     hit: bool,
     missed: bool,
+    /// Bad/Shit player hit: the native note stays visible with alpha 0.5 and
+    /// the HSV desaturation shader while it scrolls offscreen.
+    desaturated: bool,
 }
 
 struct PlayerHold {
@@ -617,6 +692,10 @@ impl LineState {
 
 /// Private scene state consumed by the headless harness.
 pub(crate) struct Scene {
+    /// `playData.stage`; selects the frozen per-sprite shader attachments.
+    stage_id: String,
+    /// Interactive Bad/Shit note overlay switch (see [`LoadedSlice`]).
+    note_desaturation: bool,
     camera: Camera,
     conductor: Conductor,
     props: Vec<PropRig>,
@@ -625,6 +704,8 @@ pub(crate) struct Scene {
     layer_specs: Vec<LayerSpec>,
     /// First overlay layer (background, receptors, holds, notes).
     overlay_start: usize,
+    /// HSV-desaturated Bad/Shit player-note layer.
+    desaturated_layer: usize,
     note_style: LoadedNoteStyle,
     notes: Vec<NoteState>,
     player_note_indices: Vec<usize>,
@@ -667,6 +748,28 @@ pub(crate) struct Scene {
     /// The native `darkenStageProps`/fade-back tint pass over the eligible
     /// prop layer colors (`None` until a darken timer fires).
     prop_tint: Option<PropTint>,
+    /// Screen-mode `RuntimeRainShader` post layer (`phillyStreets` family,
+    /// M6-CONTRACT §15.2.2).
+    rain: Option<RainRuntime>,
+    /// Index of the screen-rain post layer (inserted right before
+    /// [`Self::overlay_start`]).
+    rain_post_layer: Option<usize>,
+    /// `sserafim` stage `SserafimShader` tween/beat state (`None` on every
+    /// other stage).
+    sserafim: Option<SserafimRuntime>,
+}
+
+/// Per-stage screen-rain runtime state. The shader uniforms live on the
+/// [`LayerSpec`]; this carries the song-position driver and the
+/// `phillyBlazin` note-hit multiplier.
+struct RainRuntime {
+    layer: usize,
+    driver: RainDriver,
+    /// Chart last note end (`.max(1.0)`); `None` keeps the no-music start
+    /// intensity for note-less synthetic streams.
+    duration_ms: Option<f64>,
+    /// `phillyBlazin` `rainTimeScale`, starts at 1.0.
+    time_scale: f64,
 }
 
 /// One active tint pass over the eligible prop layers
@@ -677,6 +780,196 @@ struct PropTint {
     /// prop).
     layers: Vec<usize>,
     started_ms: f64,
+}
+
+/// One in-flight `sserafim` uniform tween (native `FlxTween.tween`).
+#[derive(Debug, Clone, Copy)]
+struct SserafimTween {
+    from: f64,
+    to: f64,
+    start_ms: f64,
+    duration_ms: f64,
+    ease: EaseFn,
+}
+
+impl SserafimTween {
+    fn value_at(&self, now_ms: f64) -> f64 {
+        if now_ms - self.start_ms >= self.duration_ms {
+            self.to
+        } else if now_ms > self.start_ms {
+            let t = (now_ms - self.start_ms) / self.duration_ms;
+            self.from + (self.to - self.from) * (self.ease)(t)
+        } else {
+            self.from
+        }
+    }
+
+    fn finished(&self, now_ms: f64) -> bool {
+        now_ms - self.start_ms >= self.duration_ms
+    }
+}
+
+/// `sserafim` stage `SserafimShader` event/beat state (`sserafim.hxc:207-226,
+/// 413-505`). One runtime feeds every attached character/prop layer; the
+/// light/cover props are mutated directly through their layer colors.
+struct SserafimRuntime {
+    darken_amount: f64,
+    pulse_light_color: [f64; 3],
+    pulse_light_strength: f64,
+    /// `backLightWhite` alpha target (`amount * 0.7`).
+    pulse_white_strength: f64,
+    truck_light_strength: f64,
+    darken_tween: Option<SserafimTween>,
+    truck_tween: Option<SserafimTween>,
+    pulse_tween: Option<SserafimTween>,
+    pulse_white_tween: Option<SserafimTween>,
+    /// The backlight props are only owned after the first pulse beat; before
+    /// that their loaded colors stay untouched.
+    pulse_visible: bool,
+    /// The truck light props are only owned after the first Lights event.
+    truck_visible: bool,
+    lights_enabled: bool,
+    lights_colors: Vec<[f64; 3]>,
+    lights_durations: Vec<f64>,
+    lights_intensities: Vec<f64>,
+}
+
+impl SserafimRuntime {
+    fn new() -> Self {
+        Self {
+            darken_amount: 0.0,
+            pulse_light_color: [1.0, 1.0, 1.0],
+            pulse_light_strength: 0.0,
+            pulse_white_strength: 0.0,
+            truck_light_strength: 0.0,
+            darken_tween: None,
+            truck_tween: None,
+            pulse_tween: None,
+            pulse_white_tween: None,
+            pulse_visible: false,
+            truck_visible: false,
+            lights_enabled: false,
+            lights_colors: Vec::new(),
+            lights_durations: Vec::new(),
+            lights_intensities: Vec::new(),
+        }
+    }
+
+    /// Per-1-ms-tick tween advance (the native `FlxTween` global update).
+    fn advance(&mut self, now_ms: f64) {
+        if let Some(tween) = self.darken_tween {
+            self.darken_amount = tween.value_at(now_ms);
+            if tween.finished(now_ms) {
+                self.darken_tween = None;
+            }
+        }
+        if let Some(tween) = self.truck_tween {
+            self.truck_light_strength = tween.value_at(now_ms);
+            if tween.finished(now_ms) {
+                self.truck_light_strength = 0.0;
+                self.truck_tween = None;
+            }
+        }
+        if let Some(tween) = self.pulse_tween {
+            self.pulse_light_strength = tween.value_at(now_ms);
+            if tween.finished(now_ms) {
+                self.pulse_light_strength = 0.0;
+                self.pulse_tween = None;
+            }
+        }
+        if let Some(tween) = self.pulse_white_tween {
+            self.pulse_white_strength = tween.value_at(now_ms);
+            if tween.finished(now_ms) {
+                self.pulse_white_strength = 0.0;
+                self.pulse_white_tween = None;
+            }
+        }
+    }
+
+    /// `sserafimDark`: cancel the in-flight tween and tween `darkenAmount`
+    /// from its current value with `sineInOut`; non-positive durations snap.
+    fn set_dark(&mut self, now_ms: f64, amount: f64, duration_s: f64) {
+        self.darken_tween = None;
+        if duration_s <= 0.0 {
+            self.darken_amount = amount;
+            return;
+        }
+        self.darken_tween = Some(SserafimTween {
+            from: self.darken_amount,
+            to: amount,
+            start_ms: now_ms,
+            duration_ms: duration_s * 1000.0,
+            ease: resolve_ease("sineInOut")
+                .map(|(_, function)| function)
+                .unwrap_or(crate::eases::linear_ease),
+        });
+    }
+
+    /// `sserafimLights`/`flashTruckLights`: set the strength immediately and
+    /// tween it back to zero with `cubeInOut`.
+    fn flash_truck_lights(&mut self, now_ms: f64, amount: f64, duration_s: f64) {
+        // A new Lights event cancels the in-flight truck tween, then starts
+        // from the freshly assigned amount (native `flashTruckLights`).
+        self.truck_light_strength = amount;
+        self.truck_visible = true;
+        self.truck_tween = Some(SserafimTween {
+            from: amount,
+            to: 0.0,
+            start_ms: now_ms,
+            duration_ms: duration_s * 1000.0,
+            ease: resolve_ease("cubeInOut")
+                .map(|(_, function)| function)
+                .unwrap_or(crate::eases::linear_ease),
+        });
+    }
+
+    /// `onBeatHit`/`flashBackLight`: pick the per-beat color/duration/
+    /// intensity and restart the pulse tween from `amount * 0.8` (the white
+    /// backlight starts at `amount * 0.7`), both to zero with `cubeInOut`.
+    fn start_pulse(&mut self, now_ms: f64, color: [f64; 3], amount: f64, duration_s: f64) {
+        let ease = resolve_ease("cubeInOut")
+            .map(|(_, function)| function)
+            .unwrap_or(crate::eases::linear_ease);
+        let duration_ms = duration_s * 1000.0;
+        self.pulse_light_color = color;
+        self.pulse_light_strength = amount * 0.8;
+        self.pulse_white_strength = amount * 0.7;
+        self.pulse_visible = true;
+        self.pulse_tween = Some(SserafimTween {
+            from: self.pulse_light_strength,
+            to: 0.0,
+            start_ms: now_ms,
+            duration_ms,
+            ease,
+        });
+        self.pulse_white_tween = Some(SserafimTween {
+            from: self.pulse_white_strength,
+            to: 0.0,
+            start_ms: now_ms,
+            duration_ms,
+            ease,
+        });
+    }
+
+    /// The per-beat array selection: each vector is indexed with the beat
+    /// modulo its own length (`sserafim.hxc:498-505`).
+    fn beat_selection(&self, beat: i32) -> Option<([f64; 3], f64, f64)> {
+        if !self.lights_enabled {
+            return None;
+        }
+        let beat = usize::try_from(beat).ok()?;
+        if self.lights_colors.is_empty()
+            || self.lights_durations.is_empty()
+            || self.lights_intensities.is_empty()
+        {
+            return None;
+        }
+        Some((
+            self.lights_colors[beat % self.lights_colors.len()],
+            self.lights_durations[beat % self.lights_durations.len()],
+            self.lights_intensities[beat % self.lights_intensities.len()],
+        ))
+    }
 }
 
 /// One scene-owned HUD: loaded assets + runtime state + layer registry.
@@ -692,6 +985,8 @@ impl Scene {
     pub(crate) fn new(loaded: LoadedSlice) -> Result<(Self, Vec<PageImage>), RenderError> {
         let LoadedSlice {
             mut pages,
+            song_id,
+            stage_id,
             stage_zoom,
             props,
             characters: loaded_characters,
@@ -706,6 +1001,8 @@ impl Scene {
             dialogue,
             weekend1_props,
             cutscene_changes,
+            shader_masks,
+            note_desaturation,
         } = loaded;
         // The HUD state is built before the character rigs consume the loaded
         // characters (it needs their normalized `healthIcon` data).
@@ -763,62 +1060,117 @@ impl Scene {
         let mut layer_specs = Vec::new();
         let mut stage_items = Vec::with_capacity(sorted.len());
         for (_, _, kind) in sorted {
-            let (pages, color) = match kind {
-                StageItemKind::Prop(index) => {
-                    (props[index].pages(), prop_layer_color(&props[index].prop))
-                }
-                StageItemKind::Character(index) => {
-                    (characters[index].pages(), [1.0, 1.0, 1.0, 1.0])
-                }
+            let (pages, color, shader) = match kind {
+                StageItemKind::Prop(index) => (
+                    props[index].pages(),
+                    prop_layer_color(&props[index].prop),
+                    super::shaders::prop_shader(&stage_id, &props[index].prop.name),
+                ),
+                StageItemKind::Character(index) => (
+                    characters[index].pages(),
+                    [1.0, 1.0, 1.0, 1.0],
+                    super::shaders::character_shader(
+                        &stage_id,
+                        characters[index].role,
+                        &characters[index].id,
+                        &shader_masks,
+                    ),
+                ),
                 StageItemKind::Weekend1Can => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.can_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
                 }
                 StageItemKind::Weekend1CanShotProp => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.can_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
                 }
                 StageItemKind::Weekend1BigExplosion => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.big_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
                 }
                 StageItemKind::Weekend1EzExplosion => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.ez_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0])
+                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
                 }
             };
             let mut layers = Vec::with_capacity(pages.len());
             for page in pages {
                 layers.push((page, layer_specs.len()));
-                layer_specs.push(LayerSpec { page, color });
+                layer_specs.push(LayerSpec {
+                    page,
+                    color,
+                    shader,
+                });
             }
             stage_items.push(StageItem { kind, layers });
         }
 
+        // M6-CONTRACT §15.2.2: the screen-mode rain is a full-screen post pass
+        // over the stage/character layers only. It sits immediately before the
+        // first overlay layer so the strumline/notes/HUD/dialogue layers draw
+        // above it without being filtered (the native `FlxG.camera.filters`
+        // applies before HUD compositing).
+        let screen_rain = super::shaders::screen_rain(&stage_id, &song_id);
+        // The chart's last note end drives the per-tick intensity remap
+        // (`max(note.time + note.sustain_ms).max(1.0)`); a note-less stream
+        // keeps the native no-music reset value.
+        let rain_duration_ms = notes
+            .iter()
+            .map(|note| note.time + note.sustain_ms)
+            .fold(0.0, f64::max);
+        let rain_duration = (!notes.is_empty()).then(|| rain_duration_ms.max(1.0));
+        let rain_post_layer = screen_rain.as_ref().map(|spec| {
+            let layer = layer_specs.len();
+            layer_specs.push(LayerSpec {
+                page: None,
+                color: [1.0, 1.0, 1.0, 1.0],
+                shader: LayerShader::Rain(spec.rain),
+            });
+            layer
+        });
+        let rain = rain_post_layer
+            .zip(screen_rain)
+            .map(|(layer, spec)| RainRuntime {
+                layer,
+                driver: spec.driver,
+                duration_ms: rain_duration,
+                time_scale: 1.0,
+            });
+
         let overlay_start = layer_specs.len();
-        layer_specs.push(LayerSpec {
-            page: None,
-            color: [0.0, 0.0, 0.0, BACKGROUND_ALPHA as f32],
-        });
-        layer_specs.push(LayerSpec {
-            page: Some(note_style.receptor_page),
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-        layer_specs.push(LayerSpec {
-            page: Some(note_style.hold_page),
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
+        layer_specs.push(LayerSpec::plain(
+            None,
+            [0.0, 0.0, 0.0, BACKGROUND_ALPHA as f32],
+        ));
+        layer_specs.push(LayerSpec::plain(
+            Some(note_style.receptor_page),
+            [1.0, 1.0, 1.0, 1.0],
+        ));
+        layer_specs.push(LayerSpec::plain(
+            Some(note_style.hold_page),
+            [1.0, 1.0, 1.0, 1.0],
+        ));
+        layer_specs.push(LayerSpec::plain(
+            Some(note_style.note_frames[0].page),
+            [1.0, 1.0, 1.0, 1.0],
+        ));
+        // Bad/Shit player hits keep the note visible with alpha 0.5 and the
+        // HSV desaturation factors (hsv.frag: hue 1.0, sat 0.2, val 1.0).
+        // The layer is empty (and therefore hidden) for every Sick/Good-only
+        // replay, so the frozen bopeebo/school/dialogue digests are unchanged.
+        let desaturated_layer = layer_specs.len();
         layer_specs.push(LayerSpec {
             page: Some(note_style.note_frames[0].page),
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: [1.0, 1.0, 1.0, 0.5],
+            shader: LayerShader::Hsv(Hsv::new(1.0, 0.2, 1.0)),
         });
 
         // M6-CONTRACT §13: HUD layers are appended AFTER every stage/overlay
@@ -842,10 +1194,7 @@ impl Scene {
         // native overlay removal + camera fadeBlack fold into one surface).
         let cutscene_overlay_layer = cutscene_changes.as_ref().map(|_| {
             let layer = layer_specs.len();
-            layer_specs.push(LayerSpec {
-                page: None,
-                color: [0.0, 0.0, 0.0, 0.0],
-            });
+            layer_specs.push(LayerSpec::plain(None, [0.0, 0.0, 0.0, 0.0]));
             layer
         });
 
@@ -886,50 +1235,64 @@ impl Scene {
         let mut conductor = Conductor::new();
         conductor.map_time_changes(&conductor_changes);
 
-        Ok((
-            Self {
-                camera,
-                conductor,
-                props,
-                characters,
-                stage_items,
-                layer_specs,
-                overlay_start,
-                note_style,
-                notes: notes
-                    .into_iter()
-                    .map(|note| NoteState {
-                        note,
-                        hit: false,
-                        missed: false,
-                    })
-                    .collect(),
-                player_note_indices,
-                opponent_note_indices,
-                sim_ms: 0.0,
-                last_tick: None,
-                dead: false,
-                player_line: LineState::default(),
-                opponent_line: LineState::default(),
-                player_holds: [None, None, None, None],
-                opponent_holds: [None, None, None, None],
-                // Rowless streams keep the frozen M5 initialization; the only
-                // sanctioned change is the M6-CONTRACT §12.7 bop default
-                // (cameraZoomRateOffset 1 -> 0), which lives in `BopConfig`.
-                camera_events: CameraEventState::new(follow_focus, scroll_speed),
-                hud,
-                hud_start,
-                conversation,
-                conversation_start,
-                weekend1,
-                prop_tint: None,
-                cutscene: cutscene_changes
-                    .as_ref()
-                    .map(|changes| super::choreography::DarnellCutscene::new(changes.clone())),
-                cutscene_overlay_layer,
-            },
-            pages,
-        ))
+        // The Sserafim events/beat hooks only exist on the frozen stage id;
+        // every attached layer starts from the shader defaults.
+        let sserafim = (stage_id == "sserafim").then(SserafimRuntime::new);
+
+        let mut scene = Self {
+            stage_id,
+            note_desaturation,
+            camera,
+            conductor,
+            props,
+            characters,
+            stage_items,
+            layer_specs,
+            overlay_start,
+            desaturated_layer,
+            note_style,
+            notes: notes
+                .into_iter()
+                .map(|note| NoteState {
+                    note,
+                    hit: false,
+                    missed: false,
+                    desaturated: false,
+                })
+                .collect(),
+            player_note_indices,
+            opponent_note_indices,
+            sim_ms: 0.0,
+            last_tick: None,
+            dead: false,
+            player_line: LineState::default(),
+            opponent_line: LineState::default(),
+            player_holds: [None, None, None, None],
+            opponent_holds: [None, None, None, None],
+            // Rowless streams keep the frozen M5 initialization; the only
+            // sanctioned change is the M6-CONTRACT §12.7 bop default
+            // (cameraZoomRateOffset 1 -> 0), which lives in `BopConfig`.
+            camera_events: CameraEventState::new(follow_focus, scroll_speed),
+            hud,
+            hud_start,
+            conversation,
+            conversation_start,
+            weekend1,
+            prop_tint: None,
+            rain,
+            rain_post_layer,
+            sserafim,
+            cutscene: cutscene_changes
+                .as_ref()
+                .map(|changes| super::choreography::DarnellCutscene::new(changes.clone())),
+            cutscene_overlay_layer,
+        };
+        // Seed the animation-frame-dependent DropShadow uniforms and the
+        // sserafim attachment defaults before the first `frame()` call (the
+        // first step also refreshes them).
+        scene.sync_shader_state();
+        scene.sync_sserafim_state();
+        Ok((scene, pages))
     }
 
     pub(crate) fn layer_specs(&self) -> &[LayerSpec] {
@@ -1203,6 +1566,13 @@ impl Scene {
 
         self.last_tick = Some(sim_ms);
         self.sim_ms = sim_ms as f64;
+        // Native stage `onUpdate(elapsed)` runs before the input/note rows:
+        // wiggle/rain `uTime` (and the rain intensity remap) advance once per
+        // 1 ms tick (M6-CONTRACT §15.1 cadence). The sserafim event tweens
+        // advance on the same grid; the end-of-step sync copies them into the
+        // attached layer uniforms.
+        self.advance_sserafim_tweens();
+        self.advance_effect_time();
 
         // Native per-tick order (M6-CONTRACT §12.7): `super.update` advances
         // the follow/zoom/scroll tweens FIRST, then the conductor update runs
@@ -1229,27 +1599,34 @@ impl Scene {
         }
         let step_length_ms = self.conductor.step_length_ms();
         for dispatch in dispatches {
-            if let Dispatch::Step(step) = dispatch {
-                if self
-                    .camera
-                    .on_step(step, &self.camera_events.bop, self.camera_events.hud_zoom)
-                {
-                    // `camHUD.zoom += hudCameraZoomIntensity *
-                    // defaultHUDCameraZoom` (`PlayState.hx` L1858-1859).
-                    self.camera_events.hud_zoom +=
-                        self.camera_events.bop.hud_intensity * DEFAULT_HUD_CAMERA_ZOOM;
-                }
-                if let Some(hud) = &mut self.hud {
-                    hud.state.on_step(step, step_length_ms, self.sim_ms);
-                }
-                for character in &mut self.characters {
-                    character.scheduler.on_step(step);
-                }
-                for prop in &mut self.props {
-                    if let Some(scheduler) = &mut prop.scheduler {
-                        scheduler.on_step_forced(step);
+            match dispatch {
+                Dispatch::Step(step) => {
+                    if self.camera.on_step(
+                        step,
+                        &self.camera_events.bop,
+                        self.camera_events.hud_zoom,
+                    ) {
+                        // `camHUD.zoom += hudCameraZoomIntensity *
+                        // defaultHUDCameraZoom` (`PlayState.hx` L1858-1859).
+                        self.camera_events.hud_zoom +=
+                            self.camera_events.bop.hud_intensity * DEFAULT_HUD_CAMERA_ZOOM;
+                    }
+                    if let Some(hud) = &mut self.hud {
+                        hud.state.on_step(step, step_length_ms, self.sim_ms);
+                    }
+                    for character in &mut self.characters {
+                        character.scheduler.on_step(step);
+                    }
+                    for prop in &mut self.props {
+                        if let Some(scheduler) = &mut prop.scheduler {
+                            scheduler.on_step_forced(step);
+                        }
                     }
                 }
+                // Native stage `onBeatHit`: the only per-beat gameplay shader
+                // driver is `sserafimPulseLights` (M6-CONTRACT §15.1).
+                Dispatch::Beat(beat) => self.sserafim_on_beat(beat),
+                Dispatch::Measure(_) => {}
             }
         }
 
@@ -1358,6 +1735,9 @@ impl Scene {
                 scheduler.update(TICK_SECONDS, step_length_ms);
             }
         }
+        // Re-emit the frame/camera-dependent shader uniforms after the
+        // animation scheduler and camera advanced this tick (M6-CONTRACT
+        // §15.2.4).
         // The follow lerp runs only while the native camera target is set; a
         // follow tween disables it (`camera.target = null`,
         // `tweenCameraToFollowPoint`).
@@ -1365,6 +1745,8 @@ impl Scene {
             self.camera
                 .follow(self.camera_events.follow_focus, TICK_SECONDS);
         }
+        self.sync_shader_state();
+        self.sync_sserafim_state();
         Ok(())
     }
 
@@ -1650,7 +2032,410 @@ impl Scene {
             .value(if opponent { LINE_OPPONENT } else { LINE_PLAYER })
     }
 
+    /// The Flixel game-camera view bounds
+    /// (`RuntimePostEffectShader.updateViewInfo`): `[left, top, right,
+    /// bottom]` in world coordinates for the current scroll/zoom.
+    fn camera_bounds(&self) -> [f64; 4] {
+        let zoom = self.camera.zoom;
+        let inverse = 1.0 / zoom;
+        let scroll = self.camera.scroll;
+        [
+            scroll[0] + 0.5 * GAME_WIDTH * (1.0 - inverse),
+            scroll[1] + 0.5 * GAME_HEIGHT * (1.0 - inverse),
+            scroll[0] + 0.5 * GAME_WIDTH * (1.0 + inverse),
+            scroll[1] + 0.5 * GAME_HEIGHT * (1.0 + inverse),
+        ]
+    }
+
+    /// Advances the per-tick `WiggleEffectRuntime`/`RuntimeRainShader` clocks
+    /// (M6-CONTRACT §15.1): wiggle `uTime += TICK_SECONDS`, screen rain time
+    /// and intensity remap, and the `phillyBlazin` note-hit time scale.
+    fn advance_effect_time(&mut self) {
+        let Self {
+            layer_specs,
+            rain,
+            sim_ms,
+            dead,
+            ..
+        } = self;
+        for spec in layer_specs.iter_mut() {
+            match &mut spec.shader {
+                LayerShader::Wiggle(wiggle) => wiggle.time += TICK_SECONDS,
+                // The spookyMansionErect sprite-level rain advances its own
+                // clock; its frame/camera uniforms refresh in
+                // [`Self::sync_shader_state`].
+                LayerShader::Rain(rain) if rain.sprite_mode => rain.time += TICK_SECONDS,
+                _ => {}
+            }
+        }
+        if *dead {
+            // Native clears `FlxG.camera.filters` on game over
+            // (phillyStreets/phillyBlazin); the frozen scene early-returns
+            // after this point, so keep the post pass at its cleared
+            // intensity instead of re-remapping it every tick.
+            return;
+        }
+        let Some(runtime) = rain else {
+            return;
+        };
+        let Some(spec) = layer_specs.get_mut(runtime.layer) else {
+            return;
+        };
+        let LayerShader::Rain(rain) = &mut spec.shader else {
+            return;
+        };
+        match &mut runtime.driver {
+            RainDriver::Remap { start, end } => {
+                rain.time += TICK_SECONDS;
+                rain.intensity =
+                    super::shaders::rain_intensity(*sim_ms, runtime.duration_ms, *start, *end);
+            }
+            RainDriver::Blazin => {
+                rain.time += TICK_SECONDS * runtime.time_scale;
+                runtime.time_scale = super::shaders::blazin_time_scale_decay(runtime.time_scale);
+                rain.intensity = 0.5;
+            }
+        }
+    }
+
+    /// Refreshes the frame/camera-dependent shader uniforms after the
+    /// animation scheduler and camera ran: DropShadow `uFrameBounds` +
+    /// `angleOffset`, and the rain `uCameraBounds`/`uFrameBounds`.
+    fn sync_shader_state(&mut self) {
+        let camera_bounds = self.camera_bounds();
+        let Self {
+            stage_items,
+            characters,
+            props,
+            layer_specs,
+            rain_post_layer,
+            ..
+        } = self;
+        for item in stage_items.iter() {
+            let StageItemKind::Character(index) = item.kind else {
+                continue;
+            };
+            let bounds = characters[index].drop_shadow_frame_bounds();
+            for (_, layer) in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(*layer)
+                    && let LayerShader::DropShadow(shadow) = &mut spec.shader
+                {
+                    shadow.frame_bounds = bounds;
+                    shadow.angle_offset = 0.0;
+                }
+            }
+        }
+        for item in stage_items.iter() {
+            let StageItemKind::Prop(index) = item.kind else {
+                continue;
+            };
+            let frame_bounds = props[index].rain_frame_bounds();
+            for (_, layer) in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(*layer)
+                    && let LayerShader::Rain(rain) = &mut spec.shader
+                    && rain.sprite_mode
+                {
+                    rain.frame_bounds = frame_bounds;
+                    rain.camera_bounds = camera_bounds;
+                }
+            }
+        }
+        if let Some(layer) = *rain_post_layer
+            && let Some(spec) = layer_specs.get_mut(layer)
+            && let LayerShader::Rain(rain) = &mut spec.shader
+        {
+            rain.camera_bounds = camera_bounds;
+        }
+    }
+
+    /// Every layer index owned by the named stage prop (all pages).
+    fn prop_layers(&self, name: &str) -> Vec<usize> {
+        let mut layers = Vec::new();
+        for item in &self.stage_items {
+            let StageItemKind::Prop(index) = item.kind else {
+                continue;
+            };
+            if self.props[index].prop.name != name {
+                continue;
+            }
+            layers.extend(item.layers.iter().map(|(_, layer)| *layer));
+        }
+        layers
+    }
+
+    fn set_prop_alpha(&mut self, name: &str, alpha: f32) {
+        for layer in self.prop_layers(name) {
+            if let Some(spec) = self.layer_specs.get_mut(layer) {
+                spec.color[3] = alpha;
+            }
+        }
+    }
+
+    fn set_prop_color(&mut self, name: &str, color: [f32; 4]) {
+        for layer in self.prop_layers(name) {
+            if let Some(spec) = self.layer_specs.get_mut(layer) {
+                spec.color = color;
+            }
+        }
+    }
+
+    /// Advances the sserafim tweens on the same 1 ms grid as every other
+    /// scene tween (the native `FlxTween` global update runs before the
+    /// stage `onUpdate` uniform copy).
+    fn advance_sserafim_tweens(&mut self) {
+        if let Some(runtime) = &mut self.sserafim {
+            runtime.advance(self.sim_ms);
+        }
+    }
+
+    /// Per-beat `onBeatHit` for `sserafimPulseLights`
+    /// (`sserafim.hxc:498-505`).
+    fn sserafim_on_beat(&mut self, beat: i32) {
+        if self.stage_id != "sserafim" {
+            return;
+        }
+        let now_ms = self.sim_ms;
+        let Some(runtime) = &mut self.sserafim else {
+            return;
+        };
+        let Some((color, duration, intensity)) = runtime.beat_selection(beat) else {
+            return;
+        };
+        runtime.start_pulse(now_ms, color, intensity, duration);
+    }
+
+    /// Drives `sserafimDark` / `sserafimLights` / `sserafimPulseLights` /
+    /// `sserafimCover` (`docs/M6-CONTRACT.md` §15.1; only on the sserafim
+    /// stage). The raw payload is preserved on the trace row; malformed
+    /// fields fail closed.
+    fn apply_sserafim_event(
+        &mut self,
+        event_kind: &str,
+        value: Option<&oxide_data::chart::SongEvent>,
+    ) -> Result<(), RenderError> {
+        let Some(payload) = value.and_then(|event| event.value.as_ref()) else {
+            return Ok(());
+        };
+        let number = |field: &str| -> Result<f64, RenderError> {
+            payload
+                .get(field)
+                .and_then(|value| value.as_f64())
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| RenderError::Unsupported {
+                    detail: format!("{event_kind} event requires a finite {field:?} number"),
+                })
+        };
+        match event_kind {
+            "sserafimDark" => {
+                let amount = number("amount")?;
+                let duration = number("duration")?;
+                if let Some(runtime) = &mut self.sserafim {
+                    runtime.set_dark(self.sim_ms, amount, duration);
+                }
+            }
+            "sserafimLights" => {
+                let amount = number("amount")?;
+                let duration = number("duration")?;
+                if let Some(runtime) = &mut self.sserafim {
+                    runtime.flash_truck_lights(self.sim_ms, amount, duration);
+                }
+            }
+            "sserafimPulseLights" => {
+                let enabled = payload
+                    .get("enabled")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                // Validate any replacement arrays before mutating the runtime
+                // so a malformed row fails closed without partial state.
+                let arrays = (
+                    payload.get("colors").and_then(|value| value.as_array()),
+                    payload.get("durations").and_then(|value| value.as_array()),
+                    payload
+                        .get("intensities")
+                        .and_then(|value| value.as_array()),
+                );
+                let mut parsed = None;
+                if let (Some(colors), Some(durations), Some(intensities)) = arrays
+                    && !colors.is_empty()
+                    && !durations.is_empty()
+                    && !intensities.is_empty()
+                {
+                    let mut parsed_colors = Vec::with_capacity(colors.len());
+                    for color in colors {
+                        let Some(text) = color.as_str() else {
+                            return Err(RenderError::Unsupported {
+                                detail: format!("{event_kind} colors must be hex color strings"),
+                            });
+                        };
+                        let Some(color) = parse_sserafim_color(text) else {
+                            return Err(RenderError::Unsupported {
+                                detail: format!("{event_kind} has an invalid hex color {text:?}"),
+                            });
+                        };
+                        parsed_colors.push(color);
+                    }
+                    let mut parsed_durations = Vec::with_capacity(durations.len());
+                    for duration in durations {
+                        let Some(duration) = duration.as_f64().filter(|value| value.is_finite())
+                        else {
+                            return Err(RenderError::Unsupported {
+                                detail: format!("{event_kind} durations must be finite numbers"),
+                            });
+                        };
+                        parsed_durations.push(duration);
+                    }
+                    let mut parsed_intensities = Vec::with_capacity(intensities.len());
+                    for intensity in intensities {
+                        let Some(intensity) = intensity.as_f64().filter(|value| value.is_finite())
+                        else {
+                            return Err(RenderError::Unsupported {
+                                detail: format!("{event_kind} intensities must be finite numbers"),
+                            });
+                        };
+                        parsed_intensities.push(intensity);
+                    }
+                    parsed = Some((parsed_colors, parsed_durations, parsed_intensities));
+                }
+                if let Some(runtime) = &mut self.sserafim {
+                    runtime.lights_enabled = enabled;
+                    if let Some((colors, durations, intensities)) = parsed {
+                        runtime.lights_colors = colors;
+                        runtime.lights_durations = durations;
+                        runtime.lights_intensities = intensities;
+                    }
+                }
+            }
+            "sserafimCover" => {
+                let visible = payload
+                    .get("visible")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                self.set_prop_alpha("solidCover", if visible { 1.0 } else { 0.0 });
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Writes the current sserafim runtime into every attached
+    /// `LayerShader::Sserafim` layer plus the owned light/cover prop tints.
+    fn sync_sserafim_state(&mut self) {
+        let Some(runtime) = self.sserafim.as_ref() else {
+            return;
+        };
+        let darken_amount = runtime.darken_amount;
+        let pulse_light_color = runtime.pulse_light_color;
+        let pulse_light_strength = runtime.pulse_light_strength;
+        let pulse_white_strength = runtime.pulse_white_strength;
+        let truck_light_strength = runtime.truck_light_strength;
+        let pulse_visible = runtime.pulse_visible;
+        let truck_visible = runtime.truck_visible;
+        for spec in &mut self.layer_specs {
+            if let LayerShader::Sserafim(sserafim) = &mut spec.shader {
+                sserafim.darken_amount = darken_amount;
+                sserafim.pulse_light_color = pulse_light_color;
+                sserafim.pulse_light_strength = pulse_light_strength;
+                sserafim.truck_light_strength = truck_light_strength;
+            }
+        }
+        if truck_visible {
+            self.set_prop_alpha("truckLight1", truck_light_strength as f32);
+            self.set_prop_alpha("truckLight2", truck_light_strength as f32);
+        }
+        if pulse_visible {
+            self.set_prop_color(
+                "backLightColor",
+                [
+                    pulse_light_color[0] as f32,
+                    pulse_light_color[1] as f32,
+                    pulse_light_color[2] as f32,
+                    pulse_light_strength as f32,
+                ],
+            );
+            self.set_prop_alpha("backLightWhite", pulse_white_strength as f32);
+        }
+    }
+
+    /// `EnableMask` (the corpus' only occurrence is `stress-chart-pico`):
+    /// turns the tankman opponent's DropShadow alternate mask on
+    /// (`tankmanBattlefieldErect.hxc:97-100`). The event carries no fields.
+    fn enable_mask(&mut self) {
+        if self.stage_id != "tankmanBattlefieldErect" {
+            return;
+        }
+        let Some(opponent) = self
+            .characters
+            .iter()
+            .position(|character| character.role == Role::Opponent)
+        else {
+            return;
+        };
+        let Self {
+            stage_items,
+            layer_specs,
+            ..
+        } = self;
+        for item in stage_items.iter() {
+            let StageItemKind::Character(index) = item.kind else {
+                continue;
+            };
+            if index != opponent {
+                continue;
+            }
+            for (_, layer) in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(*layer)
+                    && let LayerShader::DropShadow(shadow) = &mut spec.shader
+                {
+                    shadow.use_alt_mask = true;
+                }
+            }
+        }
+    }
+
+    /// `tankmanBattlefieldErect.hxc:26-27`: `onGameOver` sets
+    /// `getBoyfriend().shader = null`. Only the player's own layers lose the
+    /// DropShadow material; the girlfriend and dad keep theirs.
+    fn clear_player_shader(&mut self) {
+        if self.stage_id != "tankmanBattlefieldErect" {
+            return;
+        }
+        let Some(player) = self
+            .characters
+            .iter()
+            .position(|character| character.role == Role::Player)
+        else {
+            return;
+        };
+        let Self {
+            stage_items,
+            layer_specs,
+            ..
+        } = self;
+        for item in stage_items.iter() {
+            if !matches!(item.kind, StageItemKind::Character(index) if index == player) {
+                continue;
+            }
+            for (_, layer) in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(*layer) {
+                    spec.shader = LayerShader::None;
+                }
+            }
+        }
+    }
+
     fn process_event(&mut self, event: &TraceEvent) -> Result<(), RenderError> {
+        // `phillyBlazin` `rainTimeScale += 0.7` on every player/opponent note
+        // hit (`phillyBlazin.hxc:139`, M6-CONTRACT §15.1). The same-tick
+        // `uTime` advance already ran at the start of the step, so the boost
+        // applies from the next tick.
+        if matches!(
+            event,
+            TraceEvent::Hit { .. } | TraceEvent::OpponentHit { .. }
+        ) && let Some(runtime) = &mut self.rain
+            && matches!(runtime.driver, RainDriver::Blazin)
+        {
+            runtime.time_scale += super::shaders::BLAZIN_HIT_BOOST;
+        }
         // The HUD mirrors the player health/score rows and consumes
         // SetHealthIcon at the native processSongEvents position.
         if let Some(hud) = &mut self.hud {
@@ -1674,10 +2459,18 @@ impl Scene {
             TraceEvent::Hit {
                 note_id,
                 note_direction,
+                judgement,
                 ..
             } => {
                 let index = self.player_note_index(*note_id, self.last_tick.unwrap_or(0))?;
                 self.notes[index].hit = true;
+                // Native `playerStrumline.hitNote(note, false)` on a
+                // combo-breaking Bad/Shit hit: alpha 0.5 + desaturation, and
+                // the note keeps scrolling instead of disappearing. The
+                // frozen render-diff loader disables this overlay because its
+                // scripted negative phase contains Bad/Shit threshold hits.
+                self.notes[index].desaturated =
+                    self.note_desaturation && matches!(*judgement, "bad" | "shit");
                 let direction = *note_direction;
                 if let Ok(direction) = usize::try_from(direction)
                     && direction < 4
@@ -1786,6 +2579,20 @@ impl Scene {
                 // bf death/fakeout animations are outside phase 2b. Freeze the
                 // scene at the substate boundary; the sim stops dispatching.
                 self.dead = true;
+                // Native `getBoyfriend().shader = null` on the tankman
+                // battlefield (tankmanBattlefieldErect.hxc:26-27).
+                self.clear_player_shader();
+                // Native `FlxG.camera.filters = []` (phillyStreets.hxc:498-503,
+                // phillyBlazin.hxc:49): clear the rain contribution. [D] The
+                // two-camera representation keeps the post layer present with
+                // zero intensity so the unfiltered stage remains visible
+                // through the offscreen game target.
+                if let Some(layer) = self.rain_post_layer
+                    && let Some(spec) = self.layer_specs.get_mut(layer)
+                    && let LayerShader::Rain(rain) = &mut spec.shader
+                {
+                    rain.intensity = 0.0;
+                }
             }
             TraceEvent::CameraFocus {
                 target_kind,
@@ -1844,8 +2651,18 @@ impl Scene {
             // Consumed by the shared HUD observer above (M6-CONTRACT §13).
             TraceEvent::HealthIcon { .. } => {}
             // EnableMask / sserafim / any no-handler kind: record-only
-            // (M6-CONTRACT §12.2).
-            TraceEvent::UnknownEvent { .. } => {}
+            // (M6-CONTRACT §12.2). EnableMask toggles the tankman opponent
+            // DropShadow alternate mask; the sserafim stage additionally owns
+            // its four event tween hooks (M6-CONTRACT §15.1).
+            TraceEvent::UnknownEvent {
+                event_kind, value, ..
+            } => {
+                if event_kind == "EnableMask" {
+                    self.enable_mask();
+                } else if self.stage_id == "sserafim" {
+                    self.apply_sserafim_event(event_kind, value.as_ref())?;
+                }
+            }
             // The 6E conversation slice consumes `dialogue:` trigger rows.
             // Unknown conversation ids and triggers without a loaded payload
             // fail closed instead of silently showing the wrong content.
@@ -2010,6 +2827,7 @@ impl Scene {
         layers[self.overlay_start + 1] = self.draw_receptors();
         layers[self.overlay_start + 2] = self.draw_holds();
         layers[self.overlay_start + 3] = self.draw_notes();
+        layers[self.desaturated_layer] = self.draw_desaturated_notes();
         if let Some(hud) = &self.hud {
             let hud_quads =
                 hud.state
@@ -2023,6 +2841,13 @@ impl Scene {
             for (index, quads) in conversation_quads.into_iter().enumerate() {
                 layers[self.conversation_start + index] = quads;
             }
+        }
+        // M6-CONTRACT §15.2.2: the screen-rain post layer samples the
+        // offscreen game target and covers the full 1280x720 surface. On game
+        // over the layer stays as an identity pass (intensity 0) so the
+        // unfiltered stage is still composited.
+        if let Some(layer) = self.rain_post_layer {
+            layers[layer] = vec![rain_post_quad()];
         }
         Ok(layers)
     }
@@ -2458,6 +3283,55 @@ impl Scene {
         }
         quads
     }
+
+    /// Bad/Shit player hits keep scrolling after the hit; the frozen HSV layer
+    /// renders only those notes while still on screen. Sick/Good hits leave
+    /// `desaturated` false, so the layer stays empty.
+    fn draw_desaturated_notes(&self) -> Vec<Quad> {
+        let mut quads = Vec::new();
+        let scale = self.note_style.note_scale;
+        let speed = self.scroll_speed_for(false);
+        for note in &self.notes {
+            if !note.hit || !note.desaturated || note.note.opponent {
+                continue;
+            }
+            let frame = self.note_style.note_frames[note.note.direction];
+            let width = frame.dest_size[0] as f64 * scale;
+            let height = frame.dest_size[1] as f64 * scale;
+            let top = note_top_left(
+                PLAYER_STRUMLINE_X,
+                note.note.direction,
+                width,
+                self.sim_ms,
+                note.note.time,
+                speed,
+            );
+            if !visible(top[1], height) {
+                continue;
+            }
+            let content_top_left =
+                native_content_top_left(top, &frame, scale, self.note_style.note_hitbox_dest);
+            quads.push(sprite_frame_quad(
+                &frame,
+                content_top_left,
+                scale,
+                self.note_style.note_page_size,
+            ));
+        }
+        quads
+    }
+}
+
+/// The full-screen quad of the screen-rain post layer: game-screen coords
+/// `0..1280` x `0..720` with UV `[0,0]..[1,1]` (the material samples the
+/// offscreen game target through the `RuntimeRainShader`).
+fn rain_post_quad() -> Quad {
+    quad_from_matrix(
+        [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        GAME_WIDTH,
+        GAME_HEIGHT,
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+    )
 }
 
 /// Strumline underlay quads. The observed default opacity is 0
@@ -2841,6 +3715,34 @@ pub(crate) fn quad_from_matrix(
         pos[index] = [screen[0] - HALF_WIDTH, HALF_HEIGHT - screen[1]];
     }
     Quad { pos, uv }
+}
+
+/// Parses the `FlxColor` hex strings carried by `sserafimPulseLights`
+/// (`0xFF6D43FF` and `#6D43FF` both select RGB `6D43FF`).
+fn parse_sserafim_color(text: &str) -> Option<[f64; 3]> {
+    let digits = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .or_else(|| text.strip_prefix('#'))
+        .unwrap_or(text);
+    if !digits.is_ascii() {
+        return None;
+    }
+    // `FlxColor.fromString` treats an 8-digit literal as 0xAARRGGBB, so the
+    // RGB channels are the low 24 bits; 6-digit literals are plain RRGGBB.
+    let rgb = match digits.len() {
+        8 => digits.get(2..8)?,
+        6 => digits,
+        _ => return None,
+    };
+    let red = u8::from_str_radix(rgb.get(0..2)?, 16).ok()?;
+    let green = u8::from_str_radix(rgb.get(2..4)?, 16).ok()?;
+    let blue = u8::from_str_radix(rgb.get(4..6)?, 16).ok()?;
+    Some([
+        red as f64 / 255.0,
+        green as f64 / 255.0,
+        blue as f64 / 255.0,
+    ])
 }
 
 fn trace_sim(event: &TraceEvent) -> u64 {
@@ -3270,6 +4172,7 @@ mod tests {
     use crate::render::conversation::ConversationPhase;
     use crate::render::dialogue::{BoxAsset, DialogueSheet, LoadedDialogue};
     use crate::render::load::ReceptorFrames;
+    use crate::render::shaders::ShaderMaskPages;
     use oxide_audio::conductor::TimeChange;
     use oxide_data::dialogue::{
         BackdropData, ConversationData, DialogueBoxData, DialogueBoxTextData, DialogueEntryData,
@@ -3370,8 +4273,51 @@ mod tests {
         chart_scroll: f64,
         notes: Vec<LoadedNote>,
     ) -> Scene {
+        test_stage_scene(
+            "mainStage",
+            characters,
+            props,
+            chart_scroll,
+            notes,
+            ShaderMaskPages::default(),
+        )
+    }
+
+    fn test_stage_scene(
+        stage_id: &str,
+        characters: Vec<LoadedCharacter>,
+        props: Vec<LoadedStageProp>,
+        chart_scroll: f64,
+        notes: Vec<LoadedNote>,
+        shader_masks: ShaderMaskPages,
+    ) -> Scene {
+        test_stage_scene_with_desaturation(
+            stage_id,
+            "bopeebo",
+            characters,
+            props,
+            chart_scroll,
+            notes,
+            shader_masks,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn test_stage_scene_with_desaturation(
+        stage_id: &str,
+        song_id: &str,
+        characters: Vec<LoadedCharacter>,
+        props: Vec<LoadedStageProp>,
+        chart_scroll: f64,
+        notes: Vec<LoadedNote>,
+        shader_masks: ShaderMaskPages,
+        note_desaturation: bool,
+    ) -> Scene {
         let loaded = LoadedSlice {
             pages: Vec::new(),
+            song_id: song_id.to_string(),
+            stage_id: stage_id.to_string(),
             stage_zoom: 1.1,
             props,
             characters,
@@ -3391,6 +4337,8 @@ mod tests {
             dialogue: None,
             weekend1_props: None,
             cutscene_changes: None,
+            shader_masks,
+            note_desaturation,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
     }
@@ -3473,6 +4421,8 @@ mod tests {
     fn test_scene_with_dialogue(dialogue: LoadedDialogue) -> Scene {
         let loaded = LoadedSlice {
             pages: Vec::new(),
+            song_id: "bopeebo".to_string(),
+            stage_id: "mainStage".to_string(),
             stage_zoom: 1.1,
             props: Vec::new(),
             characters: vec![
@@ -3496,6 +4446,8 @@ mod tests {
             dialogue: Some(dialogue),
             weekend1_props: None,
             cutscene_changes: None,
+            shader_masks: ShaderMaskPages::default(),
+            note_desaturation: true,
         };
         Scene::new(loaded)
             .expect("synthetic dialogue scene builds")
@@ -4556,5 +5508,1293 @@ mod tests {
             !layers[can_shot_layer].is_empty(),
             "the Can Shot prop layer receives its atlas quad"
         );
+    }
+
+    // --- M6-CONTRACT §15 per-sprite shader attachments ---------------------
+
+    fn sheeted_character(
+        role: Role,
+        id: &str,
+        animations: BTreeMap<String, AnimationDef>,
+        page_size: [f64; 2],
+    ) -> LoadedCharacter {
+        let mut character = test_character(role, (100.0, 200.0), animations, Some("idle"));
+        character.id = id.to_string();
+        character.sprite_hitbox = Some([30, 40]);
+        character.sheets = vec![Sheet::Sprite(crate::render::load::SpriteSheet {
+            page: 0,
+            page_size,
+            frames: vec![
+                (
+                    "f0".to_string(),
+                    sprite_frame([10, 20, 30, 40], [0, 0], [30, 40]),
+                ),
+                (
+                    "f1".to_string(),
+                    sprite_frame([50, 60, 70, 80], [0, 0], [70, 80]),
+                ),
+            ],
+        })];
+        character
+    }
+
+    fn character_drop_shadows(scene: &Scene, role: Role) -> Vec<super::super::shaders::DropShadow> {
+        let Some(character_index) = scene
+            .characters
+            .iter()
+            .position(|character| character.role == role)
+        else {
+            return Vec::new();
+        };
+        let mut shadows = Vec::new();
+        for item in &scene.stage_items {
+            if !matches!(item.kind, StageItemKind::Character(index) if index == character_index) {
+                continue;
+            }
+            for (_, layer) in &item.layers {
+                if let LayerShader::DropShadow(shadow) = scene.layer_specs[*layer].shader {
+                    shadows.push(shadow);
+                }
+            }
+        }
+        shadows
+    }
+
+    fn enable_mask_event() -> TraceEvent {
+        TraceEvent::UnknownEvent {
+            schema: "3",
+            kind: "unknown_event",
+            sim: 0,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event_kind: "EnableMask".to_string(),
+            value: None,
+        }
+    }
+
+    fn hit_event(note_id: u32, judgement: &'static str) -> TraceEvent {
+        hit_event_at(0, note_id, judgement)
+    }
+
+    fn hit_event_at(sim: u64, note_id: u32, judgement: &'static str) -> TraceEvent {
+        TraceEvent::Hit {
+            schema: "1",
+            kind: "hit",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id,
+            note_direction: 0,
+            judgement,
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            note_kind: None,
+            score_delta: 0,
+            health_before: 1.0,
+            health_after: 1.0,
+            combo_before: 0,
+            combo_after: 0,
+            combo_max: 0,
+            tallies: Default::default(),
+        }
+    }
+
+    fn one_player_note() -> LoadedNote {
+        LoadedNote {
+            time: 100.0,
+            direction: 0,
+            sustain_ms: 0.0,
+            opponent: false,
+            note_id: Some(0),
+        }
+    }
+
+    #[test]
+    fn drop_shadow_layer_initialization_matches_the_stage_tables() {
+        let masks = ShaderMaskPages {
+            tankman_gf: Some(3),
+            tankman_nene: Some(4),
+            tankman_captain_bloody: Some(5),
+            ..Default::default()
+        };
+        let character = |role, id| sheeted_character(role, id, BTreeMap::new(), [100.0, 100.0]);
+        let scene = test_stage_scene(
+            "tankmanBattlefieldErect",
+            vec![
+                character(Role::Player, "bf"),
+                character(Role::Opponent, "tankman-bloody"),
+                character(Role::Girlfriend, "gf-tankmen"),
+            ],
+            Vec::new(),
+            1.5,
+            Vec::new(),
+            masks,
+        );
+        let player = character_drop_shadows(&scene, Role::Player);
+        assert_eq!(player.len(), 1);
+        close(player[0].angle, 90.0);
+        close(player[0].threshold, 0.1);
+        assert!(!player[0].use_alt_mask);
+
+        let girlfriend = character_drop_shadows(&scene, Role::Girlfriend);
+        assert_eq!(girlfriend.len(), 1);
+        assert!(girlfriend[0].use_alt_mask);
+        assert_eq!(girlfriend[0].mask_page, Some(3));
+        close(girlfriend[0].mask_threshold, 0.4);
+
+        let opponent = character_drop_shadows(&scene, Role::Opponent);
+        assert_eq!(opponent.len(), 1);
+        close(opponent[0].angle, 25.0);
+        close(opponent[0].threshold, 0.3);
+        assert!(!opponent[0].use_alt_mask);
+        assert_eq!(opponent[0].mask_page, Some(5));
+
+        // schoolErect: GF's DropShadow re-sets its own HSBC/distance and gets
+        // the nene mask for the nene-pixel character id.
+        let school = test_stage_scene(
+            "schoolErect",
+            vec![
+                sheeted_character(Role::Player, "pico-pixel", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(Role::Opponent, "senpai", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(
+                    Role::Girlfriend,
+                    "nene-pixel",
+                    BTreeMap::new(),
+                    [100.0, 100.0],
+                ),
+            ],
+            Vec::new(),
+            1.5,
+            Vec::new(),
+            ShaderMaskPages {
+                school_bf: Some(10),
+                school_pico: Some(11),
+                school_gf: Some(12),
+                school_nene: Some(13),
+                school_senpai: Some(14),
+                ..Default::default()
+            },
+        );
+        let school_player = character_drop_shadows(&school, Role::Player);
+        assert_eq!(school_player[0].mask_page, Some(11));
+        let school_gf = character_drop_shadows(&school, Role::Girlfriend);
+        assert_eq!(
+            school_gf[0].hsbc,
+            super::super::shaders::Hsbc::new(-42.0, -10.0, 5.0, -25.0)
+        );
+        close(school_gf[0].distance, 3.0);
+        assert_eq!(school_gf[0].mask_page, Some(13));
+        let school_dad = character_drop_shadows(&school, Role::Opponent);
+        assert_eq!(school_dad[0].mask_page, Some(14));
+    }
+
+    #[test]
+    fn drop_shadow_frame_bounds_follow_animation_frames() {
+        let mut animations = BTreeMap::new();
+        animations.insert("idle".to_string(), animation(&[0, 1], true));
+        let scene_character =
+            sheeted_character(Role::Opponent, "senpai", animations, [200.0, 200.0]);
+        let mut scene = test_stage_scene(
+            "schoolErect",
+            vec![
+                sheeted_character(Role::Player, "bf-pixel", BTreeMap::new(), [100.0, 100.0]),
+                scene_character,
+                sheeted_character(
+                    Role::Girlfriend,
+                    "gf-pixel",
+                    BTreeMap::new(),
+                    [100.0, 100.0],
+                ),
+            ],
+            Vec::new(),
+            1.5,
+            Vec::new(),
+            ShaderMaskPages::default(),
+        );
+        let bounds = |scene: &Scene| character_drop_shadows(scene, Role::Opponent)[0].frame_bounds;
+        // Frame 0: rect [10, 20, 30, 40] over a 200x200 page.
+        assert_eq!(bounds(&scene), [0.05, 0.1, 0.2, 0.3]);
+        // 24 fps: the second frame starts at 41.67 ms; tick 42 is the first
+        // scene tick whose scheduler reports it.
+        step_empty(&mut scene, 0, 42);
+        assert_eq!(bounds(&scene), [0.25, 0.3, 0.6, 0.7]);
+    }
+
+    #[test]
+    fn enable_mask_toggles_only_the_tankman_opponent() {
+        let masks = ShaderMaskPages {
+            tankman_gf: Some(3),
+            tankman_nene: Some(4),
+            tankman_captain_bloody: Some(5),
+            ..Default::default()
+        };
+        let mut scene = test_stage_scene(
+            "tankmanBattlefieldErect",
+            vec![
+                sheeted_character(Role::Player, "bf", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(Role::Opponent, "tankman", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(
+                    Role::Girlfriend,
+                    "gf-tankmen",
+                    BTreeMap::new(),
+                    [100.0, 100.0],
+                ),
+            ],
+            Vec::new(),
+            1.5,
+            Vec::new(),
+            masks,
+        );
+        assert!(!character_drop_shadows(&scene, Role::Opponent)[0].use_alt_mask);
+        scene
+            .step(0, &[enable_mask_event()], &[])
+            .expect("EnableMask event consumes");
+        assert!(character_drop_shadows(&scene, Role::Opponent)[0].use_alt_mask);
+        // Other characters keep their build-time state.
+        assert!(!character_drop_shadows(&scene, Role::Player)[0].use_alt_mask);
+        assert!(character_drop_shadows(&scene, Role::Girlfriend)[0].use_alt_mask);
+        // The event is inert outside the tankman stage.
+        let mut school = test_scene_with_notes(
+            vec![
+                sheeted_character(Role::Player, "bf", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(Role::Opponent, "dad", BTreeMap::new(), [100.0, 100.0]),
+            ],
+            Vec::new(),
+            1.5,
+            Vec::new(),
+        );
+        school
+            .step(0, &[enable_mask_event()], &[])
+            .expect("EnableMask event consumes");
+    }
+
+    #[test]
+    fn tankman_game_over_clears_only_the_player_drop_shadow_shader() {
+        // `tankmanBattlefieldErect.hxc:26-27`: `onGameOver` sets
+        // `getBoyfriend().shader = null`; GF and Dad keep their DropShadow
+        // materials.
+        let masks = ShaderMaskPages {
+            tankman_gf: Some(3),
+            tankman_nene: Some(4),
+            tankman_captain_bloody: Some(5),
+            ..Default::default()
+        };
+        let mut scene = test_stage_scene(
+            "tankmanBattlefieldErect",
+            vec![
+                sheeted_character(Role::Player, "bf", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(
+                    Role::Opponent,
+                    "tankman-bloody",
+                    BTreeMap::new(),
+                    [100.0, 100.0],
+                ),
+                sheeted_character(
+                    Role::Girlfriend,
+                    "gf-tankmen",
+                    BTreeMap::new(),
+                    [100.0, 100.0],
+                ),
+            ],
+            Vec::new(),
+            1.5,
+            Vec::new(),
+            masks,
+        );
+        for role in [Role::Player, Role::Opponent, Role::Girlfriend] {
+            assert!(
+                character_layer_shaders(&scene, role)
+                    .iter()
+                    .all(|shader| matches!(shader, LayerShader::DropShadow(_))),
+                "{role:?} starts on the DropShadow material"
+            );
+        }
+        scene
+            .step(0, &[game_over_event(0)], &[])
+            .expect("game-over row consumes");
+        assert!(scene.dead);
+        assert_eq!(
+            character_layer_shaders(&scene, Role::Player),
+            vec![LayerShader::None],
+            "the player shader is cleared"
+        );
+        for role in [Role::Opponent, Role::Girlfriend] {
+            assert!(
+                character_layer_shaders(&scene, role)
+                    .iter()
+                    .all(|shader| matches!(shader, LayerShader::DropShadow(_))),
+                "{role:?} keeps the DropShadow material"
+            );
+        }
+        // The post-game-over substate freeze must not restore the shader.
+        step_empty(&mut scene, 1, 2);
+        assert_eq!(
+            character_layer_shaders(&scene, Role::Player),
+            vec![LayerShader::None]
+        );
+    }
+
+    #[test]
+    fn bad_and_shit_hits_activate_the_desaturated_note_layer() {
+        let hsv_layer_spec = |scene: &Scene| scene.layer_specs[scene.desaturated_layer];
+        for (judgement, expected_quads) in [("bad", 1usize), ("shit", 1), ("sick", 0), ("good", 0)]
+        {
+            let mut scene = test_scene_with_notes(
+                vec![
+                    sheeted_character(Role::Player, "bf", BTreeMap::new(), [100.0, 100.0]),
+                    sheeted_character(Role::Opponent, "dad", BTreeMap::new(), [100.0, 100.0]),
+                ],
+                Vec::new(),
+                1.5,
+                vec![one_player_note()],
+            );
+            scene
+                .step(0, &[hit_event(0, judgement)], &[])
+                .expect("hit event consumes");
+            let spec = hsv_layer_spec(&scene);
+            assert_eq!(spec.color, [1.0, 1.0, 1.0, 0.5]);
+            assert_eq!(
+                spec.shader,
+                LayerShader::Hsv(super::super::shaders::Hsv::new(1.0, 0.2, 1.0))
+            );
+            let layers = scene.draw().expect("scene draws");
+            assert_eq!(
+                layers[scene.desaturated_layer].len(),
+                expected_quads,
+                "{judgement} hit overlay quads"
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_mode_keeps_the_bad_shot_layer_empty() {
+        // The scripted bopeebo render-diff negative phase contains Bad/Shit
+        // threshold hits; its loader disables the overlay so the frozen frame
+        // digests stay byte-identical. The play loader enables it (previous
+        // test).
+        let mut scene = test_stage_scene_with_desaturation(
+            "mainStage",
+            "bopeebo",
+            vec![
+                sheeted_character(Role::Player, "bf", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(Role::Opponent, "dad", BTreeMap::new(), [100.0, 100.0]),
+            ],
+            Vec::new(),
+            1.5,
+            vec![one_player_note()],
+            ShaderMaskPages::default(),
+            false,
+        );
+        scene
+            .step(0, &[hit_event(0, "bad")], &[])
+            .expect("hit event consumes");
+        let layers = scene.draw().expect("scene draws");
+        assert!(layers[scene.desaturated_layer].is_empty());
+    }
+
+    // --- 6G sub-slice 2: wiggle/rain scene cadence -------------------------
+
+    fn static_prop(name: &str) -> LoadedStageProp {
+        LoadedStageProp {
+            name: name.to_string(),
+            z_index: 10.0,
+            position: (100.0, 200.0),
+            scale: (1.0, 1.0),
+            scroll: (1.0, 1.0),
+            alpha: 1.0,
+            angle: 0.0,
+            flip_x: false,
+            flip_y: false,
+            visual: PropVisual::Static {
+                page: 0,
+                image_size: [10.0, 20.0],
+            },
+            animations: BTreeMap::new(),
+            dance_every: 0.0,
+            starting_animation: None,
+            bopper: false,
+        }
+    }
+
+    fn sprite_prop(name: &str, animations: BTreeMap<String, AnimationDef>) -> LoadedStageProp {
+        let frames = vec![
+            (
+                "bgtrees0".to_string(),
+                sprite_frame([0, 0, 10, 20], [0, 0], [10, 20]),
+            ),
+            (
+                "bgtrees1".to_string(),
+                sprite_frame([20, 0, 30, 40], [0, 0], [30, 40]),
+            ),
+        ];
+        LoadedStageProp {
+            name: name.to_string(),
+            z_index: 10.0,
+            position: (100.0, 200.0),
+            scale: (1.0, 1.0),
+            scroll: (1.0, 1.0),
+            alpha: 1.0,
+            angle: 0.0,
+            flip_x: false,
+            flip_y: false,
+            visual: PropVisual::Sprite {
+                sheet: crate::render::load::SpriteSheet {
+                    page: 0,
+                    page_size: [100.0, 100.0],
+                    frames,
+                },
+                hitbox_dest: [30, 40],
+            },
+            animations,
+            dance_every: 0.0,
+            starting_animation: Some("bgtrees".to_string()),
+            bopper: true,
+        }
+    }
+
+    fn single_wiggle(scene: &Scene) -> super::super::shaders::Wiggle {
+        scene
+            .layer_specs
+            .iter()
+            .find_map(|spec| match spec.shader {
+                LayerShader::Wiggle(wiggle) => Some(wiggle),
+                _ => None,
+            })
+            .expect("scene owns a wiggle layer")
+    }
+
+    fn screen_rain_spec(scene: &Scene) -> super::super::shaders::Rain {
+        let layer = scene.rain_post_layer.expect("screen-rain post layer");
+        match scene.layer_specs[layer].shader {
+            LayerShader::Rain(rain) => rain,
+            other => panic!("expected screen rain, got {other:?}"),
+        }
+    }
+
+    fn sprite_rain_spec(scene: &Scene) -> super::super::shaders::Rain {
+        scene
+            .layer_specs
+            .iter()
+            .find_map(|spec| match spec.shader {
+                LayerShader::Rain(rain) if rain.sprite_mode => Some(rain),
+                _ => None,
+            })
+            .expect("scene owns a sprite rain layer")
+    }
+
+    fn two_characters() -> Vec<LoadedCharacter> {
+        vec![
+            test_character(Role::Player, (100.0, 200.0), bf_animations(), Some("idle")),
+            test_character(Role::Opponent, (300.0, 400.0), BTreeMap::new(), None),
+        ]
+    }
+
+    fn two_sheeted_characters() -> Vec<LoadedCharacter> {
+        vec![
+            sheeted_character(Role::Player, "bf", bf_animations(), [100.0, 100.0]),
+            sheeted_character(Role::Opponent, "dad", BTreeMap::new(), [100.0, 100.0]),
+        ]
+    }
+
+    fn test_rain_scene(
+        stage_id: &str,
+        song_id: &str,
+        characters: Vec<LoadedCharacter>,
+        notes: Vec<LoadedNote>,
+    ) -> Scene {
+        test_stage_scene_with_desaturation(
+            stage_id,
+            song_id,
+            characters,
+            Vec::new(),
+            1.5,
+            notes,
+            ShaderMaskPages::default(),
+            true,
+        )
+    }
+
+    fn opponent_hit_event_at(sim: u64) -> TraceEvent {
+        TraceEvent::OpponentHit {
+            schema: "2",
+            kind: "opponent_hit",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 4,
+            judgement: "sick",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            note_kind: None,
+        }
+    }
+
+    fn game_over_event(sim: u64) -> TraceEvent {
+        TraceEvent::GameOver {
+            schema: "3",
+            kind: "game_over",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            note_id: 0,
+            note_direction: 0,
+            judgement: "miss",
+            raw_note_diff: 0.0,
+            note_diff_int: 0,
+            death_count: 1,
+        }
+    }
+
+    #[test]
+    fn school_evil_wiggle_time_advances_on_every_scene_tick() {
+        let mut scene = test_stage_scene(
+            "schoolEvil",
+            two_characters(),
+            vec![static_prop("backTrees")],
+            1.5,
+            Vec::new(),
+            ShaderMaskPages::default(),
+        );
+        let initial = single_wiggle(&scene);
+        close(initial.time, 0.0);
+        close(initial.speed, 1.6);
+        close(initial.frequency, 1.6);
+        close(initial.amplitude, 0.011);
+
+        for tick in 0..=2u64 {
+            scene.step(tick, &[], &[]).expect("wiggle scene step");
+        }
+        close(single_wiggle(&scene).time, 3.0 * TICK_SECONDS);
+
+        // A second run of the same synthetic stage yields the identical time.
+        let mut replay = test_stage_scene(
+            "schoolEvil",
+            two_characters(),
+            vec![static_prop("backTrees")],
+            1.5,
+            Vec::new(),
+            ShaderMaskPages::default(),
+        );
+        for tick in 0..=2u64 {
+            replay.step(tick, &[], &[]).expect("wiggle replay step");
+        }
+        assert_eq!(single_wiggle(&scene).time, single_wiggle(&replay).time);
+    }
+
+    #[test]
+    fn school_evil_erect_wiggle_attachment_is_prop_specific() {
+        let scene = test_stage_scene(
+            "schoolEvilErect",
+            two_characters(),
+            vec![static_prop("backspikes"), static_prop("backspike")],
+            1.5,
+            Vec::new(),
+            ShaderMaskPages::default(),
+        );
+        let mut wiggles: Vec<_> = scene
+            .layer_specs
+            .iter()
+            .filter_map(|spec| match spec.shader {
+                LayerShader::Wiggle(wiggle) => Some(wiggle),
+                _ => None,
+            })
+            .collect();
+        wiggles.sort_by(|left, right| left.amplitude.total_cmp(&right.amplitude));
+        assert_eq!(wiggles.len(), 2);
+        close(wiggles[0].amplitude, 0.01);
+        close(wiggles[1].amplitude, 0.011);
+        for wiggle in wiggles {
+            close(
+                wiggle.speed,
+                if wiggle.amplitude == 0.01 { 2.0 } else { 1.6 },
+            );
+            close(
+                wiggle.frequency,
+                if wiggle.amplitude == 0.01 { 4.0 } else { 1.6 },
+            );
+        }
+    }
+
+    #[test]
+    fn screen_rain_layer_sits_before_the_overlay_group_and_remaps_intensity() {
+        let notes = vec![LoadedNote {
+            time: 500.0,
+            direction: 0,
+            sustain_ms: 500.0,
+            opponent: false,
+            note_id: Some(0),
+        }];
+        let mut scene =
+            test_rain_scene("phillyStreets", "darnell", two_sheeted_characters(), notes);
+        let rain_layer = scene.rain_post_layer.expect("darnell has screen rain");
+        assert_eq!(
+            rain_layer + 1,
+            scene.overlay_start,
+            "rain post layer sits immediately before the first overlay layer"
+        );
+        assert!(
+            scene.hud_start >= scene.overlay_start,
+            "HUD layers stay above the rain post pass"
+        );
+        let initial = screen_rain_spec(&scene);
+        assert!(!initial.sprite_mode);
+        close(initial.time, 1.0);
+        close(initial.intensity, 0.0);
+        close(initial.scale, 3.6);
+        assert_eq!(initial.color, super::super::shaders::RAIN_COLOR_DEFAULT);
+        assert_eq!(initial.camera_bounds, scene.camera_bounds());
+
+        for tick in 0..=100u64 {
+            scene.step(tick, &[], &[]).expect("rain scene step");
+        }
+        let stepped = screen_rain_spec(&scene);
+        close(stepped.time, 1.0 + 101.0 * TICK_SECONDS);
+        // Chart duration = 500 + 500 ms; 100 ms into a 0.0 -> 0.1 remap.
+        close(stepped.intensity, 0.01);
+
+        let layers = scene.draw().expect("rain scene draws");
+        assert_eq!(layers[rain_layer].len(), 1);
+        let quad = layers[rain_layer][0];
+        assert_eq!(quad.uv, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        close(quad.pos[0][0] + HALF_WIDTH, 0.0);
+        close(HALF_HEIGHT - quad.pos[0][1], 0.0);
+        close(quad.pos[2][0] + HALF_WIDTH, GAME_WIDTH);
+        close(HALF_HEIGHT - quad.pos[2][1], GAME_HEIGHT);
+    }
+
+    #[test]
+    fn screen_rain_clears_on_game_over_but_keeps_the_stage_composite() {
+        let mut scene = test_rain_scene(
+            "phillyBlazin",
+            "blazin",
+            two_sheeted_characters(),
+            vec![one_player_note()],
+        );
+        let layer = scene.rain_post_layer.expect("blazin has screen rain");
+        close(screen_rain_spec(&scene).intensity, 0.5);
+        scene.step(0, &[], &[]).expect("pre-game-over step");
+        assert_eq!(scene.draw().expect("draws")[layer].len(), 1);
+
+        scene
+            .step(1, &[game_over_event(1)], &[])
+            .expect("game-over row");
+        assert!(scene.dead);
+        close(screen_rain_spec(&scene).intensity, 0.0);
+        assert_eq!(
+            scene.draw().expect("game-over draws")[layer].len(),
+            1,
+            "[D] identity post pass keeps the unfiltered stage visible"
+        );
+
+        // The filter stays cleared while the game-over substate is open (the
+        // frozen scene early-returns, so the intensity must not be remapped).
+        scene.step(2, &[], &[]).expect("post-game-over tick");
+        close(screen_rain_spec(&scene).intensity, 0.0);
+    }
+
+    #[test]
+    fn philly_streets_erect_rain_uses_the_erect_color_and_range() {
+        let mut scene = test_rain_scene(
+            "phillyStreetsErect",
+            "darnell",
+            two_characters(),
+            vec![LoadedNote {
+                time: 0.0,
+                direction: 0,
+                sustain_ms: 2000.0,
+                opponent: false,
+                note_id: Some(0),
+            }],
+        );
+        let initial = screen_rain_spec(&scene);
+        assert_eq!(initial.color, super::super::shaders::RAIN_COLOR_ERECT);
+        close(initial.intensity, 0.0);
+        for tick in 0..=1000u64 {
+            scene.step(tick, &[], &[]).expect("erect rain step");
+        }
+        close(screen_rain_spec(&scene).intensity, 0.01 * 0.5);
+    }
+
+    #[test]
+    fn philly_blazin_rain_time_scale_boosts_on_player_and_opponent_hits() {
+        let notes = vec![
+            LoadedNote {
+                time: 100.0,
+                direction: 0,
+                sustain_ms: 0.0,
+                opponent: false,
+                note_id: Some(0),
+            },
+            LoadedNote {
+                time: 100.0,
+                direction: 4,
+                sustain_ms: 0.0,
+                opponent: true,
+                note_id: Some(0),
+            },
+        ];
+        let mut scene = test_rain_scene("phillyBlazin", "blazin", two_characters(), notes);
+        let initial = screen_rain_spec(&scene);
+        close(initial.time, 1.0);
+        close(initial.intensity, 0.5);
+        close(scene.rain.as_ref().expect("blazin runtime").time_scale, 1.0);
+
+        // Tick 0 advances with the initial 1.0 scale, then decays.
+        scene.step(0, &[], &[]).expect("blazin tick 0");
+        close(screen_rain_spec(&scene).time, 1.0 + TICK_SECONDS);
+        let after_tick_0 = scene.rain.as_ref().expect("blazin runtime").time_scale;
+        close(
+            after_tick_0,
+            super::super::shaders::blazin_time_scale_decay(1.0),
+        );
+
+        // Tick 1 advances with the decayed multiplier; the hit then boosts the
+        // multiplier after the advance (and after that tick's decay).
+        scene
+            .step(1, &[hit_event_at(1, 0, "sick")], &[])
+            .expect("player hit row");
+        close(
+            screen_rain_spec(&scene).time,
+            1.0 + TICK_SECONDS + TICK_SECONDS * after_tick_0,
+        );
+        let after_hit = scene.rain.as_ref().expect("blazin runtime").time_scale;
+        close(
+            after_hit,
+            super::super::shaders::blazin_time_scale_decay(after_tick_0) + 0.7,
+        );
+
+        // Tick 2 advances with the boosted multiplier, then decays.
+        scene.step(2, &[], &[]).expect("blazin tick 2");
+        close(
+            screen_rain_spec(&scene).time,
+            1.0 + TICK_SECONDS + TICK_SECONDS * after_tick_0 + TICK_SECONDS * after_hit,
+        );
+        let after_tick_2 = scene.rain.as_ref().expect("blazin runtime").time_scale;
+        close(
+            after_tick_2,
+            super::super::shaders::blazin_time_scale_decay(after_hit),
+        );
+
+        // Opponent hits boost the multiplier too.
+        scene
+            .step(3, &[opponent_hit_event_at(3)], &[])
+            .expect("opponent hit row");
+        close(
+            scene.rain.as_ref().expect("blazin runtime").time_scale,
+            super::super::shaders::blazin_time_scale_decay(after_tick_2) + 0.7,
+        );
+    }
+
+    #[test]
+    fn spooky_mansion_bgtrees_sprite_rain_syncs_frame_and_camera_bounds() {
+        let mut animations = BTreeMap::new();
+        animations.insert(
+            "bgtrees".to_string(),
+            AnimationDef::test(&[0, 1], 5.0, true),
+        );
+        let mut scene = test_stage_scene(
+            "spookyMansionErect",
+            two_characters(),
+            vec![sprite_prop("bgTrees", animations)],
+            1.5,
+            Vec::new(),
+            ShaderMaskPages::default(),
+        );
+        assert!(
+            scene.rain_post_layer.is_none(),
+            "sprite mode is not a post pass"
+        );
+        let initial = sprite_rain_spec(&scene);
+        close(initial.time, 1.0);
+        close(initial.scale, 7.2);
+        close(initial.intensity, 0.4);
+        assert_eq!(initial.frame_bounds, [0.0, 0.0, 0.1, 0.2]);
+        assert_eq!(initial.camera_bounds, scene.camera_bounds());
+
+        // 5 fps: 250 ms selects the second frame (0.2 .. 0.5, 0 .. 0.4).
+        for tick in 0..=249u64 {
+            scene.step(tick, &[], &[]).expect("sprite rain step");
+        }
+        let stepped = sprite_rain_spec(&scene);
+        assert_eq!(stepped.frame_bounds, [0.2, 0.0, 0.5, 0.4]);
+        close(stepped.time, 1.0 + 250.0 * TICK_SECONDS);
+        assert_eq!(stepped.camera_bounds, scene.camera_bounds());
+    }
+
+    // --- 6G sub-slice 3: SserafimShader attachments + event tweens --------
+
+    /// Prop tints are stored as `f32`; compare through the same cast.
+    fn close_prop(actual: f64, expected: f64) {
+        let expected = expected as f32 as f64;
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn sserafim_scene() -> Scene {
+        let names = [
+            "floor",
+            "stageFront",
+            "truckLight1",
+            "truckLight2",
+            "backLightColor",
+            "backLightWhite",
+            "truckTest",
+            "solidCover",
+        ];
+        let props = names
+            .iter()
+            .map(|name| {
+                let mut prop = solid_prop(
+                    [10, 10],
+                    (10.0, 10.0),
+                    if *name == "solidCover" { 0.0 } else { 1.0 },
+                );
+                prop.name = (*name).to_string();
+                prop
+            })
+            .collect();
+        test_stage_scene(
+            "sserafim",
+            vec![
+                sheeted_character(Role::Player, "bf", bf_animations(), [100.0, 100.0]),
+                sheeted_character(Role::Opponent, "dad", BTreeMap::new(), [100.0, 100.0]),
+                sheeted_character(Role::Girlfriend, "gf", BTreeMap::new(), [100.0, 100.0]),
+            ],
+            props,
+            1.5,
+            Vec::new(),
+            ShaderMaskPages::default(),
+        )
+    }
+
+    fn sserafim_event(sim: u64, event_kind: &str, payload: serde_json::Value) -> TraceEvent {
+        TraceEvent::UnknownEvent {
+            schema: "3",
+            kind: "unknown_event",
+            sim,
+            input_ms: 0.0,
+            input_time_us: 0.0,
+            event_kind: event_kind.to_string(),
+            value: Some(oxide_data::chart::SongEvent {
+                time: sim as f64,
+                event: event_kind.to_string(),
+                value: Some(payload),
+            }),
+        }
+    }
+
+    fn character_layer_shaders(scene: &Scene, role: Role) -> Vec<LayerShader> {
+        let index = scene
+            .characters
+            .iter()
+            .position(|character| character.role == role)
+            .expect("character rig");
+        let item = scene
+            .stage_items
+            .iter()
+            .find(|item| matches!(item.kind, StageItemKind::Character(found) if found == index))
+            .expect("character stage item");
+        item.layers
+            .iter()
+            .map(|(_, layer)| scene.layer_specs[*layer].shader)
+            .collect()
+    }
+
+    fn prop_layer_shader(scene: &Scene, name: &str) -> LayerShader {
+        let layers = scene.prop_layers(name);
+        assert_eq!(layers.len(), 1, "{name} has one synthetic layer");
+        scene.layer_specs[layers[0]].shader
+    }
+
+    fn prop_alpha(scene: &Scene, name: &str) -> f64 {
+        let layers = scene.prop_layers(name);
+        assert_eq!(layers.len(), 1, "{name} has one synthetic layer");
+        scene.layer_specs[layers[0]].color[3] as f64
+    }
+
+    fn prop_color(scene: &Scene, name: &str) -> [f32; 4] {
+        let layers = scene.prop_layers(name);
+        assert_eq!(layers.len(), 1, "{name} has one synthetic layer");
+        scene.layer_specs[layers[0]].color
+    }
+
+    #[test]
+    fn sserafim_color_parses_eight_and_six_digit_hex() {
+        // `FlxColor.fromString("0xFF6D43FF")` is 0xAARRGGBB: alpha FF, RGB
+        // 6D43FF. The six-digit form carries the same RGB channels.
+        let expected = [
+            0x6D as f64 / 255.0,
+            0x43 as f64 / 255.0,
+            0xFF as f64 / 255.0,
+        ];
+        for text in ["0xFF6D43FF", "#6D43FF"] {
+            let actual = parse_sserafim_color(text).unwrap_or_else(|| panic!("{text} parses"));
+            for (actual, expected) in actual.iter().zip(expected) {
+                close(*actual, expected);
+            }
+        }
+        assert_eq!(
+            parse_sserafim_color("0x12345"),
+            None,
+            "5 digits fail closed"
+        );
+        assert_eq!(
+            parse_sserafim_color("0xGGGGGG"),
+            None,
+            "non-hex fails closed"
+        );
+    }
+
+    #[test]
+    fn sserafim_stage_attaches_the_shader_to_characters_and_props() {
+        let scene = sserafim_scene();
+        for role in [Role::Player, Role::Opponent, Role::Girlfriend] {
+            let shaders = character_layer_shaders(&scene, role);
+            assert!(!shaders.is_empty(), "{role:?} must own a draw layer");
+            for shader in shaders {
+                match shader {
+                    LayerShader::Sserafim(sserafim) => {
+                        assert!(sserafim.is_char, "{role:?} uses the character divisors");
+                    }
+                    other => panic!("{role:?} expected SserafimShader, got {other:?}"),
+                }
+            }
+        }
+        for name in ["floor", "stageFront"] {
+            match prop_layer_shader(&scene, name) {
+                LayerShader::Sserafim(sserafim) => {
+                    assert!(!sserafim.is_char, "{name} uses the stage divisors");
+                }
+                other => panic!("{name} expected SserafimShader, got {other:?}"),
+            }
+        }
+        for name in [
+            "truckLight1",
+            "truckLight2",
+            "backLightColor",
+            "backLightWhite",
+            "truckTest",
+            "solidCover",
+        ] {
+            assert_eq!(
+                prop_layer_shader(&scene, name),
+                LayerShader::None,
+                "{name} stays on the plain ColorMaterial path"
+            );
+        }
+    }
+
+    #[test]
+    fn sserafim_dark_tween_uses_sine_in_out_and_handles_the_high_regime() {
+        let mut scene = sserafim_scene();
+        scene
+            .step(
+                0,
+                &[sserafim_event(
+                    0,
+                    "sserafimDark",
+                    serde_json::json!({ "amount": 0.5, "duration": 1.0 }),
+                )],
+                &[],
+            )
+            .expect("sserafimDark applies");
+        close(scene.sserafim.as_ref().expect("runtime").darken_amount, 0.0);
+        step_empty(&mut scene, 1, 500);
+        close(
+            scene.sserafim.as_ref().expect("runtime").darken_amount,
+            0.25,
+        );
+        // The state is copied into every attached layer (characters use the
+        // char flag, props the stage divisors).
+        assert!(scene.layer_specs.iter().any(|spec| matches!(
+            spec.shader,
+            LayerShader::Sserafim(sserafim)
+                if sserafim.is_char && (sserafim.darken_amount - 0.25).abs() < 1e-12
+        )));
+        step_empty(&mut scene, 501, 1000);
+        close(scene.sserafim.as_ref().expect("runtime").darken_amount, 0.5);
+
+        // A second event cancels the finished/completed state and starts from
+        // the current value; the target above 0.65 exercises the sign-flipped
+        // light term regime.
+        scene
+            .step(
+                1001,
+                &[sserafim_event(
+                    1001,
+                    "sserafimDark",
+                    serde_json::json!({ "amount": 0.9, "duration": 1.0 }),
+                )],
+                &[],
+            )
+            .expect("second dark event applies");
+        step_empty(&mut scene, 1002, 1501);
+        close(scene.sserafim.as_ref().expect("runtime").darken_amount, 0.7);
+        // 0.7 > 0.65 exercises the sign-flipped light term regime and the
+        // state is copied into the attached layers.
+        assert!(scene.layer_specs.iter().any(|spec| matches!(
+            spec.shader,
+            LayerShader::Sserafim(sserafim)
+                if (sserafim.darken_amount - 0.7).abs() < 1e-12
+        )));
+
+        // A mid-flight event cancels the active tween and starts from the
+        // CURRENT value sampled on the event tick (0.7 + the 1502 advance),
+        // not from the previous target.
+        scene
+            .step(
+                1502,
+                &[sserafim_event(
+                    1502,
+                    "sserafimDark",
+                    serde_json::json!({ "amount": 0.1, "duration": 1.0 }),
+                )],
+                &[],
+            )
+            .expect("cancelling dark event applies");
+        let cancel_from = scene.sserafim.as_ref().expect("runtime").darken_amount;
+        assert!(
+            cancel_from > 0.7 && cancel_from < 0.71,
+            "the cancellation baseline is the current tweened value, got {cancel_from}"
+        );
+        step_empty(&mut scene, 1503, 2002);
+        close(
+            scene.sserafim.as_ref().expect("runtime").darken_amount,
+            cancel_from + (0.1 - cancel_from) * 0.5,
+        );
+        step_empty(&mut scene, 2003, 2502);
+        close(scene.sserafim.as_ref().expect("runtime").darken_amount, 0.1);
+
+        // Non-positive durations snap immediately.
+        scene
+            .step(
+                2503,
+                &[sserafim_event(
+                    2503,
+                    "sserafimDark",
+                    serde_json::json!({ "amount": 0.2, "duration": 0.0 }),
+                )],
+                &[],
+            )
+            .expect("snap dark event applies");
+        close(scene.sserafim.as_ref().expect("runtime").darken_amount, 0.2);
+    }
+
+    #[test]
+    fn sserafim_lights_tween_updates_truck_strength_and_prop_alphas() {
+        let mut scene = sserafim_scene();
+        scene
+            .step(
+                0,
+                &[sserafim_event(
+                    0,
+                    "sserafimLights",
+                    serde_json::json!({ "amount": 0.6, "duration": 1.0 }),
+                )],
+                &[],
+            )
+            .expect("sserafimLights applies");
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .truck_light_strength,
+            0.6,
+        );
+        close_prop(prop_alpha(&scene, "truckLight1"), 0.6);
+        close_prop(prop_alpha(&scene, "truckLight2"), 0.6);
+
+        step_empty(&mut scene, 1, 500);
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .truck_light_strength,
+            0.3,
+        );
+        close_prop(prop_alpha(&scene, "truckLight1"), 0.3);
+        close_prop(prop_alpha(&scene, "truckLight2"), 0.3);
+        assert!(scene.layer_specs.iter().any(|spec| matches!(
+            spec.shader,
+            LayerShader::Sserafim(sserafim)
+                if (sserafim.truck_light_strength - 0.3).abs() < 1e-12
+        )));
+
+        // A mid-flight event cancels the tween, snaps the new amount and
+        // restarts from it.
+        scene
+            .step(
+                501,
+                &[sserafim_event(
+                    501,
+                    "sserafimLights",
+                    serde_json::json!({ "amount": 0.9, "duration": 1.0 }),
+                )],
+                &[],
+            )
+            .expect("cancelling lights event applies");
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .truck_light_strength,
+            0.9,
+        );
+        close_prop(prop_alpha(&scene, "truckLight1"), 0.9);
+        // 500 ms after the event (tick 501) is the exact cubeInOut midpoint.
+        step_empty(&mut scene, 502, 1001);
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .truck_light_strength,
+            0.45,
+        );
+        close_prop(prop_alpha(&scene, "truckLight2"), 0.45);
+        step_empty(&mut scene, 1002, 1501);
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .truck_light_strength,
+            0.0,
+        );
+        close_prop(prop_alpha(&scene, "truckLight1"), 0.0);
+        close_prop(prop_alpha(&scene, "truckLight2"), 0.0);
+    }
+
+    #[test]
+    fn sserafim_pulse_lights_cycle_the_per_beat_arrays() {
+        let mut scene = sserafim_scene();
+        scene
+            .step(
+                0,
+                &[sserafim_event(
+                    0,
+                    "sserafimPulseLights",
+                    serde_json::json!({
+                        "enabled": true,
+                        "colors": ["0xFF6D43FF", "#00FF00"],
+                        "durations": [1.0, 2.0],
+                        "intensities": [0.5, 1.0],
+                    }),
+                )],
+                &[],
+            )
+            .expect("sserafimPulseLights config applies");
+        assert!(scene.sserafim.as_ref().expect("runtime").lights_enabled);
+
+        // 100 bpm -> 600 ms beats. Beat 1 selects index 1 (green, 2 s, 1.0).
+        step_empty(&mut scene, 1, 600);
+        let runtime = scene.sserafim.as_ref().expect("runtime");
+        assert_eq!(runtime.pulse_light_color, [0.0, 1.0, 0.0]);
+        close(runtime.pulse_light_strength, 0.8);
+        close(runtime.pulse_white_strength, 0.7);
+        let color = prop_color(&scene, "backLightColor");
+        close_prop(color[0] as f64, 0.0);
+        close_prop(color[1] as f64, 1.0);
+        close_prop(color[2] as f64, 0.0);
+        close_prop(color[3] as f64, 0.8);
+        close_prop(prop_alpha(&scene, "backLightWhite"), 0.7);
+
+        // Beat 2 at 1200 ms restarts with index 0 (`0xFF6D43FF`, 1 s, 0.5).
+        step_empty(&mut scene, 601, 1200);
+        let runtime = scene.sserafim.as_ref().expect("runtime");
+        close(runtime.pulse_light_strength, 0.4);
+        close(runtime.pulse_white_strength, 0.35);
+        let color = prop_color(&scene, "backLightColor");
+        close_prop(color[0] as f64, 0x6D as f64 / 255.0);
+        close_prop(color[1] as f64, 0x43 as f64 / 255.0);
+        close_prop(color[2] as f64, 1.0);
+        close_prop(color[3] as f64, 0.4);
+        close_prop(prop_alpha(&scene, "backLightWhite"), 0.35);
+
+        // Half-way through the 1 s cubeInOut tween (the ease is 0.5 at t=0.5).
+        step_empty(&mut scene, 1201, 1700);
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .pulse_light_strength,
+            0.2,
+        );
+        close_prop(prop_alpha(&scene, "backLightWhite"), 0.175);
+        close_prop(prop_color(&scene, "backLightColor")[3] as f64, 0.2);
+
+        // Disabling the beat hook freezes the selection; the in-flight tween
+        // still finishes on its own duration.
+        scene
+            .step(
+                1701,
+                &[sserafim_event(
+                    1701,
+                    "sserafimPulseLights",
+                    serde_json::json!({ "enabled": false }),
+                )],
+                &[],
+            )
+            .expect("disable event applies");
+        step_empty(&mut scene, 1702, 2200);
+        let runtime = scene.sserafim.as_ref().expect("runtime");
+        close(runtime.pulse_light_strength, 0.0);
+        close(runtime.pulse_white_strength, 0.0);
+        close_prop(prop_alpha(&scene, "backLightWhite"), 0.0);
+        close_prop(prop_color(&scene, "backLightColor")[3] as f64, 0.0);
+    }
+
+    #[test]
+    fn sserafim_cover_event_toggles_the_solid_cover_alpha() {
+        let mut scene = sserafim_scene();
+        close_prop(prop_alpha(&scene, "solidCover"), 0.0);
+        scene
+            .step(
+                0,
+                &[sserafim_event(
+                    0,
+                    "sserafimCover",
+                    serde_json::json!({ "visible": true }),
+                )],
+                &[],
+            )
+            .expect("cover show applies");
+        close_prop(prop_alpha(&scene, "solidCover"), 1.0);
+        scene
+            .step(
+                1,
+                &[sserafim_event(
+                    1,
+                    "sserafimCover",
+                    serde_json::json!({ "visible": false }),
+                )],
+                &[],
+            )
+            .expect("cover hide applies");
+        close_prop(prop_alpha(&scene, "solidCover"), 0.0);
+    }
+
+    #[test]
+    fn sserafim_events_are_stage_scoped() {
+        let mut scene = default_scene();
+        scene
+            .step(
+                0,
+                &[sserafim_event(
+                    0,
+                    "sserafimCover",
+                    serde_json::json!({ "visible": true }),
+                )],
+                &[],
+            )
+            .expect("non-sserafim stage ignores the event");
+        assert!(scene.sserafim.is_none());
     }
 }
