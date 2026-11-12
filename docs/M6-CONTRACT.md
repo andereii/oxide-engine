@@ -203,6 +203,35 @@ Evidence labels used below: **observed** (files/runtime with citations), **deriv
   erect adjust-color/drop-shadow, weekend-1 rain, thorns wiggle) under ADR-0020,
   and interactive playtest verification.
 
+### 6H — PlayState visual polish (splashes, hold covers, popups, countdown) & `--song` playtest CLI (APPROVED 2026-11-12)
+- Objective: close all remaining PlayState visual exclusions from §6D/§13.2
+  before starting Milestone 7 (UI/Menus), and generalize `oxide play` beyond
+  `bopeebo`:
+  - **Note Splashes:** `noteStyle.noteSplash` spawning on player `Sick!` note
+    hits across funkin/pixel styles (randomized/deterministic variant selection,
+    offsets, scale, fps).
+  - **Hold Covers:** `noteStyle.holdNoteCover` lifecycle (start, hold loop,
+    release/end burst) for player and opponent sustain notes.
+  - **Judgement Popups & Combo Digits:** `sick`/`good`/`bad`/`shit` rating
+    sprites + `num0..9` combo counter sprites (`PopUpStuff` native velocity,
+    gravity/acceleration, fade out, pixel vs funkin styles).
+  - **Countdown Visuals & Audio:** `ready` / `set` / `go` sprites +
+    `intro3`/`intro2`/`intro1`/`introGo` audio stems aligned with Conductor
+    countdown ticks (respecting §14 story cutscene cancellation on
+    `senpai`/`roses`/`thorns`/`darnell`).
+  - **Song-Parameterized `oxide play` CLI:** generalize `PlayConfig`,
+    `PlaySession`, `play/audio.rs`, and `src/main.rs` (`--song <id>` and
+    `--story`) to load and interactively play any corpus song/variation with
+    dynamic Inst/Voices audio, 6E cutscenes/dialogue, and 6G shaders while
+    keeping `bopeebo` as the default.
+- Behavior freeze required from original source (`NoteSplash.hx`,
+  `NoteHoldCover.hx`, `PopUpStuff.hx`, `Countdown.hx`, `Strumline.hx`,
+  `PlayState.hx`) before implementation. Existing `render-slice-2` frozen
+  fixture digests must remain preserved or explicitly updated under ADR-0020
+  human approval once the 6H freeze determines layer/fixture impact.
+- Write set: `crates/oxide-game/src/render*`, `crates/oxide-game/src/play*`,
+  `src/main.rs` (plus `xtask/` if 6H fixture/gate coverage is added).
+
 ## 4. Dependencies and constraints
 
 - M4 pending obligations (input replay/jitter, native conductor corpus traces)

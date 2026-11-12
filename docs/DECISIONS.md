@@ -1038,3 +1038,18 @@ fail-closed (no auto-repair).
   8-digit `0xAARRGGBB` `parse_sserafim_color` review fix). Two-run SHA-256
   equality asserted at capture; `bopeebo`, `school`, and `dialogue` digests
   remain byte-identical. Engine fixtures on `llvmpipe`, NOT native pixel parity.
+
+## 2026-11-12 — Phase 6H added to M6: PlayState visual polish & `--song` CLI (human product decision)
+
+- **Decision (human-approved 2026-11-12):** Before entering Milestone 7 (Meta/UI
+  menus), complete the remaining PlayState visual elements deferred from §13.2
+  as **Phase 6H** (`docs/M6-CONTRACT.md` §3): note splashes (`Sick!`), hold covers
+  (player + opponent sustains), judgement popups (`Sick`/`Good`/`Bad`/`Shit`) +
+  combo digits (`num0..9`), visual + audio countdown (`3/2/1/GO`), and a
+  song-parameterized `oxide play --song <id> [--difficulty ...] [--story]` CLI
+  so any corpus song/variation can be playtested interactively with audio,
+  dialogue, and WGSL shaders.
+- **Execution order:** Requires a read-only native behavior freeze (`NoteSplash`,
+  `NoteHoldCover`, `PopUpStuff`, `Countdown`, `Strumline`/`PlayState`) before
+  Rust implementation. Existing `render-slice-2` fixture preservation vs
+  ADR-0020 fixture updates will be resolved explicitly during the 6H freeze.
