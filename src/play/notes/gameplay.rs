@@ -107,10 +107,16 @@ impl PlayState {
     pub fn process_notes(&mut self, elapsed_s: f64) {
         let pos_ms = self.conductor.song_position_ms;
 
+        let mut confirm_lanes = [false; 4];
         for note in &mut self.opponent_strumline.notes {
             if !note.has_been_hit && pos_ms >= note.data.time_ms {
                 note.has_been_hit = true;
-                self.opponent_strumline.play_confirm(note.lane);
+                confirm_lanes[note.lane.index()] = true;
+            }
+        }
+        for (i, triggered) in confirm_lanes.into_iter().enumerate() {
+            if triggered {
+                self.opponent_strumline.play_confirm(super::direction::NoteDirection::from_index(i));
             }
         }
 

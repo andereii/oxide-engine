@@ -6,7 +6,7 @@ pub mod strumline;
 pub mod visuals;
 
 pub use direction::NoteDirection;
-pub use note::{ActiveHold, NoteSprite, SongNoteData};
+pub use note::SongNoteData;
 pub use noteskin::NoteStyle;
 pub use strumline::Strumline;
 

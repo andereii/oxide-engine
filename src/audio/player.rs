@@ -155,7 +155,7 @@ impl SongAudioPlayer {
         self.is_paused = false;
         for track in &mut self.tracks {
             let Some(entity) = track.entity else { continue };
-            let Ok(mut sink) = sinks.get_mut(entity) else {
+            let Ok(sink) = sinks.get_mut(entity) else {
                 track.pending = true;
                 continue;
             };

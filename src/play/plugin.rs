@@ -100,7 +100,7 @@ fn setup_play_scene(
     commands.spawn((
         Text::new(""),
         TextFont {
-            font_size: 20.0,
+            font_size: FontSize::Px(20.0),
             ..default()
         },
         Node {
@@ -249,7 +249,7 @@ fn sync_arrow_visuals(
             *visibility = Visibility::Hidden;
             continue;
         };
-        if note.has_been_hit && !strum.active_holds.iter().any(|h| h.note_id == vis.note_id) {
+        if note.has_been_hit && !strum.active_holds.iter().flatten().any(|h| h.note_id == vis.note_id) {
             *visibility = Visibility::Hidden;
             continue;
         }
@@ -272,7 +272,7 @@ fn sync_arrow_visuals(
             *visibility = Visibility::Hidden;
             continue;
         };
-        if note.has_been_hit && !strum.active_holds.iter().any(|h| h.note_id == vis.note_id) {
+        if note.has_been_hit && !strum.active_holds.iter().flatten().any(|h| h.note_id == vis.note_id) {
             *visibility = Visibility::Hidden;
             continue;
         }

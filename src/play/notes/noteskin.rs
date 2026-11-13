@@ -151,8 +151,8 @@ impl NoteStyle {
             if let Some(a) = gp.strumline.animations.get(*dir) {
                 style.strum_anims[i] = StrumAnimNames {
                     static_anim: a.static_anim.clone(),
-                    press_anim: a.press_anim.clone(),
-                    confirm_anim: a.confirm_anim.clone(),
+                    press_anim: a.press.clone(),
+                    confirm_anim: a.confirm.clone(),
                 };
             }
             if let Some(n) = gp.notes.animations.get(*dir) {
