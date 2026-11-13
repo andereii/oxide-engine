@@ -542,7 +542,7 @@ impl PlayRuntime {
     }
 
     /// Draws the frozen scene, including the shared HUD layer group.
-    pub(crate) fn draw_layers(&self) -> Result<Vec<Vec<Quad>>, PlayError> {
+    pub(crate) fn draw_layers(&mut self) -> Result<Vec<Vec<Quad>>, PlayError> {
         Ok(self.scene.draw()?)
     }
 

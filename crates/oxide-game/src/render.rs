@@ -19,6 +19,7 @@
 //! - Output frames are 720*1280*4 RGBA8 bytes (row-major, top-left origin,
 //!   straight alpha), rendered into an sRGB target.
 
+pub(crate) mod abot;
 mod anim;
 // The interactive play module reuses the exact same scene/layer pipeline as the
 // headless renderer. These stay crate-private; only `play` consumes them.
@@ -561,6 +562,139 @@ mod tests {
         assert_ne!(
             with_hsv, without,
             "the kind-2 Hsv WGSL branch must change the rendered frame"
+        );
+    }
+
+    /// Wave 2 engine-level check (NOT a frozen fixture): the tankman
+    /// battlefield's animate-atlas DropShadow characters (pico-holding-nene,
+    /// otis-speaker, tankman-bloody) must render their limbs into per-character
+    /// offscreen targets and draw the rim through the composed output layer.
+    /// Clearing the output layers must change the frame, proving the composed
+    /// pass (not the old per-page sampling) supplies the character pixels.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the composed DropShadow pass"]
+    fn tankman_atlas_drop_shadow_renders_through_the_composed_pass() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "stress-pico", "easy")
+            .unwrap_or_else(|error| panic!("build stress-pico renderer: {error}"));
+        for tick in 0..=2u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("tankman scene step {tick}: {error}"));
+        }
+        let groups = harness::composed_group_count(renderer.scene.layer_specs());
+        assert_eq!(groups, 3, "three animate-atlas characters compose");
+        let outputs: Vec<usize> = renderer
+            .scene
+            .layer_specs()
+            .iter()
+            .enumerate()
+            .filter(|(_, spec)| spec.composed.is_some_and(|composed| composed.output))
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            outputs.iter().any(|layer| {
+                matches!(
+                    renderer.scene.layer_specs()[*layer].shader,
+                    shaders::LayerShader::DropShadow(shadow) if shadow.mask_page.is_some()
+                )
+            }),
+            "at least the captain mask page is bound on a composed output"
+        );
+
+        let layers = renderer.scene.draw().expect("tankman scene draws");
+        for layer in &outputs {
+            assert_eq!(
+                layers[*layer].len(),
+                1,
+                "each composed group draws one output quad"
+            );
+        }
+        let frame = renderer
+            .harness
+            .render(&layers, renderer.scene.layer_specs())
+            .expect("composed tankman pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(non_black > 0, "the tankman stage draws visible pixels");
+
+        let mut without_composed = layers;
+        for layer in &outputs {
+            without_composed[*layer].clear();
+        }
+        let frame_without = renderer
+            .harness
+            .render(&without_composed, renderer.scene.layer_specs())
+            .expect("tankman pipeline renders without the composed characters");
+        assert_ne!(
+            frame, frame_without,
+            "the composed output layers must contribute the character pixels"
+        );
+    }
+
+    /// Wave 2 engine-level check (NOT a frozen fixture): the sserafim
+    /// girlfriend's `Clp` mask must clip her hair through the kind-6/orthogonal
+    /// clip uniform path. The clipped layer must own quads and its live
+    /// world-space rect; clearing the clipped layer must change the frame.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the sserafim clip path"]
+    fn sserafim_clipped_hair_renders_through_the_clip_material() {
+        let root = assets_root();
+        let mut renderer = SliceRenderer::build_for_song(&root, "spaghetti-default", "easy")
+            .unwrap_or_else(|error| panic!("build spaghetti-default renderer: {error}"));
+        for tick in 0..=2u64 {
+            renderer
+                .step(tick, &[], &[])
+                .unwrap_or_else(|error| panic!("spaghetti scene step {tick}: {error}"));
+        }
+        let layers = renderer.scene.draw().expect("spaghetti scene draws");
+        let clipped_layers: Vec<usize> = renderer
+            .scene
+            .layer_specs()
+            .iter()
+            .enumerate()
+            .filter(|(_, spec)| spec.clip.is_some())
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            !clipped_layers.is_empty(),
+            "the sserafim girlfriend hair owns a live clip rect"
+        );
+        assert!(
+            clipped_layers
+                .iter()
+                .any(|layer| !layers[*layer].is_empty()),
+            "the clipped hair layer draws quads"
+        );
+        let frame = renderer
+            .harness
+            .render(&layers, renderer.scene.layer_specs())
+            .expect("clipped sserafim pipeline renders");
+        assert_eq!(frame.len(), harness::FRAME_BYTES, "frame byte length");
+        let non_black = frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8)
+            .count();
+        assert!(non_black > 0, "the sserafim stage draws visible pixels");
+
+        let mut without_clipped = layers;
+        for layer in &clipped_layers {
+            without_clipped[*layer].clear();
+        }
+        let frame_without = renderer
+            .harness
+            .render(&without_clipped, renderer.scene.layer_specs())
+            .expect("sserafim pipeline renders without the clipped hair");
+        assert_ne!(
+            frame, frame_without,
+            "the clipped layer must contribute visible hair pixels"
         );
     }
 }

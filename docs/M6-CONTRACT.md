@@ -2137,3 +2137,610 @@ only sserafim `sserafimPulseLights` backlight selection.
   sserafim stage-scripted extra characters (`yunjin`/`chaewon`/`eunchae`),
   perspective floor, dust backdrops and cutscene HSBC tweens remain outside
   the data-driven stage loader; retry resets are implicit via scene rebuild.
+
+## 16. Phase 6H behavior freeze — PlayState visual polish & song-parameterized `oxide play`
+
+Analyst round read the installed `$HOME/Descargas/fnf/Funkin` source + assets
+read-only (2026-11-12); original files untouched. `Path correction:` in this
+checkout the popup class is `source/funkin/play/components/PopUpStuff.hx`
+(no `play/notes/PopUpStuff.hx`), and there is no `popupScore` API — the
+entry points are `displayRating`/`displayCombo`. This freeze closes the
+§13.2 exclusion #5 scope list (judgement pops, combo pops, note splashes,
+hold covers, countdown display) before M7.
+
+### 16.1 OBSERVED facts (native citations)
+
+#### NoteSplash (`source/funkin/play/notes/NoteSplash.hx`)
+
+- Fields: `splashFramerate = 24`, `splashFramerateVariance = 2`
+  (l.10-11), overwritten from the noteStyle at build (`NoteStyle.hx:894-895`).
+- `play(direction, ?variant)` (l.40-60): when `variant` is null, counts
+  animations named `splash{DIRECTION}{i}` and picks
+  `variant = FlxG.random.int(0, animationAmount)` (l.44-46); animation names
+  are assigned by `NoteStyle.hx:983-989` from the JSON per-direction arrays
+  (`toNamedArray("splashLEFT")` appends the index, `AnimationData.hx:28`).
+  Then `frameRate = splashFramerate + FlxG.random.int(-variance, variance)`
+  (l.56) and `offset.set(width * 0.3, height * 0.3)` (l.59). `onAnimationFinished`
+  → `kill()` (l.62-66); no timers/tweens.
+- **No tint/RGB shader** (no `extraTint|extraColor|RGBPalette` in
+  `play/notes`): splash color is entirely per-direction atlas content.
+- Spawn rule (PlayState.hx:3142-3151): `HitNoteScriptEvent.doesNotesplash`
+  is `daRating == 'sick'` (default false, "true only on 'sick' notes",
+  ScriptEvent.hx:156-159); splash fires on `playerStrumline` only, same tick
+  as the hit, unless the event is cancelled (l.3147). **The opponent never
+  gets splashes** (`playNoteSplash` has exactly one call site, PlayState.hx:3150;
+  opponent/botplay paths only `hitNote` + `playNoteHoldCover`).
+- Pool (`Strumline.hx:48, 236-237`): `noteSplashes` group with
+  `NOTE_SPLASH_CAP = 6`, `zIndex = 50`. `playNoteSplash` (l.1076-1098) guards
+  `showNotesplash` and `noteStyle.isNoteSplashEnabled()`; positioning
+  (l.1087-1094): `x = strumline.x + getXPos(direction) + INITIAL_OFFSET +
+  splashOffsets[0] * splash.scale.x`, `y = strumline.y - INITIAL_OFFSET +
+  splashOffsets[1] * splash.scale.y` (INITIAL_OFFSET = -0.275 * 104, l.45;
+  `getXPos` = index * (104+8) * noteSpacingScale * strumlineScale.x,
+  l.1333-1352) — the strumline's own x/y, NOT the receptor sprite's.
+- `constructNoteSplash` (l.1228-1257): create when below cap; else revive the
+  first available; else **`FlxG.random.getObject(noteSplashes.members)`**
+  evicts a random ACTIVE splash (l.1252). `destroyOnNoUse = false` (l.1096).
+- Complete FlxG.random inventory for splashes: variant choice (NoteSplash.l.46),
+  per-play fps jitter (l.56), pool eviction (Strumline.l.1252).
+
+#### NoteHoldCover (`source/funkin/play/notes/NoteHoldCover.hx`)
+
+- A `FlxTypedSpriteGroup` with ONE child `glow` (l.9-31); `sparks` is declared
+  but never instantiated (l.16, null-checked l.77/88; `NoteStyle.hx:1011-1012`
+  confirms only glow is implemented). NOT a per-direction slot pool; one
+  cover instance per active hold note; group `zIndex = 40`, no size cap
+  (Strumline.l.232-233).
+- Animations per direction (3 each, built by `NoteStyle.hx:1009-1048,
+  1094-1100`): `holdCoverStart{Color}`, `holdCover{Color}` (FORCED
+  `looped = true`, l.1094), `holdCoverEnd{Color}`; color names
+  purple/blue/green/red for LEFT/DOWN/UP/RIGHT (`NoteDirection.hx:65-80`).
+- State machine `onAnimationFinished` (l.91-103): `holdCoverStart*` →
+  `playContinue()`; `holdCoverEnd*` → `visible = false; kill()`.
+  `playStart` does one `glow.setPosition(this.x, this.y)` (l.51); `update`
+  is EMPTY (l.44-47) — the cover does NOT follow the sustain after that.
+- `kill` (l.68-78) hides the group and clears `holdNote.cover`; `revive`
+  (l.80-89) restores `visible = true; alpha = 1.0`.
+- Lifecycle rules in `updateNotes` (Strumline.hx): sustain finished with
+  `hitNote && sustainLength <= 0` → player: `cover.playEnd()`, non-player:
+  cover hidden + killed immediately (l.671-680); hold dropped →
+  `cover.visible = false; cover.kill()` (l.714-719) and the dropped hold
+  itself gets `alpha = 0.0` (l.640). `SustainTrail.kill()`
+  (SustainTrail.hx:435) also calls `cover.playEnd()` when the current
+  animation is not already a `holdCoverEnd*`. `clean()` kills all splashes
+  and covers (l.892-902).
+- Spawn (l.1104-1132, positioning l.1119-1130): guards `showNotesplash` +
+  `noteStyle.isHoldNoteCoverEnabled()`; positioning
+  `x = strumline.x + getXPos(dir) + STRUMLINE_SIZE/2 - cover.width/2 +
+  holdCoverOffsets[0]*scale.x - 12` and
+  `y = strumline.y + INITIAL_OFFSET + STRUMLINE_SIZE/2 +
+  holdCoverOffsets[1]*scale.y - 96` — the `-12`/`-96` are literal hardcoded
+  adjustments ("we are evil" comment). Spawned from
+  `playNoteHoldCover(holdNoteSprite)` on player hit of a hold note
+  (PlayState.hx:3151), on opponent hits (l.2830-2835) and botplay (l.2888-2893).
+- **No miss/red/gray cover variant exists** in this engine.
+
+#### Judgement/combo popups (`source/funkin/play/components/PopUpStuff.hx`)
+
+- Group setup: `comboPopUps = new PopUpStuff(noteStyle)` (PlayState.hx:815),
+  `zIndex = 900` (2384), `cameras = [camHUD]` (2386). `popUpScore(daRating)`
+  (PlayState.hx:3365-3380): early-returns on `'miss'`; calls
+  `displayRating(daRating)` and `if (combo >= 10) displayCombo(combo)`.
+  Combo break with combo >= 10 additionally calls `displayCombo(0)`
+  (PlayState.hx:3351-3352). Only caller is the scoreable player hit
+  (l.3163).
+- `displayRating` (l.31-70): sprite from
+  `noteStyle.buildJudgementSprite(rating)` (null rating → `"good"`, l.33);
+  `zIndex = 1000`; position
+  `x = FlxG.width * 0.474 - width/2`,
+  `y = FlxG.camera.height * 0.45 - 60 - height/2` (l.40-43) + style offsets
+  (l.47-49); physics: `acceleration.y = 550`,
+  `velocity.y -= FlxG.random.int(140, 175)`,
+  `velocity.x -= FlxG.random.int(0, 10)` (l.51-53); fade
+  `alpha → 0` over `0.2 s` with `startDelay = beatLengthMs * 0.001`,
+  ease `EaseUtil.stepped(2)` for pixel judgements else null
+  (l.59-69), destroyed on complete. NO pooling, NO rotatePoint, NO
+  random starting offsets (verified absent).
+- `displayCombo` (l.72-124): digits zero-padded to 3 (l.82-83; the
+  `reverse` is commented out — most-significant-first with `daLoop` from 1);
+  per digit `x = FlxG.width * 0.507 - 36 * daLoop - 65`,
+  `y = FlxG.camera.height * 0.44` (l.93-94) + style offsets; physics:
+  `acceleration.y = FlxG.random.int(250, 300)`,
+  `velocity.y -= FlxG.random.int(130, 150)`,
+  `velocity.x = FlxG.random.float(-5, 5)` (l.102-104); fade `alpha → 0`
+  over `0.2 s` with `startDelay = beatLengthMs * 0.002`, pixel ease
+  `stepped(2)` else null (l.112-120). `displayCombo(0)` renders three
+  `num0` digits.
+- Assets (NoteStyle.hx:533-579 build + path resolution 606-628/794-823;
+  `scrollFactor(0.2, 0.2)`, `antialiasing = !isPixel`, pixel-perfect for
+  pixel): funkin.json — judgements `default:ui/popup/funkin/{sick,good,bad,shit}`
+  scale 0.65 (lines 130-148), digits `default:ui/popup/funkin/num0..num9`
+  scale 0.45 (150-198); pixel.json (fallback "funkin", line 5) — judgements
+  and digits `default:ui/popup/pixel/...` scale 4.2, isPixel (141-209).
+
+#### Countdown (`source/funkin/play/Countdown.hx`)
+
+- Steps `BEFORE, THREE, TWO, ONE, GO, AFTER` (l.18, 285-293);
+  `performCountdown` (l.47-103): `COUNTDOWN_START` first (script cancel ⇒
+  return false, l.49-54 — the §14 story cutscene hook cancels this);
+  `Conductor.update(startTimestamp + beatLengthMs * -5)` (l.60) — the
+  countdown begins 5 beats before the song start; one `FlxTimer` at
+  `beatLengthMs / 1000` s for **5** iterations driving
+  BEFORE→THREE→TWO→ONE→GO→AFTER (l.66-100); each tick decrements,
+  `showCountdownGraphic`, `playCountdownSound`, fires `COUNTDOWN_STEP`
+  (cancel ⇒ pause, l.89-94); `AFTER` ⇒ stop (l.96-99). The only
+  `COUNTDOWN_*` constant is `COUNTDOWN_VOLUME = 0.6`
+  (`Constants.hx:680`).
+- Graphics `showCountdownGraphic` (l.220-246): per-step sprite from
+  `noteStyle.buildCountdownSprite(index)`; fade `alpha → 0` over
+  `beatLengthMs / 1000` s with `cubeInOut` (pixel: `EaseUtil.stepped(8)`);
+  `cameras = [camHUD]`, `screenCenter()` + style offsets. `funkin.json`:
+  `countdownThree.assetPath = null` (**no "3" graphic**; sound
+  `shared:gameplay/countdown/funkin/introTHREE`, lines 102-104),
+  `ready`/`set`/`go` = `shared:ui/countdown/funkin/*` scale 1.0 (110-126);
+  `pixel.json`: `shared:ui/countdown/pixel/*` scale 6.0 isPixel (117-139),
+  sounds `shared:gameplay/countdown/pixel/intro*`. Files verified:
+  `assets/shared/images/ui/countdown/{funkin,pixel}/{ready,set,go}.png`,
+  `assets/shared/sounds/gameplay/countdown/{funkin,pixel}/intro{THREE,TWO,
+  ONE,GO}.ogg` (+ mp3 twins; desktop ext = `ogg`, `Constants.hx:618`).
+- Sound `playCountdownSound` (l.251-258): `Paths.sound` for the
+  `library:path` value, `FunkinSound.playOnce(path, 0.6)` — fire-once, not
+  looped music.
+- Song start: during countdown Conductor advances manually (PlayState.hx:
+  1144-1152); when `songPosition >= startTimestamp + combinedOffset` ⇒
+  `startSong()` (l.1151); `startSong` (l.2634+) starts the instrumental
+  (`playInst(1.0, instId, false)`) — music starts AFTER the countdown;
+  `FlxG.sound.music.time = startTimestamp` (l.2659). Pause pauses/resumes
+  the countdown timer (PlayState.hx:1373-1375/1697; Countdown.hx:136-155);
+  `skipCountdown` stops the timer and `Conductor.update(0)` (l.175-181);
+  retry re-runs `performCountdown` after a 0.5 s vwoosh
+  (PlayState.hx:1118-1132). Video-cutscene end calls
+  `startCountdown()` (VideoCutscene.hx:370).
+
+#### Audio stem resolution (Paths.hx + Song.hx) and the 61 chart-id inventory
+
+- Rules (`source/funkin/Paths.hx:142-159`; `project.hxp:1426-1427` maps
+  `assets/songs` to the `songs` library; desktop sound ext = `ogg`):
+  `songs:assets/songs/{song.toLowerCase()}/Inst{suffix}.ogg` and
+  `.../Voices{suffix}.ogg`. `SongDifficulty.getInstPath` (Song.hx:830-850):
+  a requested inst id present in `altInstrumentals` uses `-{instId}`;
+  otherwise the default is `-{characters.instrumental}` (empty → none).
+  Voice lists (Song.hx:900-999): variation suffix `-{variation}` unless
+  empty/`'default'`; when metadata declares `playerVocals`/`opponentVocals`,
+  EVERY declared `Voices-{id}{suffix}.ogg` must exist or the declared list
+  falls through; the automatic path tries `Voices-{charId}{suffix}.ogg`
+  stripping one `-segment` from the char id per miss (`bf-car` → `bf`),
+  then retries the whole chain WITHOUT the variation suffix; `buildVoiceList`
+  (l.886-898) finally tries bare `Voices{suffix}.ogg`; `buildVocals`
+  (l.1006-1051) loads only existing paths and falls back to the legacy
+  single bare `Voices{suffix}.ogg` as a player voice.
+- Inventory (all 61 metadata chart-ids; charts only under
+  `assets/preload/data/songs/<song>/`, stems under `assets/songs/<song>/`):
+  every chart's declared inst stem exists (base and declared `-pico`
+  alternates). Voice stem facts that must drive engine behavior:
+  1. **`spaghetti:default`**: `opponentVocals: ['sserafim-kazuha']` declared
+     but no `Voices-sserafim-kazuha.ogg`/`.mp3` and no suffix-strip/bare
+     fallback exists → the resolved opponent voice list is EMPTY (music
+     plays, no opponent vocals).
+  2. **`blazin:default`**: metadata declares no vocals and
+     `assets/songs/blazin/` has no `Voices*` at all — fully instrumental.
+  3. **`monster:default`**: stray legacy `Voices.mp3` with no `.ogg`
+     counterpart — unused on desktop (`EXT_SOUND = 'ogg'`).
+  4. Segment-strip fallbacks are exercised widely: `bf-car`/`mom-car`
+     (`high:default`, `milf:default`, `satin-panties:default`),
+     `bf-pixel`/`senpai-angry` (senpai/roses/thorns defaults),
+     `pico-playable` (many `-pico` player vocals strip to `Voices-pico*`),
+     `pico-holding-nene`/`tankman-bloody` (stress:pico), and the weekend-1
+     `darnell/lit-up:default` player voice `Voices-pico.ogg` (stripped from
+     `pico-playable`). Christmas variants (`bf-christmas`, `monster-christmas`,
+     `parents-christmas`) reuse the non-christmas stems on the default
+     difficulties but have dedicated `-erect` stems.
+  5. `test/test.json` is chart-editor data outside the 61 (stems exist but
+     are not corpus).
+
+#### noteStyle JSON schema (splash/cover/popup/countdown relevant)
+
+`source/funkin/data/notestyle/NoteStyleData.hx`: shared asset fields
+`assetPath` (required), `scale` default 1.0, `offsets` default `[0,0]`,
+`isPixel` default false, `alpha` default 1.0, `animated` default false;
+`UnnamedAnimationData`: `looped`/`flipX`/`flipY` default false, `frameRate`
+default 24, `frameIndices` default all. noteSplash: `enabled` default true,
+`framerateDefault` 24, `framerateVariance` 2, `blendMode` "normal",
+per-direction `leftSplashes/downSplashes/upSplashes/rightSplashes` arrays;
+accessor fallback chain noted (`NoteStyle.hx:342-345, 973-1007`).
+holdNoteCover: `enabled` default true; per-direction
+`{assetPath?, start?, hold?, end?}` with the fallback order
+direction assetPath → root assetPath → fallback direction → fallback root
+(`NoteStyle.hx:1141-1143`); `getHoldCoverOffsets` default `[0,0]`.
+- `funkin.json`: splash `shared:noteSplashes`, alpha 0.8, offsets `[25,-5]`,
+  2 variants per direction (the literal prefix `"note impact 1  blue0"`
+  on line 64 contains a DOUBLE SPACE — OBSERVED shipped-file quirk, no
+  scale/isPixel/framerate/blendMode → defaults). Cover: per-direction
+  `shared:holdCover{Purple,Blue,Green,Red}` with
+  `holdCoverStart*/holdCover*/holdCoverEnd*` prefixes.
+- `pixel.json` (fallback "funkin"): splash `week6:pixelNoteSplash`,
+  scale 4.0, alpha 1.0, isPixel, offsets `[27.5, 18.5]`, blend "screen",
+  fps 33±2, 3 variants per direction; cover `week6:pixelNoteHoldCover`,
+  scale 6.0, isPixel, offsets `[29, -4]`, all directions share the
+  `loop0000`/`loop`/`explode` prefixes.
+
+### 16.2 DERIVED requirements (Oxide engine integration; labelled DER)
+
+1. **Ephemeral layer pools (DER).** All four polish families live on `camHUD`
+   (strumlines get `cameras = [camHUD]`), i.e. ABOVE the existing HUD group
+   in our layer stack. Native ordering among the ephemerals: covers
+   (`zIndex = 40`) < splashes (`zIndex = 50`) < combo group (`zIndex = 900`)
+   < rating sprites (`zIndex = 1000`); they slot relative to the HUD
+   elements per the §13-frozen HUD zIndex values. The scene gains a
+   FIXED-SIZE ephemeral layer set appended after the HUD group:
+   covers (bounded by active player+opponent holds, one instance per hold),
+   splashes (CAP = 6, evict per 16.1), 1 rating popup + up to 3 combo digits
+   (fresh instances, no pooling). Each ephemeral layer owns a private state
+   machine advanced on the 1 ms sim tick; empty layers stay hidden.
+2. **Deterministic randomness (DER + [D]).** Native drives splash variant,
+   splash fps jitter, pool eviction and ALL popup velocities with
+   `FlxG.random` (non-deterministic across runs). For engine determinism
+   (two-run sha256 fixtures) the scene uses a private PRNG seeded
+   deterministically (e.g. xorshift64* seeded from a fixed constant, advanced
+   in a fixed order at each spawn), substituting the native integer ranges
+   exactly (`int(0, amount)`, `int(-var, var)`, `int(140,175)`, `int(0,10)`,
+   `int(250,300)`, `int(130,150)`, `float(-5,5)`). Labels: the RANGES are
+   OBSERVED; the seed/sequence is an ENGINE DECISION (native gives no parity
+   obligation on which splash variant appears).
+3. **Countdown integration (DER).** `PlaySession` currently starts audio at
+   song position 0 with no countdown. 6H adds the observed 5-beat countdown:
+   conductor ticks at `startTimestamp - 5 * beatLengthMs`, per-step sprite
+   fade (`cubeInOut`, pixel `stepped(8)`) + fire-once stems at volume 0.6,
+   music starts when songPosition reaches `startTimestamp` (respecting the
+   §14 story-entry cancellation chain on senpai/roses/thorns/darnell and
+   the dialogue `CUTSCENE_ADVANCE` flow). Pause/resume of the countdown
+   timer integrates with the existing pause surface (M7 restart items stay
+   named). The M4 conductor fixture `countdown-1ms-playback-1ms-v1` remains
+   the timing authority.
+4. **Audio generalization (DER).** `play/audio.rs` replaces the hardcoded
+   `songs/bopeebo` path with the frozen resolution ladder: inst =
+   `-{altInstrumentals id}` or `-{characters.instrumental}`; voices =
+   declared vocals ladder / auto segment-strip / no-variation retry / bare
+   fallback; missing tracks resolve to empty (spaghetti opponent vocals,
+   blazin) rather than erroring; stems load per chart-id (`song` +
+   variation) from `assets/songs/<song>/`.
+5. **CLI (DER).** `PlayConfig` gains `song: String` (default `"bopeebo"`)
+   and `--story`; `Difficulty` generalizes from the 3-value enum to the
+   metadata-declared difficulty list (parse from `--difficulty`, validate
+   against the chart's metadata like `build_for_song` already does).
+   `--story` plays the level's chart sequence (level JSON, M7 surfaces the
+   meta UI; the CLI keeps a minimal non-interactive path). 6E cutscene/
+   dialogue payloads and 6G shaders flow through the existing
+   `build_for_song(_with_dialogue)` loaders.
+6. **Fixture impact (DER → APPROVAL).** Today NONE of these four families
+   is rendered by `Scene`, so every `render-slice-2` family is untouched
+   only if the ephemerals/countdown stay OFF the frozen fixture loaders.
+   Two options requiring the human decision (§16.4):
+   (a) gate the polish layers off on `build`/`build_for_song` (the dialogue
+   and note-desaturation precedent) — zero fixture impact; or
+   (b) enable splashes+popups on one NEW 6H family (or an existing one) and
+   re-establish that family's digests under the ADR-0020 path.
+   Covers follow holds, which the frozen families already exercise; enabling
+   them changes frozen digests unless gated.
+
+### 16.3 Engine decisions
+
+1. **Fixed-size ephemeral pools + one WGSL-free material path.** Splashes,
+   covers, popups and countdown sprites are plain tinted quads (no shader
+   involvement); they reuse the existing `ColorMaterial`/`LayerShader::None`
+   layer pipeline. Splash cap 6, digits bounded at 3, rating 1, covers
+   bounded by live holds — no unbounded growth, no allocation churn
+   per tick beyond existing refresh.
+2. **Deterministic PRNG (fixed constant seed) is private** to the scene;
+   the ranges match native. No new dependency (no rand crate).
+3. **Countdown lives in PlaySession + a small scene state** (sprite fade),
+   not in the sim trace: the sim/gameplay trace schema is NOT extended by
+   6H (the sim's hit rows already carry the judgement needed to drive
+   popups/splashes; countdown ticks are play-session scheduling, matching
+   §14's precedent that cutscene scheduling stays out of the trace schema).
+4. **`--song` accepts any corpus chart-id** (including variations like
+   `darnell-erect`), reusing `split_song_variant` semantics; fail closed on
+   unknown ids/difficulties with the same message style as the gates.
+5. **No new dependencies**; `Difficulty` may become a string-backed parse
+   validated against metadata (public surface change confined to
+   `oxide_game::play` + `src/main.rs`).
+
+### 16.4 Validation obligations & human approval items
+
+- **Unit obligations (no fixture approval needed):** splash spawn table
+  (sick-only, player-only, cap/eviction, position formula incl.
+  INITIAL_OFFSET and splash offsets), cover state machine (start→loop on
+  finish, end burst, drop kill, opponent immediate kill, sustain-follow
+  absence), popup physics/fade constants (velocity/acceleration ranges,
+  0.2 s fades, beat-relative start delays, 3-digit padding, `displayCombo(0)`),
+  countdown step table (5 beats, step→sprite/sound mapping, no "3" graphic,
+  volume 0.6, story-cutscene cancellation), and the full audio-stem ladder
+  across the 61 chart-ids (incl. the spaghetti/blazin/monster edge cases and
+  segment-strip fallbacks). Two-run sha256 determinism of the deterministic
+  PRNG consumers.
+- **Fixture policy question (HUMAN APPROVAL REQUIRED before implementation):**
+  option (a) keep splash/popup/cover/countdown layers off the frozen
+  `render-slice-2` loaders (zero digest impact, PlaySession-only visuals) —
+  recommended as the default; or option (b) enable them on a designated
+  family and re-establish that family's digests via the ADR-0020 path.
+  This must be answered before 6H implementation lands.
+- **Approval items:** (a) the fixture-policy decision above; (b) none other
+  — no new dependencies, no tolerance changes, no asset changes are
+  requested; `Difficulty` generalization is within the approved §6H write
+  set.
+
+## 17. Block-A native-parity fixes & 7th ADR-0020 re-establishment (2026-11-12)
+
+Human-directed native-vs-engine comparison found five systemic bugs; all were
+verified in code and native source before fixing, implemented across
+`oxide-game`/`oxide-atlas`, and the affected engine fixtures re-established
+under the ADR-0020 path after visual PNG inspection.
+
+1. **Camera projection on `Sheet::Sprite` characters** (§11 amendment): the
+   Sprite rig branch now composes `concat(projection, matrix)` exactly like
+   the Atlas branch and the prop paths — Sprite-backed characters
+   (`senpai`, `gf-pixel`, `bf-pixel`, `spirit`, `tankman-bloody`) follow
+   stage camera pan/zoom.
+2. **Native character anchor** (§11 amendment): the anchor is
+   `stagePos − origin(idleDims@finalScale) + globalOffsets` (globalOffsets
+   UNSCALED) with per-animation shift `−(animOffsets − globalOffsets)·scale`
+   where omitted animation `offsets` default to `[0, 0]` (native
+   `Bopper.applyAnimationOffsets` assigns null → coerced `[0,0]`;
+   `Stage.hx:443-466` anchors from the idle animation; `setScale` re-anchors
+   feet). Characters carry an `idle_size` (idle animation's first frame)
+   replacing the first-document-frame/main-sheet-bounds basis.
+3. **HealthIcon center-origin scaling** (§13 amendment): the icon draw
+   matrix applies flixel's `updateHitbox`+`centerOrigin` chain — the
+   previous top-left-origin scaling pushed pixel icons ~59-73 px below the
+   bar and normal icons ~15 px into the score text during bops. §13's
+   position algebra (POSITION_OFFSET 26, `y = bar.y − height/2`) is
+   unchanged.
+4. **Animate `M3D` matrices + `Clp` mask layers** (§11 amendment):
+   `oxide-atlas` derives the 2D affine from element/`TRP` `M3D` 4×4 when
+   `MX` is absent (native `FlxAnimateJson.hx:713-717` layout; MX keeps
+   priority so the frozen bf/dad/gf atlas path is byte-identical), and
+   `LT: "Clp"` mask layers never draw; masked quads carry the mask's AABB
+   clip rect (native mask-before-clipped ordering verified: `Layer.hx:
+   138-178`), consumed by the renderer through a new `LayerShader::Clip`
+   discard pass with preallocated per-page clip slots and a named AABB
+   approximation of native per-pixel masks. NOTE (brief correction): M3D
+   translations do NOT match co-located `TRP x/y` in the shipped sserafim
+   data (corpus-wide 690 matches / 80,080 mismatches); native uses the M3D
+   translation only.
+5. **DropShadow composed-character pass** (§15.3.4 supersedes the per-page
+   approximation): characters owning `DropShadow` over atlas limbs render
+   their limb layers into a per-group transparent 1280×720 offscreen target
+   (existing offscreen-camera mechanism) and draw one output quad sampling
+   it — the native `useRenderTexture = true` semantics
+   (`DropShadowShader.hx:262-265`). Named approximations: `dist` is
+   screen-pixel-scale (not native sprite-texture pixels) and the altMask is
+   mapped over the character's current limb AABB.
+6. **SserafimShader audit: zero findings** against `SserafimShader.hx` /
+   `sserafim.hxc` / shipped `spaghetti-chart.json` payloads (HSBC, dark/light
+   divisors, 0.07 light multiplier, `darkAmt > 0.65` flip, event wiring incl.
+   `0xAARRGGBB` colors, per-beat selection).
+- **Fixture re-establishment (7th ADR-0020 pass, human-approved):** 211
+  frame digests across the six gameplay families + the `dialogue` family
+  re-established after visual inspection of the generated PNGs (alignment,
+  icon centering, no `#0000FF` mask rect, tankman `#DFEF3C` rim, coherent
+  M3D characters, pulse-light tint). ALL trace digests UNCHANGED (the sim
+  was untouched); only the `sserafim` geometry section changed (kazuha's
+  M3D/mask-aware atlas bounds). Bopeebo `bf/dad/gf` atlas parses remain
+  byte-identical (`MX`-priority).
+- **Named limitation:** the scene camera-focus sampling keeps the frozen
+  §12.7 sim algebra; native `resetCameraFocusPoint` derives from the
+  corrected anchor, so camera-focus parity is a separate follow-up (it does
+  not affect drawn characters).
+- **Block-B decision:** `ABotSpeaker` (nene/otis-speaker speaker unit,
+  visualizer bars, eye-look state) is scoped as its own follow-up slice
+  after Block A stabilizes; it is a new component needing its own behavior
+  freeze. The M8 HScript behaviors (background cars, running tankmen/Otis
+  shooting, extra sserafim members, `dust1..dust4`) remain out of scope.
+
+## 18. Block B — `ABotSpeaker` Speaker Unit Behavior Freeze
+
+Status: **Behavior-frozen** before Block B Rust edits; supersedes §17's
+deferral of `ABotSpeaker` (leaving M8 HScript extensions and Phase 6H out of
+scope).
+
+### 18.1 Observed Facts (Native Sources)
+
+1. **Applicable corpus speaker characters** (`scripts/characters/{nene,nene-christmas,nene-tankmen,nene-dark,otis-speaker}.hxc`):
+   - All five non-pixel A-Bot speaker characters share the exact same
+     5-component Animate-Atlas speaker assembly attached to the `gf` stage
+     character: `eyeWhites`, `stereoBG`, `pupil`, `abotViz`, and `abot`.
+   - `nene-pixel` (`nene-pixel.hxc`, used on pixel `school`/`schoolErect`
+     pico mixes) uses separate pixel-art assets (`aBotPixelBody`,
+     `aBotPixelBack`, `aBotPixelSpeaker`, `abotHead`, `aBotVizPixel`,
+     `aBotPixelSpeaker_mask`) and is **not** part of the Animate-Atlas
+     `ABotSpeaker` slice (`render-slice-2` contains no `nene-pixel` family).
+2. **Sub-layer composition and z-ordering** (`nene.hxc:188-215, 376-399`,
+   `otis-speaker.hxc:58-84, 181-205`): relative to parent character's stage
+   `char_z = stage.characters.<role>.zIndex`, final `setupAbot()` z-indices
+   draw in strictly ascending back-to-front order:
+   - `eyeWhites` (`makeSolidColor(160, 60)` opaque `#FFFFFFFF`): `zIndex = char_z - 20` (`abot.zIndex - 10`).
+   - `stereoBG` (static PNG `characters/abot/stereoBG.png`): `zIndex = char_z - 18` (`abot.zIndex - 8`).
+   - `pupil` (AnimateAtlas `characters/abot/systemEyes`, `applyStageMatrix: false`): `zIndex = char_z - 15` (`eyeWhites.zIndex + 5`).
+   - `abotViz` (7-bar `ABotVis` group, Sparrow `characters/abot/aBotViz`, `viz{1..7}0`, antialiasing true, scale 1.0): `zIndex = char_z - 11` (`abot.zIndex - 1`).
+   - `abot` (`ABotAtlasSprite`, AnimateAtlas `characters/abot/abotSystem` or `characters/abot/dark/abotSystem`): `zIndex = char_z - 10` (`this.zIndex - 10`).
+   - Parent speaker character draws at `char_z` (in front of all five A-Bot
+     layers). On `tankmanBattlefieldErect`, `gf.zIndex = 100` places A-Bot at
+     `80..90` and stage prop `tankBricks` at `zIndex = 101` in front of both
+     Otis and A-Bot (`tankmanBattlefieldErect.json:62-83`).
+   - All five layers match parent visibility (`visible = this.visible`), use
+     `scroll = [1.0, 1.0]`, `scale = [1.0, 1.0]`, `angle = 0.0`, and
+     `flipX = false`.
+3. **World placement and Block-A anchor alignment**
+   (`Stage.hx:455-460`, `BaseCharacter.hx:277-288`, `Bopper.hx:322-341`,
+   `nene.hxc:374-398`, `otis-speaker.hxc:181-205`):
+   - `Stage.addCharacter` computes `this.x = stagePos[0] - idle_w * scale / 2 + globalOffsets[0]`
+     and `this.y = stagePos[1] - idle_h * scale + globalOffsets[1]` (the
+     exact `CharacterRig.anchor` computed by Block A).
+   - Native computes `abot` top-left as:
+     - Nene family (`nene`, `nene-christmas`, `nene-tankmen`, `nene-dark`):
+       `abot.x = this.x - 95 - (-globalOffsets[0] * scale.x)`,
+       `abot.y = this.y + 384 - (-globalOffsets[1] * scale.y)`
+       (i.e. `anchor + data_offsets * scale + [-95.0, 384.0]`).
+     - `otis-speaker`:
+       `abot.x = this.x + 170 - (-globalOffsets[0] * scale.x)`,
+       `abot.y = this.y + 455 - (-globalOffsets[1] * scale.y)`
+       (i.e. `anchor + data_offsets * scale + [170.0, 455.0]`).
+   - Child offsets relative to `(abot.x, abot.y)` (identical across all five):
+     - `eyeWhites`: `(abot.x + 40, abot.y + 250)`
+     - `pupil`: `(abot.x + 50, abot.y + 238)`
+     - `stereoBG`: `(abot.x + 150, abot.y + 30)`
+     - `abotViz`: group origin `(abot.x + 207, abot.y + 84)`; bars `0..7`
+       (`viz10..viz70`) use step offsets `positionX = [0, 59, 56, 66, 54, 52, 51]`
+       and `positionY = [0, -8, -3.5, -0.4, 0.5, 4.7, 7]` -> cumulative offsets
+       `cumX = [0, 59, 115, 181, 235, 287, 338]` and
+       `cumY = [0, -8, -11.5, -11.9, -11.4, -6.7, 0.3]` (`ABotVis.hx:30-49`).
+4. **Body and pupil animation sync** (`ABotAtlasSprite`, `systemEyes`,
+   `nene.hxc:197-203, 217-223, 267-358`, `otis-speaker.hxc:67-73, 123-131, 282-306`):
+   - **Body (`abotSystem`):** Main timeline has **16 frames (`0..=15`)** at
+     **24 fps** (`metadata.framerate: 24.0`), non-looped; frame `0` is
+     non-bumping. Every beat-gated `dance()` restarts `abot` from frame `1`
+     (`abot.anim.play("", true, false, 1)`), advancing `1..=15` and holding on
+     `15`. Both `nene` and `otis-speaker` omit `danceEvery` -> default `1.0`
+     (every beat).
+   - **Pupils (`systemEyes`):** Main timeline has **32 frames (`0..=31`)** at
+     **24 fps**, non-looped (`applyStageMatrix: false`, ignoring the top-level
+     `StageInstance.Matrix3D` translation).
+     - Frames `0..=15` glide center/right -> left; `16..=21` hold resting left
+       (`m30 = -9, m31 = 17.35`); `22..=29` glide left -> right; `30..=31` hold
+       resting right (`m30 = 0, m31 = -0.95`, visually identical to frame `0`).
+     - Initial pose at scene start is frame `0` (paused, right-looking).
+     - `FocusCamera` `char == 0` triggers `movePupilsRight()` (plays from
+       frame `17` forward); `char == 1` triggers `movePupilsLeft()` (plays from
+       frame `0` forward, pausing at frame `16` via `onFrameChange`); other
+       `char` values leave pupils unchanged.
+     - Additionally, `NeneBaseCharacter` (`nene`, `nene-christmas`,
+       `nene-tankmen`, `nene-dark`, NOT `otis-speaker`) triggers
+       `movePupilsLeft()` on `"weekend-1-lightcan"` and `movePupilsRight()` on
+       `"weekend-1-cockgun"` in both `onNoteHit` and `onNoteMiss`.
+     - Note on `nene.hxc:338-358`: `otis-speaker.hxc` omits Nene's redundant
+       `onUpdate` `pupilState` pause check (`if pupilState == RIGHT && curFrame >= 17`)
+       and pauses left at frame `16` via `onFrameChange` while letting right
+       play `17..=31`. Both variants hold the identical resting-left frame `16`
+       and resting-right pose `30..=31`.
+5. **Visualizer bars (`ABotVis.hx:24-165`):**
+   - `nene.hxc:214, 429` starts `abotViz.alpha = 0` and sets `1` on
+     `SONG_START`; `otis-speaker.hxc` starts `alpha = 1`.
+   - Every draw computes `animFrame = (volume == 0 || muted) ? 0 : round(level * 6)`
+     and sets `group.members[i].visible = animFrame > 0`, selecting frame
+     `abs(clamp(animFrame - 1, 0, 5) - 5)` (`viz{i}0000` tallest .. `viz{i}0005`
+     shortest). When no audio FFT analyzer is present (`analyzer == null`),
+     default levels are all `0.0`, so `animFrame == 0` and all 7 bars remain
+     `visible == false`.
+6. **Shaders and stage color variants** (`shaders.rs`, `nene*.hxc`,
+   `otis-speaker.hxc`, stage `.hxc` files):
+   - Notice Oxide `Hsbc::new(brightness, hue, contrast, saturation)` parameter order.
+   - `nene` & `nene-christmas`: `synchronizeShader()` copies the parent
+     character's stage shader (`character_shader(stage_id, Girlfriend, id, masks)`)
+     to `abot`, `abotViz`, `stereoBG`, `eyeWhites`, while leaving **`pupil`
+     with `LayerShader::None`**.
+     - On `phillyStreetsErect`: `nene` gets `AdjustColor(-20, -5, -25, -40)`.
+     - On `phillyBlazin`: `abot` additionally receives color tint `0xFF888888`.
+   - `otis-speaker` & `nene-tankmen`: parent keeps its stage shader (e.g.
+     `DropShadow` on `tankmanBattlefieldErect`), while A-Bot components override
+     shaders independently (never copying `DropShadow`):
+     - `abot`, `stereoBG`, `pupil`: `AdjustColor(Hsbc::new(-40.0, -40.0, -25.0, -20.0))`
+     - `eyeWhites`: `LayerShader::None`
+     - `abotViz`: `AdjustColor(Hsbc::new(-12.0, -30.0, 0.0, -10.0))`
+   - `nene-dark`:
+     - `abot` uses `characters/abot/dark/abotSystem` (geometry/timelines identical
+       to `abotSystem`; swapped `spritemap1.png`), `LayerShader::None`.
+     - `stereoBG` tint `0xFF616785`, `eyeWhites` tint `0xFF6F96CE`,
+       `pupil` `LayerShader::None`, `abotViz` `AdjustColor(Hsbc::new(-12.0, -26.0, 0.0, -45.0))`.
+7. **Adobe Animate verbose JSON format (`oxide-atlas`):**
+   - `characters/abot/abotSystem/Animation.json`, `dark/abotSystem/Animation.json`,
+     and `systemEyes/Animation.json` use unminified Adobe Animate JSON (`metadata`,
+     `ANIMATION.StageInstance`, `ANIMATION.TIMELINE.LAYERS`, `SYMBOL_DICTIONARY.Symbols`,
+     `Frames[].{index, duration, name, elements}`, `SYMBOL_Instance`,
+     `ATLAS_SPRITE_instance`, and `Matrix3D` `{ m00..m33 }` objects whose
+     column-major 2D affine projection is `[m00, m01, m10, m11, m30, m31]`).
+   - `oxide-atlas::animate_stage::parse_stage` currently accepts only the
+     minified BTA schema (`MD`, `AN`, `SD`, `L`, `FR`, `E`, `SI`, `ASI`, `MX`, `M3D`).
+
+### 18.2 Derived Requirements
+
+1. `oxide-atlas::animate_stage` must parse both minified BTA JSON and verbose
+   Adobe Animate JSON (`metadata` / `ANIMATION` / `SYMBOL_DICTIONARY` /
+   `Matrix3D` object) into the same `StageData` representation without
+   altering existing minified atlas behavior.
+2. When `gf` (or any loaded character) is one of the five Animate-Atlas
+   `ABotSpeaker` variants, `StageScene` must insert the five A-Bot child layers
+   at their exact `zIndex` offsets below the character (`char_z - 20`, `-18`,
+   `-15`, `-11`, `-10`) so stage props such as `tankBricks` (`z=101`) sort
+   between `gf` (`100`) and foreground characters (`200`) exactly as native.
+3. A-Bot root world position must derive from the Block-A character anchor plus
+   `(data_offsets * scale)` plus the variant's signed offset (`[-95, 384]` or
+   `[170, 455]`), without disturbing Block-A character anchors.
+4. `abot` body timeline must restart from frame `1` on each speaker `dance()`
+   and clamp at frame `15`; `pupil` timeline must start paused at frame `0`,
+   respond to `FocusCamera` `target_char == 0` (play `17..=31` / stop at `30..=31`)
+   and `target_char == 1` (play `0..=16` / pause at `16`), and (for `nene*`
+   variants only) respond identically to `"weekend-1-lightcan"` and
+   `"weekend-1-cockgun"` on `Hit`, `OpponentHit`, and `Miss`.
+5. `abotViz` bars remain `visible = false` when no audio FFT energy/analyzer is
+   present (matching native `ABotVis.hx:152` headless / muted behavior), emitting
+   no fabricated visualizer bars in `render-diff`.
+6. Variant shaders and solid/sprite color tints must be applied per component as
+   observed in §18.1 item 6, using the existing GPU `AdjustColor` pipeline.
+7. Explicit Block-B non-goals remain untouched: `otis-speaker` combat
+   (`muzzleFlash`, `shoot1..4`), `nene` train-hair reaction (`HAIR_BLOWING` /
+   `HAIR_FALLING`), `nene` `normalChar` lightning crossfade, `nene-tankmen`
+   `comboHeart`, `nene-pixel`, passing cars/running tankmen (M8), Phase 6H
+   HUD/note visuals, and camera-focus math refactors.
+
+### 18.3 Engine Decisions
+
+1. **Unified parser in `oxide-atlas::animate_stage`:** parameterize field lookup
+   across minified and verbose Animate JSON keys inside `animate_stage.rs`
+   (including `Matrix3D` object -> `[m00, m01, m10, m11, m30, m31]` projection
+   and integer-valued float `metadata.framerate` validation), keeping the public
+   `parse_stage` / `AnimateStageError` contract cleanly intact.
+2. **Variant-table driven `ABotSpeaker` in `oxide-game::render`:** introduce a
+   single compact `ABotSpec` / `ABotRig` keyed by `(character_id, stage_id)`
+   handling asset paths (`abotSystem` vs `dark/abotSystem`), root offset,
+   body/eye/stereo tints, note-kind trigger enablement, and per-part `LayerShader`.
+   No trait hierarchy or duplicate per-character modules.
+3. **`eyeWhites` backing texture & drawing:** create a deterministic 2×2 opaque
+   white `#FFFFFFFF` RGBA texture page scaled to `(160, 60)` (`makeSolidColor`
+   equivalent) and reuse existing `StageLayer` / `prop_world_matrix` rendering
+   primitives (incl. color tint modulation on solid/static/atlas parts).
+4. **Headless `abotViz` representation:** load the `aBotViz` Sparrow frames and
+   store the 7 bar positions/shaders in `ABotRig` while gating bar visibility
+   on live spectrum levels (`0.0` in deterministic `render-diff`), avoiding
+   arbitrary static bars that contradict native `ABotVis.hx:152`.
+5. **Pupil playback target-range rule:** model `pupil` as a `systemEyes`
+   timeline at 24 fps initialized paused at frame `0`:
+   - `movePupilsLeft()` sets active range `[0..=16]` from frame `0`, advancing at
+     24 fps and pausing at frame `16`.
+   - `movePupilsRight()` sets active range `[17..=30]` from frame `17`,
+     advancing at 24 fps and pausing at frame `30` (visually identical to `31`),
+     avoiding the contradictory `nene.hxc:342` `pupilState` stall while
+     matching both `otis-speaker.hxc` and intended Weekend-1 left/right motion.
+
+### 18.4 Validation Obligations
+
+1. `oxide-atlas` unit tests covering verbose Animate JSON parsing (symbols,
+   nested frames, `Matrix3D` object affine extraction, float framerate, fail-closed
+   errors on non-integer framerate / missing keys), leaving minified BTA tests
+   untouched.
+2. `oxide-game` targeted unit tests covering:
+   - Z-ordering of all 5 A-Bot layers relative to `gf` and `tankBricks` (`z=101`).
+   - Exact root and child anchor coordinates for `nene` (`phillyStreetsErect`)
+     and `otis-speaker` (`tankmanBattlefieldErect`) preserving Block-A character
+     positions.
+   - Body dance frame `1..=15` restart/clamp on beat and pupil range playback on
+     `FocusCamera` `0`/`1` and `weekend-1-lightcan`/`cockgun` (`nene*` vs `otis-speaker`).
+   - Variant shader & tint assignments (`nene`, `otis-speaker`, `nene-dark`,
+     `nene-tankmen`, `nene-christmas`, `phillyBlazin`).
+   - Headless `abotViz` zero-level invisibility.
+3. Single post-integration `cargo xtask render-diff`, visual PNG inspection of
+   newly rendered `philly_streets_erect` and `tankman_erect` frames, ADR-0020
+   re-establishment of **only** affected family frame/run digests in
+   `tests/fixtures/render-slice/_manifest.json` (`trace_sha256` & `geometry`
+   unchanged) recorded in `docs/DECISIONS.md` and `docs/PROGRESS.md`, followed
+   by one clean `cargo xtask verify` and `tools/workflow_lint.py` pass.
+

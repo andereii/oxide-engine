@@ -341,6 +341,20 @@ pub(crate) enum LayerShader {
     Wiggle(Wiggle),
     Rain(Rain),
     Sserafim(Sserafim),
+    /// World-space AABB discard for a clipped layer with no other shader.
+    ///
+    /// `rect` is `[min_x, min_y, max_x, max_y]` in the same Bevy world space
+    /// as the mesh vertices; the fragment discards positions outside it. The
+    /// scene updates the live rect through `LayerSpec::clip` so preallocated
+    /// clip-slot materials keep a stable shader variant; this stored rect is
+    /// the fail-closed empty remainder.
+    Clip {
+        rect: [f64; 4],
+    },
+    /// Pass-through composite of a composed-character offscreen target. Used
+    /// only by a composed DropShadow output layer after the native
+    /// `shader = null` game-over path (tankmanBattlefieldErect.hxc:26-27).
+    Composed,
 }
 
 impl LayerShader {
@@ -365,6 +379,8 @@ impl LayerShader {
             Self::Wiggle(_) => 3.0,
             Self::Rain(_) => 4.0,
             Self::Sserafim(_) => 5.0,
+            Self::Clip { .. } => 6.0,
+            Self::Composed => 7.0,
         };
         let linear = Color::srgba(tint[0], tint[1], tint[2], tint[3]).to_linear();
         let mut uniforms = LayerUniforms {
@@ -390,6 +406,7 @@ impl LayerShader {
             camera_bounds: Vec4::new(0.0, 0.0, GAME_WIDTH as f32, GAME_HEIGHT as f32),
             sserafim0: Vec4::ZERO,
             sserafim1: Vec4::ZERO,
+            clip: Vec4::ZERO,
         };
         match self {
             Self::AdjustColor(hsbc) => fill_hsbc(&mut uniforms, hsbc),
@@ -483,7 +500,16 @@ impl LayerShader {
                     0.0,
                 );
             }
-            Self::None => {}
+            Self::Clip { rect } => {
+                uniforms.flags.z = 1.0;
+                uniforms.clip = Vec4::new(
+                    rect[0] as f32,
+                    rect[1] as f32,
+                    rect[2] as f32,
+                    rect[3] as f32,
+                );
+            }
+            Self::Composed | Self::None => {}
         }
         Some(uniforms)
     }
@@ -497,9 +523,30 @@ impl LayerShader {
             | Self::Hsv(_)
             | Self::Wiggle(_)
             | Self::Rain(_)
-            | Self::Sserafim(_) => None,
+            | Self::Sserafim(_)
+            | Self::Clip { .. }
+            | Self::Composed => None,
         }
     }
+}
+
+/// Applies the live world-space clip rect to a built uniform block. The
+/// scene stores the rect per layer (`LayerSpec::clip`) because one material
+/// is shared by every quad in the layer.
+pub(crate) fn apply_clip(uniforms: &mut LayerUniforms, clip: Option<[f64; 4]>) {
+    let Some([min_x, min_y, max_x, max_y]) = clip else {
+        return;
+    };
+    uniforms.flags.z = 1.0;
+    uniforms.clip = Vec4::new(min_x as f32, min_y as f32, max_x as f32, max_y as f32);
+}
+
+/// Marks a layer as a composed-character output: the base texture is the
+/// character's offscreen render target sampled in screen space, and the
+/// DropShadow frame-bounds check covers the whole target.
+pub(crate) fn apply_composed(uniforms: &mut LayerUniforms) {
+    uniforms.flags.w = 1.0;
+    uniforms.frame_bounds = Vec4::new(0.0, 0.0, 1.0, 1.0);
 }
 
 fn fill_hsbc(uniforms: &mut LayerUniforms, hsbc: Hsbc) {
@@ -971,6 +1018,9 @@ pub(crate) struct LayerUniforms {
     pub(crate) sserafim0: Vec4,
     /// Sserafim: rgb = normalized pulse light color.
     pub(crate) sserafim1: Vec4,
+    /// Clip: `[min_x, min_y, max_x, max_y]` in Bevy world space. Active when
+    /// `flags.z > 0.5`.
+    pub(crate) clip: Vec4,
 }
 
 /// Bevy `Material2d` implementation for every non-plain layer.
@@ -1359,6 +1409,36 @@ mod tests {
             LayerShader::AdjustColor(Hsbc::new(-5.0, -26.0, 0.0, -16.0))
         );
         assert_eq!(prop_shader("phillyTrainErect", "street"), LayerShader::None);
+    }
+
+    #[test]
+    fn clip_and_composed_uniforms_set_the_shader_flags() {
+        let clip = LayerShader::Clip {
+            rect: [-10.0, 5.0, 300.0, 400.0],
+        };
+        let uniforms = clip.uniforms([1.0, 1.0, 1.0, 0.5]).expect("clip uniforms");
+        assert_eq!(uniforms.flags.x, 6.0);
+        assert_eq!(uniforms.flags.z, 1.0);
+        close_f32(uniforms.clip.x, -10.0);
+        close_f32(uniforms.clip.w, 400.0);
+        assert_eq!(clip.mask_page(), None);
+
+        let mut composed = LayerShader::DropShadow(DropShadow::default())
+            .uniforms([1.0, 1.0, 1.0, 1.0])
+            .expect("drop shadow uniforms");
+        assert_eq!(composed.flags.w, 0.0);
+        apply_composed(&mut composed);
+        assert_eq!(composed.flags.w, 1.0);
+        assert_eq!(composed.frame_bounds, Vec4::new(0.0, 0.0, 1.0, 1.0));
+
+        assert_eq!(
+            LayerShader::Composed
+                .uniforms([1.0, 1.0, 1.0, 1.0])
+                .expect("composed uniforms")
+                .flags
+                .x,
+            7.0
+        );
     }
 
     #[test]

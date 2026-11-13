@@ -1053,3 +1053,108 @@ fail-closed (no auto-repair).
   `NoteHoldCover`, `PopUpStuff`, `Countdown`, `Strumline`/`PlayState`) before
   Rust implementation. Existing `render-slice-2` fixture preservation vs
   ADR-0020 fixture updates will be resolved explicitly during the 6H freeze.
+
+## 2026-11-12 — Block-A native-parity fixes + 7th ADR-0020 re-establishment (human-approved)
+
+- **Five verified systemic fixes:** (1) `Sheet::Sprite` characters now
+  compose the camera projection (previously stuck at raw world coordinates —
+  senpai/gf-pixel/bf-pixel/spirit/tankman-bloody); (2) native character
+  anchor: `stagePos − origin(idleDims@finalScale) + globalOffsets`,
+  omitted per-animation `offsets` default `[0,0]` (native `Bopper.hx:325`
+  assigns null → `[0,0]`), idle-dimension basis replaces
+  first-document-frame/main-sheet bounds (measured misalignments otis-speaker
+  `[-13,-132]`, nene `[4,-89]`, darnell `[18,31]`, pico-playable `[19,1]`,
+  spirit `[31,40]`); (3) HealthIcon flixel `updateHitbox`+`centerOrigin`
+  scaling (pixel icons were pushed 59-73 px below the bar, normal icons
+  ~15 px into the score text on bops); (4) oxide-atlas `M3D` 4×4 → 2D affine
+  fallback (native `FlxAnimateJson.hx:713-717`; MX priority preserved so the
+  frozen bf/dad/gf parses stay byte-identical; the brief's "M3D translation
+  == TRP x/y" premise was FALSE — corpus 690/80,770 matches — and native
+  uses M3D translation only) + `LT:"Clp"` mask layers never draw, masked
+  quads carry a mask-AABB clip rect consumed by a new `LayerShader::Clip`
+  discard pass (named AABB approximation of native per-pixel masks); (5)
+  DropShadow on atlas characters composes the character into a per-group
+  transparent 1280×720 offscreen target before the rim shader samples it
+  (native `useRenderTexture = true`; named approximations: screen-pixel-scale
+  `dist`, altMask mapped over the limb AABB). SserafimShader audit: zero
+  findings.
+- **Approach:** wave 1 = two parallel workers (oxide-game render/{scene,
+  load,hud}; oxide-atlas), wave 2 = one worker (clip consumption + composed
+  pass + Sserafim audit) that hit its step limit mid-refactor; the
+  orchestrator finished the specified `ClipPlan` build-loop integration
+  (clip slots emitted before the page layer when the scanned frames only
+  clip lower quads; `after` requires positive evidence) and validation.
+- **Re-establishment:** 211 frame digests across all seven
+  `render-slice-2` families re-established after visual PNG inspection of
+  all six gameplay families (alignment, icon centering, no `#0000FF` mask
+  rect over sserafim-gf, tankman `#DFEF3C` rim, coherent M3D characters,
+  pulse-light tint). ALL trace digests unchanged (sim untouched); only the
+  sserafim geometry section changed (kazuha M3D/mask-aware bounds).
+- **Deferred:** `ABotSpeaker` = own follow-up slice after Block A (new
+  component needing its own freeze); M8 HScript behaviors (cars, tankmen
+  runners, extra sserafim members, dust sprites) out of scope; scene
+  camera-focus parity vs native `resetCameraFocusPoint` = named follow-up
+  (frozen §12.7 sim algebra kept).
+
+## 2026-11-12 — Block B (`ABotSpeaker`) + 8th ADR-0020 partial re-establishment (human-approved)
+
+- **Scope & design (`docs/M6-CONTRACT.md` §18):** Added behavior-frozen
+  `ABotSpeaker` support in `oxide-atlas` (`animate_stage.rs` verbose Adobe
+  Animate JSON schema with `Matrix3D` fallback) and `oxide-game`
+  (`render/abot.rs`, wired into `render/load.rs` and `render/scene.rs`) for the
+  five shared Animate-Atlas speaker characters (`nene`, `nene-christmas`,
+  `nene-tankmen`, `nene-dark`, `otis-speaker`; `nene-pixel` remains excluded
+  for its separate pixel-art speaker setup).
+- **Observables & parity rules:** Sublayers sort behind the speaker character
+  at `[char_z - 20, char_z - 19, char_z - 15, char_z - 11, char_z - 10]`
+  (`eyeWhites`, `stereoBG`, `pupil`, `abotViz`, `abot`), keeping `otis-speaker`
+  and A-Bot behind `tankBricks` (`zIndex: 101`) while matching Block-A speaker
+  anchoring (`anchor + dataOffsets * scale + root_offset`), beat-restarted
+  body animation (`play(1..=15)`), focus/note-kind pupil playback (`[0..=16]`
+  left / `[17..=30]` right), silent headless `abotViz` hiding at `0.0` levels
+  (`ABotVis.hx:152`), and variant shaders/tints (`phillyStreetsErect` /
+  `nene-dark` / `otis-speaker`).
+- **ADR-0020 8th re-establishment:** Visually inspected updated PNGs in
+  `target/render-diff/philly_streets_erect/erect/` and
+  `target/render-diff/tankman_erect/hard/` (Nene & Otis seating on A-Bot,
+  `eyeWhites` + left/right `pupil` alignment inside visor cutout, stage shader
+  application, `tankBricks` z-order in front of Otis + A-Bot). Refreshed only
+  the two affected families in `tests/fixtures/render-slice/_manifest.json`:
+  `philly_streets_erect/erect` (14 frames + `run_sha256`) and
+  `tankman_erect/hard` (19 frames + `run_sha256`). All `trace_sha256` digests,
+  `geometry` blocks, and the remaining five families (`bopeebo`, `school`,
+  `dialogue`, `school_evil`, `sserafim`) remain byte-identical.
+
+## 2026-11-12 — AnimateAtlas whole-timeline bounds + character feet/camera_focus parity (human-approved)
+
+- **Problem & root cause:** Animate-atlas characters (`bf`, `dad`, `gf`,
+  `darnell`, `nene`, `otis-speaker`, `pico`, `tankman-bloody`, `sserafim/*`)
+  used the first idle frame's quad AABB (`startup_frame_size` via
+  `atlas_frame_bounds`) as `idle_size` instead of the active timeline's whole
+  bounds (`FlxAnimateController.updateTimelineBounds` reading
+  `timeline._bounds`), shifting their vertical origin (`anchor()`) and sinking
+  their feet below stage ground. In addition, `oxide-atlas` `compute_bounds`
+  evaluated unclipped leaf quads rather than `flixel-animate`'s
+  `Timeline.getWholeBounds` (`Frame.getBounds` + `Timeline.maskBounds` on
+  `Clpb`-clipped layers and `Timeline.applyMatrixToRect` on nested symbols),
+  `CharacterRig::draw` / `StageProp::draw` used main `sheet.bounds` instead of
+  the played symbol's bounds on `animType: "symbol"` animations, and
+  `CharacterRig::camera_focus` used `main_sheet.bounds[3]` and omitted
+  `data_offsets` compared to `BaseCharacter.resetCameraFocusPoint`.
+- **Approved cleanroom exception & changes:** Per explicit user approval,
+  ported `flixel-animate`'s `Timeline.getWholeBounds`, `Timeline.getBounds`,
+  `Layer.getBounds`, `Frame.getBounds` (`mask_bounds`), `SymbolInstance.getBounds`,
+  `AtlasInstance.getBounds`, and `Timeline.applyMatrixToRect` directly into
+  `crates/oxide-atlas/src/animate_stage.rs` and added
+  `AnimateStage::symbol_bounds`. Note: local untransformed frame bounds are
+  memoized before `apply_matrix_to_rect`, matching native `flixel-animate`'s
+  bottom-up `Timeline._loadJson` caching order. Updated `crates/oxide-game`
+  (`AtlasSheet::symbol_bounds` / `timeline_bounds`, `startup_frame_size`,
+  `CharacterRig::from_loaded` `camera_focus`, `CharacterRig::draw`, and
+  `StageProp::draw`), while preserving `Sheet::Sprite` first-frame `dest_size`
+  semantics.
+- **Fixture handling:** Per explicit user direction,
+  `tests/fixtures/render-slice/_manifest.json` was left untouched; fresh
+  screenshots were regenerated under `target/render-diff/` for direct
+  visual comparison against native Funkin prior to any future ADR-0020
+  digest re-establishment.

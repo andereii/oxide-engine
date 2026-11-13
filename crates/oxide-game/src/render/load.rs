@@ -152,8 +152,22 @@ impl SpriteSheet {
 pub(crate) struct AtlasSheet {
     pub(crate) stage: AnimateStage,
     pub(crate) bounds: [f64; 4],
+    /// Whole-timeline bounds (`Timeline.getWholeBounds`) for each `animType:
+    /// "symbol"` symbol referenced in the character or prop's animations.
+    pub(crate) symbol_bounds: BTreeMap<String, [f64; 4]>,
     pub(crate) page: usize,
     pub(crate) page_size: [f64; 2],
+}
+
+impl AtlasSheet {
+    /// Whole-timeline bounds for the active animation (`symbol` when defined in
+    /// the sheet's symbol dictionary, else the main timeline). Matches
+    /// `FlxAnimate`'s `timeline._bounds`.
+    pub(crate) fn timeline_bounds(&self, symbol: Option<&str>) -> [f64; 4] {
+        symbol
+            .and_then(|name| self.symbol_bounds.get(name).copied())
+            .unwrap_or(self.bounds)
+    }
 }
 
 /// A loaded visual sheet. Characters may mix atlas and Sparrow/Packer sheets
@@ -197,10 +211,18 @@ pub(crate) struct LoadedCharacter {
     pub(crate) role: Role,
     pub(crate) id: String,
     pub(crate) sheets: Vec<Sheet>,
-    /// Whole-sprite placement bounds at scale 1 (main sheet).
-    pub(crate) bounds: [f64; 4],
-    /// Setup-time Sparrow/Packer hitbox (`updateHitbox` first document frame).
-    /// `None` when every loaded sheet is an animate atlas.
+    /// Setup-time `updateHitbox` frame dimensions at scale 1, in the idle
+    /// animation's timeline/frame space (`BaseCharacter.hx` L258-268, L300-309):
+    /// Sparrow/Packer frames contribute their frame `dest_size`; Animate atlases
+    /// contribute their active timeline's whole bounds (`timeline._bounds`,
+    /// `FlxAnimateController.updateTimelineBounds`). This is the
+    /// `characterOrigin` basis (`width/2`, `height` before scaling) and the
+    /// vertical camera-focus basis (`height * scale / 2`).
+    pub(crate) idle_size: [f64; 2],
+    /// Setup-time Sparrow/Packer hitbox (`updateHitbox` frame box): the idle
+    /// animation's first frame when it lives on a Sparrow/Packer sheet.
+    /// `None` when the idle animation is an animate atlas; the draw path then
+    /// keeps the historical first-document-frame fallback.
     pub(crate) sprite_hitbox: Option<[i32; 2]>,
     pub(crate) animations: BTreeMap<String, AnimationDef>,
     pub(crate) data_offsets: (f64, f64),
@@ -362,6 +384,9 @@ pub(crate) struct LoadedSlice {
     /// Alternate-mask pages for the two DropShadow stages (M6-CONTRACT
     /// §15.1). Empty for every other stage, so their page sets stay frozen.
     pub(crate) shader_masks: ShaderMaskPages,
+    /// Loaded `ABotSpeaker` assembly when a matching speaker character is
+    /// present (`nene*` or `otis-speaker`, `docs/M6-CONTRACT.md` §18).
+    pub(crate) abot: Option<super::abot::LoadedABot>,
     /// Whether Bad/Shit player hits render the scrolling HSV-desaturated note
     /// overlay. Enabled by the interactive play loader and by the generalized
     /// non-bopeebo fixture path; disabled only by the frozen bopeebo
@@ -876,6 +901,9 @@ pub(crate) fn load_slice_from_paths(
     // every existing page, so the frozen bopeebo/school/dialogue page indices
     // stay byte-identical. Only the two shipped DropShadow stages load pages.
     let shader_masks = load_shader_masks(&vfs, &mut pages, &stage_name)?;
+    // Loaded after existing stage/mask pages so non-speaker stages keep
+    // byte-identical page indices (`docs/M6-CONTRACT.md` §18).
+    let abot = super::abot::load_abot_speaker(&vfs, &mut pages, &characters, level_dir.as_deref())?;
 
     // `tankmanBattlefieldErect.hxc`: when the girlfriend is added, the
     // `tankBricks` prop is repositioned to (445, 774).
@@ -905,6 +933,7 @@ pub(crate) fn load_slice_from_paths(
         weekend1_props,
         cutscene_changes,
         shader_masks,
+        abot,
         note_desaturation,
     })
 }
@@ -1255,7 +1284,19 @@ impl PageStore {
         self.pages
     }
 
-    fn load_image_key(
+    pub(crate) fn add_solid_white(&mut self) -> Result<usize, RenderError> {
+        let key = "<solid-white-2x2>".to_string();
+        if let Some(index) = self.indices.get(&key).copied() {
+            return Ok(index);
+        }
+        let page = PageImage::from_rgba(2, 2, vec![255; 16])?;
+        let index = self.pages.len();
+        self.pages.push(page);
+        self.indices.insert(key, index);
+        Ok(index)
+    }
+
+    pub(crate) fn load_image_key(
         &mut self,
         vfs: &Vfs,
         key: &str,
@@ -1526,12 +1567,12 @@ fn load_stage_props(
                     PropVisual::Sprite { sheet, hitbox_dest }
                 }
                 Some("animateatlas") => {
-                    let sheet = load_atlas_sheet(vfs, pages, &asset_path, level_dir, nearest)?;
+                    let mut sheet = load_atlas_sheet(vfs, pages, &asset_path, level_dir, nearest)?;
                     if let Some(list) = &prop.animations {
                         for animation in list {
                             animations.insert(
                                 animation.name.clone(),
-                                atlas_animation_def(animation, &sheet, 0, &asset_path)?,
+                                atlas_animation_def(animation, &mut sheet, 0, &asset_path)?,
                             );
                         }
                     }
@@ -1628,6 +1669,52 @@ fn load_sheet(
             Sheet::Sprite(load_packer_sheet(vfs, pages, key, level_dir, is_pixel)?)
         }
     })
+}
+
+/// Resolves the animation displayed when the character is created, mirroring
+/// [`super::anim::CharacterScheduler`]'s startup: an explicit
+/// `startingAnimation` (with the native `-suffix` stripping fallback), else
+/// `idle`, else `danceLeft`. Native `resetCharacter` re-plays the idle/dance
+/// animation before measuring the hitbox (`BaseCharacter.hx` L258-268,
+/// L300-309).
+fn resolve_startup_animation<'a>(
+    animations: &'a BTreeMap<String, AnimationDef>,
+    starting_animation: Option<&str>,
+) -> Option<&'a AnimationDef> {
+    fn lookup<'a>(
+        animations: &'a BTreeMap<String, AnimationDef>,
+        name: &str,
+    ) -> Option<&'a AnimationDef> {
+        if let Some(animation) = animations.get(name) {
+            return Some(animation);
+        }
+        name.rsplit_once('-')
+            .and_then(|(base, _suffix)| lookup(animations, base))
+    }
+    starting_animation
+        .and_then(|name| lookup(animations, name))
+        .or_else(|| animations.get("idle"))
+        .or_else(|| animations.get("danceLeft"))
+}
+
+/// Frame/timeline dimensions of the startup animation at scale 1 (`width`, `height`).
+/// `None` when the animation has no frames or the sheet/frame index is
+/// unavailable; the caller falls back to the main-sheet bounds. For
+/// `Sheet::Atlas`, native `FlxAnimateController.updateTimelineBounds` sets
+/// `frameWidth`/`frameHeight` to the active timeline's whole bounds
+/// (`timeline._bounds`), not a single resolved frame.
+fn startup_frame_size(sheets: &[Sheet], animation: &AnimationDef) -> Option<[f64; 2]> {
+    let frame = animation.frames.first().copied()?;
+    let sheet = sheets.get(animation.sheet)?;
+    match sheet {
+        Sheet::Sprite(sheet) => sheet
+            .frame(frame)
+            .map(|frame| [frame.dest_size[0] as f64, frame.dest_size[1] as f64]),
+        Sheet::Atlas(sheet) => {
+            let bounds = sheet.timeline_bounds(animation.symbol.as_deref());
+            Some([bounds[2], bounds[3]])
+        }
+    }
 }
 
 fn load_character(
@@ -1728,7 +1815,7 @@ fn load_character(
             None => (0, main_kind),
         };
 
-        let def = match &sheets[sheet_index] {
+        let def = match &mut sheets[sheet_index] {
             Sheet::Atlas(sheet) => atlas_animation_def(animation, sheet, sheet_index, id)?,
             Sheet::Sprite(sheet) => sprite_animation_def(
                 animation,
@@ -1739,6 +1826,29 @@ fn load_character(
             )?,
         };
         animations.insert(animation.name.clone(), def);
+    }
+
+    // `BaseCharacter.resetCharacter`/`onCreate` play the idle animation and
+    // only then call `updateHitbox`, so `characterOrigin` (and the position
+    // derived from it) uses the startup animation's active timeline/frame
+    // dimensions, not the sheet's first document frame (`BaseCharacter.hx`
+    // L258-268, L300-309).
+    let startup_animation =
+        resolve_startup_animation(&animations, character.starting_animation.as_deref());
+    let idle_size = startup_animation
+        .and_then(|animation| startup_frame_size(&sheets, animation))
+        .unwrap_or([bounds[2], bounds[3]]);
+    if let Some(animation) = startup_animation
+        && let Some(Sheet::Sprite(sheet)) = sheets.get(animation.sheet)
+        && let Some(frame) = animation
+            .frames
+            .first()
+            .and_then(|index| sheet.frame(*index))
+    {
+        // Setup-time `frameWidth`/`frameHeight` for the Sprite draw content
+        // path: the idle frame's box, even when it is not the sheet's first
+        // document frame.
+        sprite_hitbox = Some(frame.dest_size);
     }
 
     let data_offsets = character.offsets.unwrap_or((0.0, 0.0));
@@ -1786,7 +1896,7 @@ fn load_character(
         role,
         id: id.to_string(),
         sheets,
-        bounds,
+        idle_size,
         sprite_hitbox,
         animations,
         data_offsets,
@@ -1886,7 +1996,7 @@ fn sprite_animation_def(
 
 fn atlas_animation_def(
     animation: &AnimationData,
-    sheet: &AtlasSheet,
+    sheet: &mut AtlasSheet,
     sheet_index: usize,
     owner: &str,
 ) -> Result<AnimationDef, RenderError> {
@@ -1903,7 +2013,18 @@ fn atlas_animation_def(
         // `AN.SN` main-symbol name (e.g. `BOPPERS_EXPORT`, `rando`) is not in
         // the SD symbol dictionary; its playback is the main stage timeline.
         match sheet.stage.symbol_frame_count(&prefix) {
-            Some(count) => (0..count).collect::<Vec<_>>(),
+            Some(count) => {
+                if !sheet.symbol_bounds.contains_key(&prefix) {
+                    let symbol_bounds = sheet.stage.symbol_bounds(&prefix).map_err(|source| {
+                        RenderError::AtlasStage {
+                            path: owner.to_string(),
+                            source,
+                        }
+                    })?;
+                    sheet.symbol_bounds.insert(prefix.clone(), symbol_bounds);
+                }
+                (0..count).collect::<Vec<_>>()
+            }
             None => match sheet.stage.label_frames(&prefix) {
                 Some(frames) => frames,
                 None => (0..sheet.stage.frame_count()).collect(),
@@ -1947,7 +2068,7 @@ fn atlas_animation_def(
     })
 }
 
-fn load_sparrow_sheet(
+pub(crate) fn load_sparrow_sheet(
     vfs: &Vfs,
     pages: &mut PageStore,
     asset_path: &str,
@@ -2078,7 +2199,7 @@ fn load_packer_sheet(
     })
 }
 
-fn load_atlas_sheet(
+pub(crate) fn load_atlas_sheet(
     vfs: &Vfs,
     pages: &mut PageStore,
     asset_path: &str,
@@ -2113,6 +2234,7 @@ fn load_atlas_sheet(
     Ok(AtlasSheet {
         stage,
         bounds,
+        symbol_bounds: BTreeMap::new(),
         page,
         page_size,
     })
@@ -2477,6 +2599,163 @@ mod tests {
         assert!(!resolved_flip_x(Role::Girlfriend, None));
         assert!(resolved_flip_x(Role::Opponent, Some(true)));
         assert!(resolved_flip_x(Role::Girlfriend, Some(true)));
+    }
+
+    #[test]
+    fn startup_animation_resolution_matches_the_scheduler_order() {
+        let frame = |dest: [i32; 2]| SpriteFrame {
+            page: 0,
+            rect: [0, 0, dest[0], dest[1]],
+            dest_offset: [0, 0],
+            dest_size: dest,
+            rotated: false,
+        };
+        let sheets = vec![Sheet::Sprite(SpriteSheet {
+            page: 0,
+            page_size: [100.0, 100.0],
+            frames: vec![
+                ("first".to_string(), frame([10, 10])),
+                ("idle".to_string(), frame([30, 40])),
+                ("danceLeft".to_string(), frame([20, 25])),
+                ("hey".to_string(), frame([50, 60])),
+            ],
+        })];
+        let mut animations = BTreeMap::new();
+        for (name, index) in [("idle", 1usize), ("danceLeft", 2), ("hey", 3)] {
+            let mut animation = AnimationDef::test(&[index], 24.0, true);
+            animation.sheet = 0;
+            animations.insert(name.to_string(), animation);
+        }
+        let startup = resolve_startup_animation(&animations, None).expect("idle is the fallback");
+        assert_eq!(startup.frames, vec![1]);
+        assert_eq!(startup_frame_size(&sheets, startup), Some([30.0, 40.0]));
+
+        let startup = resolve_startup_animation(&animations, Some("hey-alt"))
+            .expect("explicit starting animation wins");
+        assert_eq!(startup.frames, vec![3]);
+        // Missing explicit name falls through to idle.
+        let startup =
+            resolve_startup_animation(&animations, Some("missing")).expect("idle fallback");
+        assert_eq!(startup.frames, vec![1]);
+
+        // No idle: danceLeft is the native dance fallback.
+        let mut dance_only = BTreeMap::new();
+        dance_only.insert("danceLeft".to_string(), animations["danceLeft"].clone());
+        dance_only.insert("danceRight".to_string(), animations["danceLeft"].clone());
+        let startup = resolve_startup_animation(&dance_only, None).expect("danceLeft fallback");
+        assert_eq!(startup.frames, vec![2]);
+    }
+
+    /// The startup frame may be a trimmed/offset idle frame: the origin uses
+    /// its frame box, not the first document frame (BaseCharacter.hx L258-268,
+    /// L300-309).
+    #[test]
+    fn startup_frame_size_uses_the_idle_animation_frame() {
+        let frame = |rect: [i32; 4], offset: [i32; 2], dest: [i32; 2]| SpriteFrame {
+            page: 0,
+            rect,
+            dest_offset: offset,
+            dest_size: dest,
+            rotated: false,
+        };
+        let sheets = vec![Sheet::Sprite(SpriteSheet {
+            page: 0,
+            page_size: [100.0, 100.0],
+            frames: vec![
+                ("first".to_string(), frame([0, 0, 10, 10], [0, 0], [10, 10])),
+                (
+                    "idle0000".to_string(),
+                    frame([10, 0, 30, 40], [-2, -3], [30, 40]),
+                ),
+            ],
+        })];
+        let mut idle = AnimationDef::test(&[1], 24.0, true);
+        idle.sheet = 0;
+        assert_eq!(startup_frame_size(&sheets, &idle), Some([30.0, 40.0]));
+    }
+
+    #[test]
+    fn startup_frame_size_for_atlas_uses_whole_timeline_and_symbol_bounds() {
+        let animation_json = r#"{
+            "AN": {"TL": {"L": [{"FR": [
+                {"I": 0, "DU": 1, "N": "Idle", "E": [{"ASI": {"N": "small", "MX": [1, 0, 0, 1, 0, 0]}}]},
+                {"I": 1, "DU": 1, "E": [{"ASI": {"N": "wide", "MX": [1, 0, 0, 1, 100, 200]}}]}
+            ]}]}},
+            "SD": {"S": [{"SN": "DanceSym", "TL": {"L": [{"FR": [
+                {"I": 0, "DU": 1, "E": [{"ASI": {"N": "small", "MX": [1, 0, 0, 1, 5, 6]}}]},
+                {"I": 1, "DU": 1, "E": [{"ASI": {"N": "tall", "MX": [1, 0, 0, 1, 25, 36]}}]}
+            ]}]}}]},
+            "MD": {"W": 300, "H": 400, "FRT": 24}
+        }"#;
+        let spritemap = r#"{
+            "ATLAS": {"SPRITES": [
+                {"SPRITE": {"name": "small", "x": 0, "y": 0, "w": 10, "h": 12}},
+                {"SPRITE": {"name": "wide", "x": 0, "y": 0, "w": 50, "h": 30}},
+                {"SPRITE": {"name": "tall", "x": 0, "y": 0, "w": 20, "h": 40}}
+            ]},
+            "meta": {"image": "spritemap1.png", "size": {"w": 128, "h": 128}}
+        }"#;
+        let stage = oxide_atlas::AnimateStage::parse(animation_json, spritemap)
+            .expect("synthetic stage parses");
+        let bounds = stage.bounds();
+        // Main timeline covers [0, 0] to [150, 230].
+        assert_eq!(bounds, [0.0, 0.0, 150.0, 230.0]);
+        let mut sheet = AtlasSheet {
+            stage,
+            bounds,
+            symbol_bounds: BTreeMap::new(),
+            page: 0,
+            page_size: [128.0, 128.0],
+        };
+        let label_def = atlas_animation_def(
+            &AnimationData {
+                name: "idle".to_string(),
+                prefix: Some("Idle".to_string()),
+                asset_path: None,
+                render_type: None,
+                anim_type: None,
+                library: None,
+                frame_indices: None,
+                offsets: None,
+                frame_rate: None,
+                looped: None,
+                flip_x: None,
+                flip_y: None,
+            },
+            &mut sheet,
+            0,
+            "test",
+        )
+        .expect("label def");
+        let symbol_def = atlas_animation_def(
+            &AnimationData {
+                name: "danceLeft".to_string(),
+                prefix: Some("DanceSym".to_string()),
+                asset_path: None,
+                render_type: None,
+                anim_type: Some("symbol".to_string()),
+                library: None,
+                frame_indices: None,
+                offsets: None,
+                frame_rate: None,
+                looped: None,
+                flip_x: None,
+                flip_y: None,
+            },
+            &mut sheet,
+            0,
+            "test",
+        )
+        .expect("symbol def");
+        let sheets = vec![Sheet::Atlas(Box::new(sheet))];
+
+        // Main-timeline animations use whole timeline._bounds, NOT frame 0 (10x12).
+        assert_eq!(
+            startup_frame_size(&sheets, &label_def),
+            Some([150.0, 230.0])
+        );
+        // `animType: "symbol"` uses that symbol's own whole timeline bounds ([5,6]..[45,76]).
+        assert_eq!(startup_frame_size(&sheets, &symbol_def), Some([40.0, 70.0]));
     }
 
     #[test]

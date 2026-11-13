@@ -172,6 +172,17 @@ pub(crate) fn screen_rain_layer_index(specs: &[LayerSpec]) -> Option<usize> {
 /// The 1280x720 offscreen game target of the screen-rain pass. It is both a
 /// render attachment (offscreen camera) and a sampled texture (rain material).
 pub(crate) fn game_target_image() -> Image {
+    offscreen_target_image([0, 0, 0, 255])
+}
+
+/// Transparent full-frame target for one composed DropShadow character
+/// (native `useRenderTexture = true` semantics). The offscreen camera clears
+/// it to `Color::NONE`; the output layer samples it in screen space.
+pub(crate) fn composed_target_image() -> Image {
+    offscreen_target_image([0, 0, 0, 0])
+}
+
+fn offscreen_target_image(fill: [u8; 4]) -> Image {
     let mut image = Image::new_fill(
         Extent3d {
             width: RENDER_WIDTH,
@@ -179,13 +190,29 @@ pub(crate) fn game_target_image() -> Image {
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        &[0, 0, 0, 255],
+        &fill,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
     image.texture_descriptor.usage |=
         TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
     image
+}
+
+/// Number of composed-character groups the scene registered.
+pub(crate) fn composed_group_count(specs: &[LayerSpec]) -> usize {
+    specs
+        .iter()
+        .filter_map(|spec| spec.composed)
+        .map(|composed| composed.group + 1)
+        .max()
+        .unwrap_or(0)
+}
+
+/// Render layer for a composed group's source pass (the screen-rain stage
+/// pass uses layer 1; the main camera uses layer 0).
+pub(crate) fn composed_render_layer(group: usize) -> usize {
+    group + 2
 }
 
 /// Render-world state for the persistent target -> buffer readback.
@@ -215,6 +242,8 @@ pub(crate) struct Harness {
     /// (`phillyStreets` family, M6-CONTRACT §15.2.2). `None` on every other
     /// stage so the single-camera setup is untouched.
     screen_rain_target: Option<Handle<Image>>,
+    /// One full-frame target per composed DropShadow character group.
+    composed_targets: Vec<Handle<Image>>,
     failed: Option<String>,
 }
 
@@ -325,6 +354,13 @@ impl Harness {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
             rain_index.map(|_| images.add(game_target_image()))
         };
+        let composed_group_count = composed_group_count(specs);
+        let composed_targets: Vec<Handle<Image>> = {
+            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+            (0..composed_group_count)
+                .map(|_| images.add(composed_target_image()))
+                .collect()
+        };
 
         let page_handles: Vec<Handle<Image>> = {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
@@ -343,6 +379,7 @@ impl Harness {
                     &page_handles,
                     specs,
                     game_target.as_ref(),
+                    &composed_targets,
                 )
             },
         )?;
@@ -360,9 +397,19 @@ impl Harness {
             mesh_handles.iter().zip(material_handles.iter()).enumerate()
         {
             let entity = spawn_layer_entity(app.world_mut(), mesh.clone(), material, index as f32);
-            // Screen-rain stages split the scene into the offscreen game
-            // camera (indices below the post layer) and the main camera.
-            if let Some(rain_index) = rain_index
+            // Composed-character limb sources are visible only to their
+            // group's offscreen camera. Screen-rain stages split the scene
+            // into the offscreen game camera (indices below the post layer)
+            // and the main camera.
+            if let Some(group) = specs[index]
+                .composed
+                .filter(|composed| !composed.output)
+                .map(|composed| composed.group)
+            {
+                app.world_mut()
+                    .entity_mut(entity)
+                    .insert(RenderLayers::layer(composed_render_layer(group)));
+            } else if let Some(rain_index) = rain_index
                 && index < rain_index
             {
                 app.world_mut()
@@ -391,6 +438,22 @@ impl Harness {
                 RenderTarget::from(game_target.clone()),
                 Msaa::Off,
                 RenderLayers::layer(1),
+            ));
+        }
+        for (group, composed_target) in composed_targets.iter().enumerate() {
+            // Transparent full-frame composed-character pass. The 1:1
+            // Camera2d maps world coordinates exactly like the main camera,
+            // so the DropShadow output can sample the target in screen uv.
+            app.world_mut().spawn((
+                Camera2d,
+                Camera {
+                    order: -2 - group as isize,
+                    clear_color: ClearColorConfig::Custom(Color::NONE),
+                    ..default()
+                },
+                RenderTarget::from(composed_target.clone()),
+                Msaa::Off,
+                RenderLayers::layer(composed_render_layer(group)),
             ));
         }
 
@@ -447,6 +510,7 @@ impl Harness {
             result,
             adapter_name,
             screen_rain_target: game_target,
+            composed_targets,
             failed: None,
         })
     }
@@ -499,6 +563,7 @@ impl Harness {
                     &self.page_handles,
                     specs,
                     self.screen_rain_target.as_ref(),
+                    &self.composed_targets,
                 )
             },
         )?;
@@ -806,17 +871,15 @@ pub(crate) fn build_material_handles(
     page_handles: &[Handle<Image>],
     specs: &[LayerSpec],
     screen_rain_texture: Option<&Handle<Image>>,
+    composed_targets: &[Handle<Image>],
 ) -> Result<Vec<LayerMaterialHandle>, RenderError> {
     let mut handles = Vec::with_capacity(specs.len());
     for spec in specs {
-        let texture = layer_texture(spec, page_handles, screen_rain_texture)?;
-        if spec.shader.is_shader() {
-            let uniforms =
-                spec.shader
-                    .uniforms(spec.color)
-                    .ok_or_else(|| RenderError::Renderer {
-                        detail: "shader layer produced no uniform block".to_string(),
-                    })?;
+        let texture = layer_texture(spec, page_handles, screen_rain_texture, composed_targets)?;
+        if spec.material_is_shader() {
+            let uniforms = spec.uniforms().ok_or_else(|| RenderError::Renderer {
+                detail: "shader layer produced no uniform block".to_string(),
+            })?;
             let mask = spec
                 .shader
                 .mask_page()
@@ -872,11 +935,13 @@ pub(crate) fn spawn_layer_entity(
 }
 
 /// The base texture of one layer material. Screen-mode rain layers sample the
-/// offscreen game target; every other layer resolves its page.
+/// offscreen game target, composed-character outputs sample their group's
+/// target, and every other layer resolves its page.
 fn layer_texture(
     spec: &LayerSpec,
     page_handles: &[Handle<Image>],
     screen_rain_texture: Option<&Handle<Image>>,
+    composed_targets: &[Handle<Image>],
 ) -> Result<Option<Handle<Image>>, RenderError> {
     if spec.shader.is_screen_rain() {
         return screen_rain_texture
@@ -884,6 +949,19 @@ fn layer_texture(
             .map(Some)
             .ok_or_else(|| RenderError::Renderer {
                 detail: "screen-rain layer has no offscreen game target".to_string(),
+            });
+    }
+    if let Some(composed) = spec.composed.filter(|composed| composed.output) {
+        return composed_targets
+            .get(composed.group)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| RenderError::Renderer {
+                detail: format!(
+                    "composed layer references group {} but only {} targets were created",
+                    composed.group,
+                    composed_targets.len()
+                ),
             });
     }
     resolve_page(spec.page, page_handles)
@@ -922,6 +1000,7 @@ pub(crate) fn sync_material_specs(
     page_handles: &[Handle<Image>],
     specs: &[LayerSpec],
     screen_rain_texture: Option<&Handle<Image>>,
+    composed_targets: &[Handle<Image>],
 ) -> Result<(), RenderError> {
     if handles.len() != specs.len() {
         return Err(RenderError::Renderer {
@@ -933,8 +1012,8 @@ pub(crate) fn sync_material_specs(
         });
     }
     for (handle, spec) in handles.iter().zip(specs) {
-        let texture = layer_texture(spec, page_handles, screen_rain_texture)?;
-        match (handle, spec.shader.is_shader()) {
+        let texture = layer_texture(spec, page_handles, screen_rain_texture, composed_targets)?;
+        match (handle, spec.material_is_shader()) {
             (LayerMaterialHandle::Color(handle), false) => {
                 let Some(mut material) = color_materials.get_mut(handle) else {
                     return Err(RenderError::Renderer {
@@ -954,12 +1033,9 @@ pub(crate) fn sync_material_specs(
                             .to_string(),
                     });
                 };
-                let uniforms =
-                    spec.shader
-                        .uniforms(spec.color)
-                        .ok_or_else(|| RenderError::Renderer {
-                            detail: "shader layer produced no uniform block".to_string(),
-                        })?;
+                let uniforms = spec.uniforms().ok_or_else(|| RenderError::Renderer {
+                    detail: "shader layer produced no uniform block".to_string(),
+                })?;
                 material.uniforms = uniforms;
                 material.texture = texture;
                 material.mask_texture = spec
@@ -1046,6 +1122,8 @@ mod tests {
                 camera_bounds: [0.0, 0.0, 1280.0, 720.0],
                 frame_bounds: [0.0, 0.0, 1.0, 1.0],
             }),
+            clip: None,
+            composed: None,
         }
     }
 
@@ -1095,5 +1173,63 @@ mod tests {
                 .usage
                 .contains(TextureUsages::TEXTURE_BINDING)
         );
+    }
+
+    #[test]
+    fn composed_target_image_is_transparent_and_samplable() {
+        let image = composed_target_image();
+        assert_eq!(image.texture_descriptor.size.width, RENDER_WIDTH);
+        assert_eq!(image.texture_descriptor.size.height, RENDER_HEIGHT);
+        assert_eq!(
+            image.texture_descriptor.format,
+            TextureFormat::Rgba8UnormSrgb
+        );
+        assert_eq!(
+            image.data.as_deref().map(|data| &data[..4]),
+            Some(&[0, 0, 0, 0][..]),
+            "the offscreen character starts fully transparent"
+        );
+        assert!(
+            image
+                .texture_descriptor
+                .usage
+                .contains(TextureUsages::RENDER_ATTACHMENT)
+        );
+        assert!(
+            image
+                .texture_descriptor
+                .usage
+                .contains(TextureUsages::TEXTURE_BINDING)
+        );
+    }
+
+    #[test]
+    fn composed_group_count_reads_the_scene_registration() {
+        let specs = vec![
+            LayerSpec {
+                page: Some(0),
+                color: [1.0, 1.0, 1.0, 1.0],
+                shader: LayerShader::None,
+                clip: None,
+                composed: Some(crate::render::scene::ComposedLayer {
+                    group: 0,
+                    output: false,
+                }),
+            },
+            LayerSpec {
+                page: None,
+                color: [1.0, 1.0, 1.0, 1.0],
+                shader: LayerShader::None,
+                clip: None,
+                composed: Some(crate::render::scene::ComposedLayer {
+                    group: 0,
+                    output: true,
+                }),
+            },
+            LayerSpec::plain(None, [1.0, 1.0, 1.0, 1.0]),
+        ];
+        assert_eq!(composed_group_count(&specs), 1);
+        assert_eq!(composed_render_layer(0), 2);
+        assert_eq!(composed_render_layer(2), 4);
     }
 }

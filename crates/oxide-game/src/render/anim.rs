@@ -162,6 +162,10 @@ impl CharacterScheduler {
         self.animations.contains_key(name)
     }
 
+    pub(crate) fn dance_every(&self) -> f64 {
+        self.dance_every
+    }
+
     pub(crate) fn current_name(&self) -> Option<&str> {
         self.current.as_ref().map(|playing| playing.name.as_str())
     }

@@ -19,7 +19,8 @@ use super::input::{direction_for, is_advance_key};
 use super::session::PlayRuntime;
 use super::{PlayConfig, PlayError, QuitReason, WindowConfig};
 use crate::render::harness::{
-    LayerMaterialHandle, build_material_handles, build_mesh, game_target_image, placeholder_mesh,
+    LayerMaterialHandle, build_material_handles, build_mesh, composed_group_count,
+    composed_render_layer, composed_target_image, game_target_image, placeholder_mesh,
     screen_rain_layer_index, spawn_layer_entity, sync_material_specs,
 };
 use crate::render::load::PageImage;
@@ -36,6 +37,8 @@ struct WindowLayers {
     /// Offscreen game target for a screen-rain stage (M6-CONTRACT §15.2.2);
     /// `None` keeps the single-camera setup.
     screen_rain_target: Option<Handle<Image>>,
+    /// One full-frame target per composed DropShadow character group.
+    composed_targets: Vec<Handle<Image>>,
     /// F6 debug-overlay text entity (top layer, hidden until toggled).
     overlay: Entity,
 }
@@ -102,6 +105,13 @@ pub(crate) fn build(
         let mut images = app.world_mut().resource_mut::<Assets<Image>>();
         rain_index.map(|_| images.add(game_target_image()))
     };
+    let composed_groups = composed_group_count(specs);
+    let composed_targets: Vec<Handle<Image>> = {
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        (0..composed_groups)
+            .map(|_| images.add(composed_target_image()))
+            .collect()
+    };
 
     let material_handles: Vec<LayerMaterialHandle> =
         app.world_mut()
@@ -113,6 +123,7 @@ pub(crate) fn build(
                     &page_handles,
                     specs,
                     screen_rain_target.as_ref(),
+                    &composed_targets,
                 )
             })?;
 
@@ -127,7 +138,15 @@ pub(crate) fn build(
     let mut entities = Vec::with_capacity(specs.len());
     for (index, (mesh, material)) in mesh_handles.iter().zip(material_handles.iter()).enumerate() {
         let entity = spawn_layer_entity(app.world_mut(), mesh.clone(), material, index as f32);
-        if let Some(rain_index) = rain_index
+        if let Some(group) = specs[index]
+            .composed
+            .filter(|composed| !composed.output)
+            .map(|composed| composed.group)
+        {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(RenderLayers::layer(composed_render_layer(group)));
+        } else if let Some(rain_index) = rain_index
             && index < rain_index
         {
             app.world_mut()
@@ -152,6 +171,21 @@ pub(crate) fn build(
             RenderTarget::from(target.clone()),
             Msaa::Off,
             RenderLayers::layer(1),
+        ));
+    }
+    for (group, target) in composed_targets.iter().enumerate() {
+        // Transparent composed-character pass; the output layer samples the
+        // image in screen space exactly like the headless harness.
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                order: -2 - group as isize,
+                clear_color: ClearColorConfig::Custom(Color::NONE),
+                ..default()
+            },
+            RenderTarget::from(target.clone()),
+            Msaa::Off,
+            RenderLayers::layer(composed_render_layer(group)),
         ));
     }
 
@@ -185,6 +219,7 @@ pub(crate) fn build(
         page_handles,
         entities,
         screen_rain_target,
+        composed_targets,
         overlay,
     });
     app.add_systems(Update, play_frame);
@@ -371,6 +406,7 @@ fn upload_layers(
         &layers.page_handles,
         specs,
         layers.screen_rain_target.as_ref(),
+        &layers.composed_targets,
     )
     .map_err(|error| PlayError::Session {
         detail: format!("could not refresh layer materials: {error}"),

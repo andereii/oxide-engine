@@ -18,7 +18,9 @@ struct LayerUniforms {
     // Straight-alpha tint: RGB is linear, A multiplies the sampled alpha.
     tint: vec4<f32>,
     // x = shader kind (0 adjust, 1 drop shadow, 2 hsv, 3 wiggle, 4 rain,
-    // 5 sserafim), y = alternate-mask enabled, z/w reserved.
+    // 5 sserafim, 6 clip, 7 composed pass-through), y = alternate-mask
+    // enabled, z = world-space clip active, w = composed-character base
+    // texture (premultiplied screen-space sampling).
     flags: vec4<f32>,
     // x = brightness / 255, y = contrast scale (already curved).
     hsbc: vec4<f32>,
@@ -55,6 +57,9 @@ struct LayerUniforms {
     sserafim0: vec4<f32>,
     // Sserafim: rgb = normalized pulse light color.
     sserafim1: vec4<f32>,
+    // Clip: [min_x, min_y, max_x, max_y] in Bevy world space. Active when
+    // flags.z > 0.5.
+    clip: vec4<f32>,
 };
 
 @group(2) @binding(0) var<uniform> u: LayerUniforms;
@@ -67,8 +72,27 @@ struct LayerUniforms {
 const LIGHT_MULTIPLIER: f32 = 0.07;
 
 struct FragmentInput {
+    // Bevy's Mesh2d vertex output passes the transformed local position at
+    // location 0 (`vertex_output.wesl`); the clip rect is compared in this
+    // same world space.
+    @location(0) world_position: vec4<f32>,
     @location(2) uv: vec2<f32>,
 };
+
+// Game surface the composed-character targets and the main camera use. A
+// world point maps to this pixel grid exactly like `quad_from_matrix`:
+// `(x + 640, 360 - y)`.
+const GAME_HALF_WIDTH: f32 = 640.0;
+const GAME_HALF_HEIGHT: f32 = 360.0;
+const GAME_WIDTH: f32 = 1280.0;
+const GAME_HEIGHT: f32 = 720.0;
+
+fn composed_screen_uv(world: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        (world.x + GAME_HALF_WIDTH) / GAME_WIDTH,
+        (GAME_HALF_HEIGHT - world.y) / GAME_HEIGHT,
+    );
+}
 
 fn hsbc_apply(color: vec3<f32>) -> vec3<f32> {
     let bright = vec3<f32>(u.hsbc.x) + color;
@@ -85,17 +109,26 @@ fn hsbc_apply(color: vec3<f32>) -> vec3<f32> {
     );
 }
 
-fn get_luma(rgba: vec4<f32>) -> f32 {
-    // Straight-alpha Bevy sample: premultiply before the luma dot so a
-    // transparent texel has zero luma (the native `getLumaRGB` input).
-    return dot(rgba.rgb * rgba.a, vec3<f32>(0.2126, 0.7152, 0.0722));
+fn get_luma(rgba: vec4<f32>, premultiplied: bool) -> f32 {
+    // Page textures sample as straight alpha: premultiply before the luma dot
+    // so a transparent texel has zero luma. Composed-character targets are
+    // written through `SrcAlpha, OneMinusSrcAlpha` blending, so their RGB is
+    // already premultiplied (the native `getLumaRGB` input).
+    let rgb = select(rgba.rgb * rgba.a, rgba.rgb, premultiplied);
+    return dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
 // Difference-based anti-aliased edge width (native `lwidth_manual`).
-fn lwidth_manual(center: f32, uv: vec2<f32>, px: vec2<f32>) -> f32 {
-    let right = get_luma(textureSample(base_texture, base_sampler, uv + vec2<f32>(px.x, 0.0)));
-    let down = get_luma(textureSample(base_texture, base_sampler, uv + vec2<f32>(0.0, px.y)));
-    let diagonal = get_luma(textureSample(base_texture, base_sampler, uv + px));
+fn lwidth_manual(center: f32, uv: vec2<f32>, px: vec2<f32>, premultiplied: bool) -> f32 {
+    let right = get_luma(
+        textureSample(base_texture, base_sampler, uv + vec2<f32>(px.x, 0.0)),
+        premultiplied,
+    );
+    let down = get_luma(
+        textureSample(base_texture, base_sampler, uv + vec2<f32>(0.0, px.y)),
+        premultiplied,
+    );
+    let diagonal = get_luma(textureSample(base_texture, base_sampler, uv + px), premultiplied);
     let dx = abs(right - center);
     let dy = abs(down - center);
     let dd = abs(diagonal - center);
@@ -356,7 +389,21 @@ fn rain_color_at(uv: vec2<f32>) -> vec4<f32> {
 
 @fragment
 fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
+    // Per-quad mask clip (native FlxAnimate `Clp` AABB): the scene transforms
+    // the mask rect through the same projection as the quad and intersects it
+    // with the quad bounds. `flags.z` is set only for clipped layers.
+    if u.flags.z > 0.5
+        && (input.world_position.x < u.clip.x
+            || input.world_position.x > u.clip.z
+            || input.world_position.y < u.clip.y
+            || input.world_position.y > u.clip.w)
+    {
+        discard;
+    }
+
     let kind = i32(u.flags.x);
+    let composed = u.flags.w > 0.5;
+    let base_uv = select(input.uv, composed_screen_uv(input.world_position.xy), composed);
     if kind == 3 {
         let sampled = textureSample(base_texture, base_sampler, wiggle_uv(input.uv));
         let color4 = sampled * u.tint;
@@ -365,26 +412,43 @@ fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     if kind == 4 {
         return rain_color_at(input.uv);
     }
-    let sampled = textureSample(base_texture, base_sampler, input.uv);
+    if kind == 7 {
+        // Composed-character pass-through (the game-over `shader = null`
+        // path keeps the composed texture).
+        let sampled = textureSample(base_texture, base_sampler, base_uv);
+        let color4 = sampled * u.tint;
+        return vec4<f32>(clamp(color4.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), color4.a);
+    }
+    let sampled = textureSample(base_texture, base_sampler, base_uv);
     let color4 = sampled * u.tint;
 
     if kind == 1 {
         // DropShadowShader (inline native GLSL).
         let ratio = 1.0 / vec2<f32>(textureDimensions(base_texture));
-        let px = max(ratio, fwidth(input.uv));
-        let luma = get_luma(color4);
-        let delta = lwidth_manual(luma, input.uv, px);
+        let px = max(ratio, fwidth(base_uv));
+        let luma = get_luma(color4, composed);
+        let delta = lwidth_manual(luma, base_uv, px, composed);
         var threshold = u.shadow1.x;
+        // Native samples `altMask` with the same UV as the bitmap. For the
+        // composed target that UV is the character-bounds UV carried by the
+        // output quad (the mask image is mapped over the character bounds).
         if u.flags.y > 0.5
             && textureSample(alt_mask, alt_mask_sampler, input.uv).b > 0.0
         {
             threshold = u.shadow1.y;
         }
         let intensity = smoothstep(threshold - delta, threshold + delta, luma);
-        var color3 = hsbc_apply(color4.rgb);
+        // Native render textures store premultiplied RGB and the fragment
+        // divides by alpha before HSBC (`color4.rgb / color4.a`).
+        let straight_color = select(
+            color4.rgb,
+            color4.rgb / max(color4.a, 1e-4),
+            composed,
+        );
+        var color3 = hsbc_apply(straight_color);
         let checked = vec2<f32>(
-            input.uv.x + u.shadow0.z * u.shadow0.x * ratio.x,
-            input.uv.y - u.shadow0.z * u.shadow0.y * ratio.y,
+            base_uv.x + u.shadow0.z * u.shadow0.x * ratio.x,
+            base_uv.y - u.shadow0.z * u.shadow0.y * ratio.y,
         );
         var shadow_alpha = 0.0;
         if checked.x > u.frame_bounds.x
@@ -443,8 +507,9 @@ fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
         return vec4<f32>(clamp(color3, vec3<f32>(0.0), vec3<f32>(1.0)), color4.a);
     }
 
-    // AdjustColorShader (`adjustColor.frag`): fixed brightness -> hue ->
-    // contrast -> saturation order, straight-alpha in and out.
+    // AdjustColorShader (`adjustColor.frag`) and the kind-6 clip-only layer:
+    // fixed brightness -> hue -> contrast -> saturation order, straight-alpha
+    // in and out.
     let color3 = hsbc_apply(color4.rgb);
     return vec4<f32>(clamp(color3, vec3<f32>(0.0), vec3<f32>(1.0)), color4.a);
 }

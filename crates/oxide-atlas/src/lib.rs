@@ -16,7 +16,7 @@ pub mod sparrow;
 pub mod xml;
 
 pub use animate::{AnimateAtlas, AnimateSprite, parse_animate};
-pub use animate_stage::{AnimateStage, AnimateStageError, SpriteQuad};
+pub use animate_stage::{AnimateStage, AnimateStageError, ResolvedQuad, SpriteQuad};
 pub use packer::{PackerAtlas, PackerFrame, parse_packer, parse_packer_text};
 pub use sparrow::{Atlas, FrameQuad, SubTexture, frame_quad, parse_sparrow};
 

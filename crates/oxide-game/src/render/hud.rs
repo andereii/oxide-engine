@@ -671,6 +671,13 @@ impl HealthIconState {
         self.sheet.first_size()
     }
 
+    /// `FlxSprite.centerOrigin` (`FlxSprite.hx` L1148-1151): the draw origin
+    /// is the frame centre, in UNSCALED frame pixels.
+    fn frame_origin(&self) -> [f64; 2] {
+        let frame = self.frame_size();
+        [0.5 * frame[0], 0.5 * frame[1]]
+    }
+
     /// Native `configure(data)` (`HealthIcon.hx` L181-225): id/isPixel/
     /// shouldBop, `loadCharacter` (a full reload, so the animation state
     /// restarts), then size/offsets/flip and `updatePosition`.
@@ -999,8 +1006,18 @@ impl HealthIconState {
             .get(index)
             .or_else(|| self.sheet.frames.first())
             .copied()?;
-        let left = self.x - self.offset[0];
-        let top = self.y - self.offset[1];
+        // Native draw matrix (`FlxSprite.prepareComplexMatrix`, flixel 6.2.1
+        // L1045-1068): `frame -> translate(-origin) -> scale ->
+        // translate(screenPosition - offset + origin)`. `updateHitbox`
+        // (`HealthIcon.hx` L260-264 + `FlxSprite.hx` L884-890) sets the
+        // centring offset `-0.5 * (graphic - frame)` together with
+        // `centerOrigin()`; the two terms cancel exactly, so the rendered
+        // frame top-left is `x - iconOffset`. Without the origin term the
+        // icon would be pushed by half of its scaling growth (pixel icons
+        // drift ~59 px, bop frames ~15 px).
+        let origin = self.frame_origin();
+        let left = self.x - self.offset[0] + origin[0] - self.scale_x * origin[0];
+        let top = self.y - self.offset[1] + origin[1] - self.scale_y * origin[1];
         let matrix = concat(
             projection,
             [self.scale_x, 0.0, 0.0, self.scale_y, left, top],
@@ -1796,6 +1813,74 @@ mod tests {
         assert_eq!(icon.sheet.frames.len(), 1);
         assert_eq!(icon.width, 150.0);
         assert_eq!(icon.height, 150.0);
+    }
+
+    /// `HealthIcon.updateHitbox` sets the flixel centring offset together
+    /// with `centerOrigin()`; the draw matrix applies both, so a scaled icon
+    /// renders from `(x, y)` and stays centred on the bar reference line at
+    /// rest. The pre-fix model drew at `x - offset` without the origin term,
+    /// pushing a 32px pixel icon right/down by (150-32)/2 = 59 px.
+    #[test]
+    fn pixel_icon_renders_centered_at_rest() {
+        let pixel = test_hud(&["bf-pixel"], [64, 32]);
+        let mut icon = HealthIconState::new(0);
+        icon.configure(&pixel, &test_config("bf-pixel", true), false, 1.0, 1.0)
+            .expect("pixel configure");
+        assert_eq!(icon.width, 150.0);
+        assert_eq!(icon.height, 150.0);
+        // The flixel `updateHitbox` centring offset is present...
+        let frame = icon.frame_size();
+        close(icon.offset[0], -0.5 * (icon.width - frame[0]));
+        close(icon.offset[1], -0.5 * (icon.height - frame[1]));
+        // ...and the draw's center-origin term cancels it.
+        let quad = icon.quad(hud_projection(1.0)).expect("pixel icon draws");
+        let corner = quad_game_corner(&quad);
+        close(corner[0], icon.x);
+        close(corner[1], icon.y);
+        // y = healthBar.y - height/2, so the rendered box is centred on the
+        // bar's reference line (bar.y = 652 in the shipped layout).
+        close(corner[1] + icon.height / 2.0, 652.0);
+    }
+
+    /// The per-bop resize re-runs `updateHitbox`/`updatePosition`; the
+    /// rendered frame must stay centred while it grows and shrink back.
+    /// `iconOffset` remains a pure `(-x, -y)` pixel shift.
+    #[test]
+    fn bop_resize_keeps_the_icon_centered_and_icon_offsets_apply() {
+        let assets = test_hud(&["bf", "dad"], [300, 150]);
+        let mut state = test_state(&assets);
+        let player = state.icons[0].as_mut().expect("player icon");
+        player.on_step(4, 150.0, 600.0, 1.0, 1.0);
+        assert_eq!(player.width, 180.0);
+        let corner = quad_game_corner(
+            &player
+                .quad(hud_projection(1.0))
+                .expect("bop-start icon draws"),
+        );
+        close(corner[0], player.x);
+        close(corner[1], player.y);
+        close(corner[1] + player.height / 2.0, 652.0);
+
+        player.advance_bop(687.5);
+        player.update_position(1.0, 1.0);
+        assert_eq!(player.height, 165.0);
+        let corner = quad_game_corner(
+            &player
+                .quad(hud_projection(1.0))
+                .expect("mid-bop icon draws"),
+        );
+        close(corner[0], player.x);
+        close(corner[1], player.y);
+        close(corner[1] + player.height / 2.0, 652.0);
+
+        let mut face = test_config("bf", false);
+        face.offsets = [5.0, 7.0];
+        let mut icon = HealthIconState::new(0);
+        icon.configure(&assets, &face, true, 1.0, 1.0)
+            .expect("offset icon configures");
+        let corner = quad_game_corner(&icon.quad(hud_projection(1.0)).expect("offset icon draws"));
+        close(corner[0], icon.x - 5.0);
+        close(corner[1], icon.y - 7.0);
     }
 
     #[test]

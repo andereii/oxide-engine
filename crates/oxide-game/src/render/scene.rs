@@ -8,8 +8,10 @@
 
 use oxide_audio::conductor::{Conductor, Dispatch};
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use super::RenderError;
-use super::anim::CharacterScheduler;
+use super::anim::{AnimationDef, CharacterScheduler};
 use super::dialogue::{ConversationRuntime, SCREEN_PROJECTION};
 use super::geometry::{
     self, BACKGROUND_ALPHA, BACKGROUND_WIDTH, BopConfig, Camera, DEFAULT_HUD_CAMERA_ZOOM,
@@ -42,6 +44,87 @@ pub(crate) struct Quad {
     pub(crate) uv: [[f64; 2]; 4],
 }
 
+/// One resolved draw before layer routing: the texture page, final geometry
+/// and the optional world-space mask AABB already intersected with the quad.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DrawnQuad {
+    pub(crate) page: Option<usize>,
+    pub(crate) quad: Quad,
+    pub(crate) clip: Option<[f64; 4]>,
+}
+
+fn quad_world_aabb(quad: &Quad) -> [f64; 4] {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for [x, y] in quad.pos {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    [min_x, min_y, max_x, max_y]
+}
+
+/// Transforms a clip rect through the same projection as the quad and
+/// intersects it with the quad's world AABB.
+///
+/// `AnimateStage` returns the clip in the same accumulated parent space as
+/// `SpriteQuad::matrix`'s output (the docs on `ResolvedQuad::clip`), so the
+/// chain applied here is `projection ∘ world`; applying `quad.matrix` again
+/// would move the mask by the element's local transform. The rect's four
+/// corners are transformed and re-bounded because a rotated world matrix
+/// makes the mask rect non-axis-aligned. `None` means the quad is fully
+/// clipped away and must not be drawn.
+pub(crate) fn clipped_world_aabb(
+    matrix: [f64; 6],
+    rect: [f64; 4],
+    quad: &Quad,
+) -> Option<[f64; 4]> {
+    let [x, y, width, height] = rect;
+    if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite() {
+        return None;
+    }
+    let corners = [
+        [x, y],
+        [x + width, y],
+        [x + width, y + height],
+        [x, y + height],
+    ];
+    let mut clip = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for [cx, cy] in corners {
+        let screen = apply(matrix, cx, cy);
+        let world = [screen[0] - HALF_WIDTH, HALF_HEIGHT - screen[1]];
+        if !world[0].is_finite() || !world[1].is_finite() {
+            return None;
+        }
+        clip[0] = clip[0].min(world[0]);
+        clip[1] = clip[1].min(world[1]);
+        clip[2] = clip[2].max(world[0]);
+        clip[3] = clip[3].max(world[1]);
+    }
+    let quad = quad_world_aabb(quad);
+    let intersected = [
+        clip[0].max(quad[0]),
+        clip[1].max(quad[1]),
+        clip[2].min(quad[2]),
+        clip[3].min(quad[3]),
+    ];
+    (intersected[0].is_finite()
+        && intersected[1].is_finite()
+        && intersected[2].is_finite()
+        && intersected[3].is_finite()
+        && intersected[2] > intersected[0]
+        && intersected[3] > intersected[1])
+        .then_some(intersected)
+}
+
 /// Material description of one draw layer. Layers are created once at build;
 /// `page` is an index into the loaded image pages, `color` is the material
 /// tint (the strumline background uses an untextured black tint) and `shader`
@@ -51,6 +134,25 @@ pub(crate) struct LayerSpec {
     pub(crate) page: Option<usize>,
     pub(crate) color: [f32; 4],
     pub(crate) shader: LayerShader,
+    /// Live world-space AABB discard rect `[min_x, min_y, max_x, max_y]`.
+    /// `None` draws unclipped. The scene updates this per frame for the
+    /// preallocated clip-slot layers; one material is shared by every quad in
+    /// a layer, so distinct clip rects get distinct layers.
+    pub(crate) clip: Option<[f64; 4]>,
+    /// Composed-character role. `Some { output: true }` is the single layer
+    /// sampling the character's offscreen render texture; `Some { output:
+    /// false }` is a limb source rendered only into that texture.
+    pub(crate) composed: Option<ComposedLayer>,
+}
+
+/// One preallocated composed-character group (`useRenderTexture = true`
+/// semantics for animate-atlas DropShadow characters).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ComposedLayer {
+    /// Dense scene-assigned group index (0..composed group count).
+    pub(crate) group: usize,
+    /// True for the layer that draws the composed output quad.
+    pub(crate) output: bool,
 }
 
 impl LayerSpec {
@@ -59,15 +161,128 @@ impl LayerSpec {
             page,
             color,
             shader: LayerShader::None,
+            clip: None,
+            composed: None,
         }
+    }
+
+    /// Whether this layer owns a `LayerShaderMaterial`. Composed limb sources
+    /// keep the plain `ColorMaterial` path so the offscreen pass rasterizes
+    /// the character without any shader.
+    pub(crate) fn material_is_shader(&self) -> bool {
+        self.shader.is_shader() && !self.composed.is_some_and(|composed| !composed.output)
+    }
+
+    /// Builds the material uniforms including the live clip rect and the
+    /// composed-character base-texture flag.
+    pub(crate) fn uniforms(&self) -> Option<super::shaders::LayerUniforms> {
+        let mut uniforms = self.shader.uniforms(self.color)?;
+        super::shaders::apply_clip(&mut uniforms, self.clip);
+        if self.composed.is_some_and(|composed| composed.output) {
+            super::shaders::apply_composed(&mut uniforms);
+        }
+        Some(uniforms)
     }
 }
 
-/// One sorted stage-group member plus the draw layers it may write.
+fn clip_bits(rect: [f64; 4]) -> [u64; 4] {
+    [
+        rect[0].to_bits(),
+        rect[1].to_bits(),
+        rect[2].to_bits(),
+        rect[3].to_bits(),
+    ]
+}
+
+/// Distinct live clip rects per page, sorted by their bit pattern so slot
+/// assignment is deterministic without relying on hash iteration.
+fn ordered_clips(quads: &[DrawnQuad]) -> BTreeMap<Option<usize>, Vec<[f64; 4]>> {
+    let mut by_page: BTreeMap<Option<usize>, BTreeMap<[u64; 4], [f64; 4]>> = BTreeMap::new();
+    for drawn in quads {
+        if let Some(clip) = drawn.clip {
+            by_page
+                .entry(drawn.page)
+                .or_default()
+                .insert(clip_bits(clip), clip);
+        }
+    }
+    by_page
+        .into_iter()
+        .map(|(page, rects)| (page, rects.into_values().collect()))
+        .collect()
+}
+
+fn regular_layer(item: &StageItem, page: Option<usize>) -> Result<usize, RenderError> {
+    item.layers
+        .iter()
+        .find(|layer| layer.clip_slot.is_none() && !layer.composed_output && layer.page == page)
+        .map(|layer| layer.layer)
+        .ok_or_else(|| RenderError::Renderer {
+            detail: format!("stage item drew page {page:?} without a registered layer"),
+        })
+}
+
+fn composed_output_quad(quads: &[DrawnQuad]) -> Option<Quad> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for drawn in quads {
+        for [x, y] in drawn.quad.pos {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+    }
+    (min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite()).then_some(
+        Quad {
+            // Texture order top-left..bottom-left in the game's y-down
+            // convention; Bevy world y is inverted, so the first corner is
+            // (min_x, max_y). UV [0, 1] maps the alt-mask image over the
+            // character's screen bounds.
+            pos: [
+                [min_x, max_y],
+                [max_x, max_y],
+                [max_x, min_y],
+                [min_x, min_y],
+            ],
+            uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        },
+    )
+}
+
+/// One-time structured note when a frame needs more simultaneous clip rects
+/// than the preallocated slots (malformed/future data): those quads degrade
+/// to unclipped rather than panicking.
+static CLIP_SLOT_OVERFLOW: std::sync::Once = std::sync::Once::new();
+
 struct StageItem {
     kind: StageItemKind,
-    /// `(page, layer_specs index)`; `None` is an untextured solid color.
-    layers: Vec<(Option<usize>, usize)>,
+    /// Registered layers in draw order. `None` pages are untextured solids.
+    /// Clip slots are preallocated per page so a layer never mixes clipped
+    /// and unclipped quads; composed groups add one output layer per
+    /// character.
+    layers: Vec<StageLayer>,
+}
+
+impl StageItem {
+    fn spec_layers(&self) -> impl Iterator<Item = usize> + '_ {
+        self.layers.iter().map(|layer| layer.layer)
+    }
+}
+
+/// One registered layer plus the routing metadata the draw pass needs.
+#[derive(Debug, Clone, Copy)]
+struct StageLayer {
+    page: Option<usize>,
+    /// `layer_specs` index.
+    layer: usize,
+    /// `Some(slot)` for a preallocated clip-slot layer; `None` for the normal
+    /// unclipped page layer and the composed output layer.
+    clip_slot: Option<usize>,
+    /// True for the single composed-character output layer.
+    composed_output: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -84,26 +299,172 @@ enum StageItemKind {
     Weekend1BigExplosion,
     /// One-shot `spraypaintExplosionEZ` layer (same append position).
     Weekend1EzExplosion,
+    /// Ordered sub-layer of an attached `ABotSpeaker` (`nene*` / `otis-speaker`).
+    ABot(super::abot::ABotPart),
+}
+
+/// Upper bound on preallocated clip-slot layers per page. The shipping corpus
+/// needs at most one simultaneous mask per page; the cap keeps malformed or
+/// future multi-mask atlases bounded (excess rects degrade to unclipped).
+const MAX_CLIP_SLOTS_PER_PAGE: usize = 4;
+
+/// Preallocated clip layers for one page plus the observed draw-order side
+/// they occupy. Native Flash masks can clip layers above or below their
+/// unclipped siblings; the shipped sserafim hair is the bottom layer, so the
+/// slots are registered before the regular page layer when the scanned frames
+/// only clip quads below the first unclipped quad.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ClipPlan {
+    slots: usize,
+    before: bool,
+}
+
+fn distinct_clip_count(quads: &[oxide_atlas::ResolvedQuad]) -> usize {
+    let mut rects = BTreeSet::new();
+    for resolved in quads {
+        if let Some(clip) = resolved.clip {
+            rects.insert([
+                clip[0].to_bits(),
+                clip[1].to_bits(),
+                clip[2].to_bits(),
+                clip[3].to_bits(),
+            ]);
+        }
+    }
+    rects.len()
+}
+
+/// One-time deviation note for a page where clipped quads straddle unclipped
+/// ones (a single preallocated clip group cannot reproduce that interleaving).
+static CLIP_ORDER_MIXED: std::sync::Once = std::sync::Once::new();
+
+/// Scans one animate sheet's reachable animation frames and returns the
+/// largest number of distinct mask rects present in a single frame plus the
+/// dominant clip order. Any resolution error degrades that frame to zero
+/// slots (unclipped draw), never a panic; the draw path still resolves the
+/// live frame with its typed error.
+fn atlas_clip_plan(
+    stage: &oxide_atlas::AnimateStage,
+    animations: &BTreeMap<String, AnimationDef>,
+    sheet_index: usize,
+) -> ClipPlan {
+    let mut plan = ClipPlan::default();
+    let mut saw_before = false;
+    let mut saw_after = false;
+    let mut saw_animation = false;
+    let mut scan = |symbol: Option<&str>, frame: usize| {
+        let resolved = match symbol {
+            Some(symbol) => stage.resolve_symbol_frame_with_clips(symbol, frame),
+            None => stage.resolve_main_frame_with_clips(frame),
+        };
+        let Ok(quads) = resolved else {
+            return;
+        };
+        plan.slots = plan.slots.max(distinct_clip_count(&quads));
+        let unclipped: Vec<usize> = quads
+            .iter()
+            .enumerate()
+            .filter(|(_, resolved)| resolved.clip.is_none())
+            .map(|(index, _)| index)
+            .collect();
+        let (Some(first), Some(last)) = (unclipped.first(), unclipped.last()) else {
+            return;
+        };
+        for (index, resolved) in quads.iter().enumerate() {
+            if resolved.clip.is_none() {
+                continue;
+            }
+            if index < *first {
+                saw_before = true;
+            } else if index > *last {
+                saw_after = true;
+            } else {
+                // Interleaved clipped/unclipped quads: a single clip group
+                // cannot preserve painter order.
+                CLIP_ORDER_MIXED.call_once(|| {
+                    eprintln!(
+                        "oxide render: deviation kind=clip_order_mixed \
+                         detail=\"clipped quads interleave unclipped quads on one page; \
+                         clip layers use one side and painter order is approximate\""
+                    );
+                });
+            }
+        }
+    };
+    for animation in animations
+        .values()
+        .filter(|animation| animation.sheet == sheet_index)
+    {
+        saw_animation = true;
+        if animation.frames.is_empty() {
+            scan(animation.symbol.as_deref(), 0);
+        }
+        for &frame in &animation.frames {
+            scan(animation.symbol.as_deref(), frame);
+        }
+    }
+    if !saw_animation {
+        scan(None, 0);
+    }
+    plan.slots = plan.slots.min(MAX_CLIP_SLOTS_PER_PAGE);
+    // `after` requires positive evidence (a clipped quad after the last
+    // unclipped one); "before" is the default because the shipped clip
+    // target (sserafim hair) draws beneath its unclipped siblings, and a
+    // frame with clipped quads but no unclipped ones has no counterexample.
+    plan.before = saw_before || (!saw_before && !saw_after);
+    plan
+}
+
+/// Per-sheet clip plans for a character/prop sheet list.
+fn character_clip_plans(
+    sheets: &[Sheet],
+    animations: &BTreeMap<String, AnimationDef>,
+) -> Vec<ClipPlan> {
+    sheets
+        .iter()
+        .enumerate()
+        .map(|(index, sheet)| match sheet {
+            Sheet::Atlas(sheet) => atlas_clip_plan(&sheet.stage, animations, index),
+            Sheet::Sprite(_) => ClipPlan::default(),
+        })
+        .collect()
 }
 
 /// Per-character runtime state: scheduler plus the loaded sheet set.
-struct CharacterRig {
-    role: Role,
-    id: String,
+pub(crate) struct CharacterRig {
+    pub(crate) role: Role,
+    pub(crate) id: String,
     scheduler: CharacterScheduler,
     sheets: Vec<Sheet>,
+    /// Preallocated clip plan per sheet (parallel to `sheets`).
+    clip_plans: Vec<ClipPlan>,
+    /// Idle-frame `width/height` at scale 1 (`characterOrigin` basis).
+    idle_size: [f64; 2],
     sprite_hitbox: Option<[i32; 2]>,
-    data_offsets: (f64, f64),
-    scale: f64,
+    pub(crate) data_offsets: (f64, f64),
+    pub(crate) scale: f64,
     flip_x: bool,
     position: Vec2,
     scroll: Vec2,
     camera_focus: Vec2,
-    z_index: f64,
+    pub(crate) z_index: f64,
 }
 
 impl CharacterRig {
-    fn from_loaded(loaded: LoadedCharacter) -> Self {
+    /// Native `Stage.addCharacter` + `setScale` character origin anchor (`this.x`/`this.y`).
+    pub(crate) fn anchor(&self) -> Vec2 {
+        [
+            self.position[0] - self.idle_size[0] * self.scale / 2.0 + self.data_offsets.0,
+            self.position[1] - self.idle_size[1] * self.scale + self.data_offsets.1,
+        ]
+    }
+
+    pub(crate) fn dance_every(&self) -> f64 {
+        self.scheduler.dance_every()
+    }
+
+    pub(crate) fn from_loaded(loaded: LoadedCharacter) -> Self {
+        let clip_plans = character_clip_plans(&loaded.sheets, &loaded.animations);
         let mut scheduler = CharacterScheduler::new(
             loaded.animations,
             loaded.dance_every,
@@ -122,11 +483,19 @@ impl CharacterRig {
             }
         }
         let scale = loaded.scale;
-        let bounds = loaded.bounds;
         let position = [loaded.slot.position.0, loaded.slot.position.1];
+        // Native `Stage.addCharacter` places `this` at `anchor()` and
+        // `BaseCharacter.resetCameraFocusPoint` adds `cameraOffsets` to
+        // `getGraphicMidpoint()`: `(position + data_offsets - (0, idle_size.y * scale / 2))`
+        // plus character and stage camera offsets (`Stage.hx` L455-466,
+        // `BaseCharacter.hx` L350-356).
         let camera_focus = [
-            position[0] + loaded.camera_offsets.0 + loaded.slot.camera_offsets.0,
-            position[1] - bounds[3] * scale / 2.0
+            position[0]
+                + loaded.data_offsets.0
+                + loaded.camera_offsets.0
+                + loaded.slot.camera_offsets.0,
+            position[1] - loaded.idle_size[1] * scale / 2.0
+                + loaded.data_offsets.1
                 + loaded.camera_offsets.1
                 + loaded.slot.camera_offsets.1,
         ];
@@ -135,6 +504,8 @@ impl CharacterRig {
             id: loaded.id,
             scheduler,
             sheets: loaded.sheets,
+            clip_plans,
+            idle_size: loaded.idle_size,
             sprite_hitbox: loaded.sprite_hitbox,
             data_offsets: loaded.data_offsets,
             scale,
@@ -157,6 +528,33 @@ impl CharacterRig {
             }
         }
         pages
+    }
+
+    /// Clip plan for one page (max slots across sheets sharing that page;
+    /// the common observed order wins).
+    fn clip_plan_for_page(&self, page: usize) -> ClipPlan {
+        let plans: Vec<ClipPlan> = self
+            .sheets
+            .iter()
+            .enumerate()
+            .filter(|(_, sheet)| sheet.page() == page)
+            .map(|(index, _)| self.clip_plans.get(index).copied().unwrap_or_default())
+            .collect();
+        let slots = plans.iter().map(|plan| plan.slots).max().unwrap_or(0);
+        let before = plans
+            .iter()
+            .filter(|plan| plan.slots > 0)
+            .all(|plan| plan.before);
+        ClipPlan { slots, before }
+    }
+
+    /// Native `DropShadowShader.attachedSprite` forces `useRenderTexture` on
+    /// animate-atlas sprites (DropShadowShader.hx:262-265); those characters
+    /// need the composed offscreen pass.
+    fn has_atlas_sheet(&self) -> bool {
+        self.sheets
+            .iter()
+            .any(|sheet| matches!(sheet, Sheet::Atlas(_)))
     }
 
     /// Current animation-frame normalized UV bounds for the DropShadow
@@ -188,7 +586,7 @@ impl CharacterRig {
         }
     }
 
-    fn draw(&self, camera: &Camera) -> Result<Vec<(Option<usize>, Quad)>, RenderError> {
+    fn draw(&self, camera: &Camera) -> Result<Vec<DrawnQuad>, RenderError> {
         let (sheet_index, frame_value, animation) = match self.scheduler.current_visual_frame() {
             Some((animation, frame)) => (animation.sheet, frame, Some(animation)),
             None => (0, 0, None),
@@ -204,53 +602,73 @@ impl CharacterRig {
                 ),
             });
         };
+        // `Bopper.applyAnimationOffsets`: a missing per-animation override is
+        // an EMPTY animation offset, not the character-global offsets
+        // (Bopper.hx L322-341). The draw shift then subtracts
+        // `(animOffsets - globalOffsets) * scale`, so an animation without an
+        // override picks up `+globalOffsets * scale`.
         let animation_offsets = animation
             .and_then(|animation| animation.offsets)
-            .unwrap_or(self.data_offsets);
+            .unwrap_or((0.0, 0.0));
         let shift = [
             -(animation_offsets.0 - self.data_offsets.0) * self.scale,
             -(animation_offsets.1 - self.data_offsets.1) * self.scale,
         ];
         let projection = camera_projection_matrix(camera, self.scroll);
+        // `Stage.hx` L443-466: `x/y = stagePosition - characterOrigin` at the
+        // FINAL scale, then `setScale` adds the UNSCALED global offsets
+        // (`BaseCharacter.hx` L281-288). `characterOrigin` is `(width/2,
+        // height)` of the idle frame at that scale.
+        let anchor = self.anchor();
 
         match sheet {
             Sheet::Atlas(sheet) => {
-                let quads = match animation.and_then(|animation| animation.symbol.as_deref()) {
+                let symbol = animation.and_then(|animation| animation.symbol.as_deref());
+                let quads = match symbol {
                     Some(symbol) => sheet
                         .stage
-                        .resolve_symbol_frame(symbol, frame_value)
+                        .resolve_symbol_frame_with_clips(symbol, frame_value)
                         .map_err(|source| RenderError::AtlasStage {
                             path: format!("character {} ({})", self.id, self.role.label()),
                             source,
                         })?,
                     None => sheet
                         .stage
-                        .resolve_main_frame(frame_value)
+                        .resolve_main_frame_with_clips(frame_value)
                         .map_err(|source| RenderError::AtlasStage {
                             path: format!("character {} ({})", self.id, self.role.label()),
                             source,
                         })?,
                 };
-                let bounds = sheet.bounds;
-                let top_left = [
-                    self.position[0] - bounds[2] * self.scale / 2.0,
-                    self.position[1] - bounds[3] * self.scale,
-                ];
-                let world =
-                    character_world_matrix(bounds, self.scale, self.flip_x, top_left, shift);
+                let bounds = sheet.timeline_bounds(symbol);
+                let world = character_world_matrix(bounds, self.scale, self.flip_x, anchor, shift);
+                let clip_space = concat(projection, world);
                 let mut out = Vec::with_capacity(quads.len());
-                for quad in &quads {
+                for resolved in &quads {
+                    let quad = &resolved.quad;
                     let [_, _, width, height] = quad.atlas_rect;
-                    let matrix = concat(projection, concat(world, quad.matrix));
-                    out.push((
-                        Some(sheet.page),
-                        quad_from_matrix(
-                            matrix,
-                            width as f64,
-                            height as f64,
-                            quad_uv(quad.atlas_rect, sheet.page_size),
-                        ),
-                    ));
+                    let matrix = concat(clip_space, quad.matrix);
+                    let drawn = quad_from_matrix(
+                        matrix,
+                        width as f64,
+                        height as f64,
+                        quad_uv(quad.atlas_rect, sheet.page_size),
+                    );
+                    let clip = match resolved.clip {
+                        None => None,
+                        Some(rect) => match clipped_world_aabb(clip_space, rect, &drawn) {
+                            Some(clip) => Some(clip),
+                            // Fully clipped away: never draw (native bakes
+                            // the mask, so a fully masked layer contributes
+                            // nothing).
+                            None => continue,
+                        },
+                    };
+                    out.push(DrawnQuad {
+                        page: Some(sheet.page),
+                        quad: drawn,
+                        clip,
+                    });
                 }
                 Ok(out)
             }
@@ -267,10 +685,7 @@ impl CharacterRig {
                     .ok_or_else(|| RenderError::Unsupported {
                         detail: format!("character {} has a sprite sheet with no frames", self.id),
                     })?;
-                let sprite_top_left = [
-                    self.position[0] - hitbox[0] as f64 * self.scale / 2.0 + shift[0],
-                    self.position[1] - hitbox[1] as f64 * self.scale + shift[1],
-                ];
+                let sprite_top_left = [anchor[0] + shift[0], anchor[1] + shift[1]];
                 let flip_x = self.flip_x ^ animation.is_some_and(|animation| animation.flip_x);
                 let flip_y = animation.is_some_and(|animation| animation.flip_y);
                 let (matrix, uv) = sprite_frame_matrix(
@@ -283,10 +698,16 @@ impl CharacterRig {
                     0.0,
                     sheet.page_size,
                 );
-                Ok(vec![(
-                    Some(sheet.page),
-                    quad_from_matrix(matrix, frame.rect[2] as f64, frame.rect[3] as f64, uv),
-                )])
+                Ok(vec![DrawnQuad {
+                    page: Some(sheet.page),
+                    quad: quad_from_matrix(
+                        concat(projection, matrix),
+                        frame.rect[2] as f64,
+                        frame.rect[3] as f64,
+                        uv,
+                    ),
+                    clip: None,
+                }])
             }
         }
     }
@@ -296,6 +717,8 @@ impl CharacterRig {
 struct PropRig {
     prop: LoadedStageProp,
     scheduler: Option<CharacterScheduler>,
+    /// Preallocated clip plan for the atlas page (empty for other props).
+    clip_plan: ClipPlan,
     /// One-shot structured deviation log for `applyStageMatrix` props that are
     /// loaded but intentionally not drawn (M6-CONTRACT §11.6).
     stage_matrix_log: std::sync::Once,
@@ -303,6 +726,12 @@ struct PropRig {
 
 impl PropRig {
     fn from_loaded(prop: LoadedStageProp) -> Self {
+        let clip_plan = match &prop.visual {
+            PropVisual::Atlas { sheet, .. } => atlas_clip_plan(&sheet.stage, &prop.animations, 0),
+            PropVisual::Solid { .. } | PropVisual::Static { .. } | PropVisual::Sprite { .. } => {
+                ClipPlan::default()
+            }
+        };
         let scheduler = prop.bopper.then(|| {
             let mut scheduler = CharacterScheduler::new(
                 prop.animations.clone(),
@@ -316,6 +745,7 @@ impl PropRig {
         Self {
             prop,
             scheduler,
+            clip_plan,
             stage_matrix_log: std::sync::Once::new(),
         }
     }
@@ -326,6 +756,13 @@ impl PropRig {
             PropVisual::Static { page, .. } => vec![Some(*page)],
             PropVisual::Sprite { sheet, .. } => vec![Some(sheet.page)],
             PropVisual::Atlas { sheet, .. } => vec![Some(sheet.page)],
+        }
+    }
+
+    fn clip_plan_for_page(&self, page: usize) -> ClipPlan {
+        match &self.prop.visual {
+            PropVisual::Atlas { sheet, .. } if sheet.page == page => self.clip_plan,
+            _ => ClipPlan::default(),
         }
     }
 
@@ -757,6 +1194,9 @@ pub(crate) struct Scene {
     /// `sserafim` stage `SserafimShader` tween/beat state (`None` on every
     /// other stage).
     sserafim: Option<SserafimRuntime>,
+    /// Attached `ABotSpeaker` unit when the speaker character is `nene*` or
+    /// `otis-speaker` (`docs/M6-CONTRACT.md` §18).
+    abot: Option<super::abot::ABotRuntime>,
 }
 
 /// Per-stage screen-rain runtime state. The shader uniforms live on the
@@ -1002,6 +1442,7 @@ impl Scene {
             weekend1_props,
             cutscene_changes,
             shader_masks,
+            abot: loaded_abot,
             note_desaturation,
         } = loaded;
         // The HUD state is built before the character rigs consume the loaded
@@ -1014,6 +1455,26 @@ impl Scene {
         for character in loaded_characters {
             characters.push(CharacterRig::from_loaded(character));
         }
+        let abot = match loaded_abot {
+            Some(loaded_abot) => {
+                let speaker = characters.get(loaded_abot.speaker_index).ok_or_else(|| {
+                    RenderError::Unsupported {
+                        detail: format!(
+                            "ABot speaker index {} out of range ({})",
+                            loaded_abot.speaker_index,
+                            characters.len()
+                        ),
+                    }
+                })?;
+                Some(super::abot::ABotRuntime::new(
+                    loaded_abot,
+                    speaker,
+                    &stage_id,
+                    &shader_masks,
+                ))
+            }
+            None => None,
+        };
         let props: Vec<PropRig> = props.into_iter().map(PropRig::from_loaded).collect();
         // M6-CONTRACT §14.2 (weekend-1): the can joins the z-sorted stage
         // surface at `spraycanPile.zIndex - 1`; the explosions draw at the
@@ -1051,6 +1512,15 @@ impl Scene {
             sorted.push((0.0, sorted.len(), StageItemKind::Weekend1BigExplosion));
             sorted.push((0.0, sorted.len(), StageItemKind::Weekend1EzExplosion));
         }
+        if let Some(runtime) = &abot {
+            for part in super::abot::ABotPart::ALL {
+                sorted.push((
+                    runtime.z_index(part),
+                    sorted.len(),
+                    StageItemKind::ABot(part),
+                ));
+            }
+        }
         sorted.sort_by(|left, right| {
             left.0
                 .total_cmp(&right.0)
@@ -1059,55 +1529,219 @@ impl Scene {
 
         let mut layer_specs = Vec::new();
         let mut stage_items = Vec::with_capacity(sorted.len());
+        let mut composed_groups = 0usize;
         for (_, _, kind) in sorted {
-            let (pages, color, shader) = match kind {
-                StageItemKind::Prop(index) => (
-                    props[index].pages(),
-                    prop_layer_color(&props[index].prop),
-                    super::shaders::prop_shader(&stage_id, &props[index].prop.name),
-                ),
-                StageItemKind::Character(index) => (
-                    characters[index].pages(),
-                    [1.0, 1.0, 1.0, 1.0],
-                    super::shaders::character_shader(
+            let (pages, color, shader, clip_plans, composed) = match kind {
+                StageItemKind::Prop(index) => {
+                    let pages = props[index].pages();
+                    let plans = pages
+                        .iter()
+                        .map(|page| {
+                            page.map_or_else(ClipPlan::default, |page| {
+                                props[index].clip_plan_for_page(page)
+                            })
+                        })
+                        .collect();
+                    (
+                        pages,
+                        prop_layer_color(&props[index].prop),
+                        super::shaders::prop_shader(&stage_id, &props[index].prop.name),
+                        plans,
+                        false,
+                    )
+                }
+                StageItemKind::Character(index) => {
+                    let pages = characters[index].pages();
+                    let plans = pages
+                        .iter()
+                        .map(|page| {
+                            page.map_or_else(ClipPlan::default, |page| {
+                                characters[index].clip_plan_for_page(page)
+                            })
+                        })
+                        .collect();
+                    let shader = super::shaders::character_shader(
                         &stage_id,
                         characters[index].role,
                         &characters[index].id,
                         &shader_masks,
-                    ),
-                ),
+                    );
+                    // Native `DropShadowShader.attachedSprite` forces
+                    // `useRenderTexture` on animate-atlas sprites
+                    // (DropShadowShader.hx:262-265).
+                    let composed = matches!(shader, LayerShader::DropShadow(_))
+                        && characters[index].has_atlas_sheet();
+                    (pages, [1.0, 1.0, 1.0, 1.0], shader, plans, composed)
+                }
                 StageItemKind::Weekend1Can => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.can_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
+                    (
+                        vec![Some(page)],
+                        [1.0, 1.0, 1.0, 1.0],
+                        LayerShader::None,
+                        vec![ClipPlan::default()],
+                        false,
+                    )
                 }
                 StageItemKind::Weekend1CanShotProp => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.can_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
+                    (
+                        vec![Some(page)],
+                        [1.0, 1.0, 1.0, 1.0],
+                        LayerShader::None,
+                        vec![ClipPlan::default()],
+                        false,
+                    )
                 }
                 StageItemKind::Weekend1BigExplosion => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.big_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
+                    (
+                        vec![Some(page)],
+                        [1.0, 1.0, 1.0, 1.0],
+                        LayerShader::None,
+                        vec![ClipPlan::default()],
+                        false,
+                    )
                 }
                 StageItemKind::Weekend1EzExplosion => {
                     let page = weekend1
                         .as_ref()
                         .map_or(usize::MAX, |runtime| runtime.ez_page());
-                    (vec![Some(page)], [1.0, 1.0, 1.0, 1.0], LayerShader::None)
+                    (
+                        vec![Some(page)],
+                        [1.0, 1.0, 1.0, 1.0],
+                        LayerShader::None,
+                        vec![ClipPlan::default()],
+                        false,
+                    )
                 }
+                StageItemKind::ABot(part) => match &abot {
+                    Some(runtime) => {
+                        let (pages, color, shader) = runtime.layer_setup(part);
+                        (pages, color, shader, vec![ClipPlan::default()], false)
+                    }
+                    None => (
+                        Vec::new(),
+                        [1.0, 1.0, 1.0, 1.0],
+                        LayerShader::None,
+                        Vec::new(),
+                        false,
+                    ),
+                },
             };
-            let mut layers = Vec::with_capacity(pages.len());
-            for page in pages {
-                layers.push((page, layer_specs.len()));
+            let group = composed.then(|| {
+                let group = composed_groups;
+                composed_groups += 1;
+                group
+            });
+            let source_role = group.map(|group| ComposedLayer {
+                group,
+                output: false,
+            });
+            let mut layers = Vec::new();
+            for (page, plan) in pages.into_iter().zip(clip_plans) {
+                // Clip slots are preallocated from the largest simultaneous
+                // mask count over the sheet's reachable frames. A page with
+                // no `Clp` data allocates none, keeping non-clipped stages
+                // byte-identical. Native Flash masks clip layers on one side
+                // of their unclipped siblings; the shipped sserafim hair is
+                // the bottom layer, so the slots register BEFORE the page
+                // layer when the scanned frames only clip lower quads.
+                fn push_clip_slot(
+                    layers: &mut Vec<StageLayer>,
+                    layer_specs: &mut Vec<LayerSpec>,
+                    page: Option<usize>,
+                    color: [f32; 4],
+                    base_shader: LayerShader,
+                    slot: usize,
+                    composed: Option<ComposedLayer>,
+                ) {
+                    let slot_shader = if base_shader.is_shader() {
+                        base_shader
+                    } else {
+                        LayerShader::Clip { rect: [0.0; 4] }
+                    };
+                    let index = layer_specs.len();
+                    layers.push(StageLayer {
+                        page,
+                        layer: index,
+                        clip_slot: Some(slot),
+                        composed_output: false,
+                    });
+                    layer_specs.push(LayerSpec {
+                        page,
+                        color,
+                        shader: slot_shader,
+                        clip: None,
+                        composed,
+                    });
+                }
+                if plan.before {
+                    for slot in 0..plan.slots {
+                        push_clip_slot(
+                            &mut layers,
+                            &mut layer_specs,
+                            page,
+                            color,
+                            shader,
+                            slot,
+                            source_role,
+                        );
+                    }
+                }
+                let page_layer = layer_specs.len();
+                layers.push(StageLayer {
+                    page,
+                    layer: page_layer,
+                    clip_slot: None,
+                    composed_output: false,
+                });
                 layer_specs.push(LayerSpec {
                     page,
                     color,
                     shader,
+                    clip: None,
+                    composed: source_role,
+                });
+                if !plan.before {
+                    for slot in 0..plan.slots {
+                        push_clip_slot(
+                            &mut layers,
+                            &mut layer_specs,
+                            page,
+                            color,
+                            shader,
+                            slot,
+                            source_role,
+                        );
+                    }
+                }
+            }
+            if let Some(group) = group {
+                // The output layer draws the composed target as one quad.
+                // Its page is unused (the harness binds the offscreen image).
+                let layer = layer_specs.len();
+                layers.push(StageLayer {
+                    page: None,
+                    layer,
+                    clip_slot: None,
+                    composed_output: true,
+                });
+                layer_specs.push(LayerSpec {
+                    page: None,
+                    color,
+                    shader,
+                    clip: None,
+                    composed: Some(ComposedLayer {
+                        group,
+                        output: true,
+                    }),
                 });
             }
             stage_items.push(StageItem { kind, layers });
@@ -1133,6 +1767,8 @@ impl Scene {
                 page: None,
                 color: [1.0, 1.0, 1.0, 1.0],
                 shader: LayerShader::Rain(spec.rain),
+                clip: None,
+                composed: None,
             });
             layer
         });
@@ -1171,6 +1807,8 @@ impl Scene {
             page: Some(note_style.note_frames[0].page),
             color: [1.0, 1.0, 1.0, 0.5],
             shader: LayerShader::Hsv(Hsv::new(1.0, 0.2, 1.0)),
+            clip: None,
+            composed: None,
         });
 
         // M6-CONTRACT §13: HUD layers are appended AFTER every stage/overlay
@@ -1282,6 +1920,7 @@ impl Scene {
             rain,
             rain_post_layer,
             sserafim,
+            abot,
             cutscene: cutscene_changes
                 .as_ref()
                 .map(|changes| super::choreography::DarnellCutscene::new(changes.clone())),
@@ -1318,7 +1957,7 @@ impl Scene {
             if !super::choreography::prop_darken_eligible(&prop.name, prop.z_index, bf_z) {
                 continue;
             }
-            layers.extend(item.layers.iter().map(|(_, layer)| *layer));
+            layers.extend(item.spec_layers());
         }
         if layers.is_empty() {
             return;
@@ -1617,6 +2256,9 @@ impl Scene {
                     for character in &mut self.characters {
                         character.scheduler.on_step(step);
                     }
+                    if let Some(abot) = &mut self.abot {
+                        abot.on_step(step);
+                    }
                     for prop in &mut self.props {
                         if let Some(scheduler) = &mut prop.scheduler {
                             scheduler.on_step_forced(step);
@@ -1729,6 +2371,9 @@ impl Scene {
         }
         for character in &mut self.characters {
             character.scheduler.update(TICK_SECONDS, step_length_ms);
+        }
+        if let Some(abot) = &mut self.abot {
+            abot.update(TICK_SECONDS);
         }
         for prop in &mut self.props {
             if let Some(scheduler) = &mut prop.scheduler {
@@ -2116,8 +2761,8 @@ impl Scene {
                 continue;
             };
             let bounds = characters[index].drop_shadow_frame_bounds();
-            for (_, layer) in &item.layers {
-                if let Some(spec) = layer_specs.get_mut(*layer)
+            for layer in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(layer.layer)
                     && let LayerShader::DropShadow(shadow) = &mut spec.shader
                 {
                     shadow.frame_bounds = bounds;
@@ -2130,8 +2775,8 @@ impl Scene {
                 continue;
             };
             let frame_bounds = props[index].rain_frame_bounds();
-            for (_, layer) in &item.layers {
-                if let Some(spec) = layer_specs.get_mut(*layer)
+            for layer in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(layer.layer)
                     && let LayerShader::Rain(rain) = &mut spec.shader
                     && rain.sprite_mode
                 {
@@ -2158,7 +2803,7 @@ impl Scene {
             if self.props[index].prop.name != name {
                 continue;
             }
-            layers.extend(item.layers.iter().map(|(_, layer)| *layer));
+            layers.extend(item.spec_layers());
         }
         layers
     }
@@ -2382,8 +3027,8 @@ impl Scene {
             if index != opponent {
                 continue;
             }
-            for (_, layer) in &item.layers {
-                if let Some(spec) = layer_specs.get_mut(*layer)
+            for layer in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(layer.layer)
                     && let LayerShader::DropShadow(shadow) = &mut spec.shader
                 {
                     shadow.use_alt_mask = true;
@@ -2415,9 +3060,20 @@ impl Scene {
             if !matches!(item.kind, StageItemKind::Character(index) if index == player) {
                 continue;
             }
-            for (_, layer) in &item.layers {
-                if let Some(spec) = layer_specs.get_mut(*layer) {
-                    spec.shader = LayerShader::None;
+            for layer in &item.layers {
+                if let Some(spec) = layer_specs.get_mut(layer.layer) {
+                    if layer.composed_output {
+                        // The native `shader = null` keeps `useRenderTexture`,
+                        // so the output still samples the composed target.
+                        spec.shader = LayerShader::Composed;
+                    } else if layer.clip_slot.is_some() {
+                        // Clip slots keep a shader material for their whole
+                        // lifetime; an unshaded limb source would change the
+                        // harness material type at runtime.
+                        spec.shader = LayerShader::Clip { rect: [0.0; 4] };
+                    } else {
+                        spec.shader = LayerShader::None;
+                    }
                 }
             }
         }
@@ -2441,18 +3097,26 @@ impl Scene {
         if let Some(hud) = &mut self.hud {
             hud.state.observe_event(event, &hud.assets)?;
         }
-        // Weekend-1 note-kind choreography (M6-CONTRACT §14.2): the rows
+        // Weekend-1 note-kind choreography (M6-CONTRACT §14.2 & §18): the rows
         // carry the chart `k` kinds; lightcan/kneecan/cockgun are timing
-        // anchors, kickcan spawns the can, firegun fires the ARcing one.
-        if let Some(kind) = event.note_kind()
-            && let Some(runtime) = &mut self.weekend1
-        {
-            match event {
-                TraceEvent::Miss { .. } => runtime.on_miss(kind),
-                TraceEvent::Hit { .. } | TraceEvent::OpponentHit { .. } => {
-                    runtime.on_hit(kind, self.sim_ms)
+        // anchors, kickcan spawns the can, firegun fires the arcing one, and
+        // `nene*` shifts A-Bot pupils on `lightcan`/`cockgun`.
+        if let Some(kind) = event.note_kind() {
+            if let Some(runtime) = &mut self.weekend1 {
+                match event {
+                    TraceEvent::Miss { .. } => runtime.on_miss(kind),
+                    TraceEvent::Hit { .. } | TraceEvent::OpponentHit { .. } => {
+                        runtime.on_hit(kind, self.sim_ms)
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+            if matches!(
+                event,
+                TraceEvent::Hit { .. } | TraceEvent::OpponentHit { .. } | TraceEvent::Miss { .. }
+            ) && let Some(abot) = &mut self.abot
+            {
+                abot.on_note_kind(kind);
             }
         }
         match event {
@@ -2595,6 +3259,7 @@ impl Scene {
                 }
             }
             TraceEvent::CameraFocus {
+                target_char,
                 target_kind,
                 x,
                 y,
@@ -2603,6 +3268,9 @@ impl Scene {
                 ease,
                 ..
             } => {
+                if let Some(abot) = &mut self.abot {
+                    abot.on_camera_focus(*target_char);
+                }
                 self.apply_camera_focus(
                     target_kind,
                     *x,
@@ -2790,37 +3458,135 @@ impl Scene {
     /// Composes all draw layers in painter order. Stage items may own several
     /// page layers (mixed multi-sheet characters); each quad is routed to the
     /// layer registered for its page.
-    pub(crate) fn draw(&self) -> Result<Vec<Vec<Quad>>, RenderError> {
+    pub(crate) fn draw(&mut self) -> Result<Vec<Vec<Quad>>, RenderError> {
         let mut layers: Vec<Vec<Quad>> = vec![Vec::new(); self.layer_specs.len()];
+        let mut clip_updates: Vec<(usize, Option<[f64; 4]>)> = Vec::new();
         for item in &self.stage_items {
-            let quads = match item.kind {
+            let quads: Vec<DrawnQuad> = match item.kind {
                 StageItemKind::Prop(index) => Scene::draw_prop(&self.camera, &self.props[index])?,
                 StageItemKind::Character(index) => self.characters[index].draw(&self.camera)?,
                 StageItemKind::Weekend1Can => match &self.weekend1 {
-                    Some(runtime) => runtime.draw_can(&self.camera)?,
+                    Some(runtime) => runtime
+                        .draw_can(&self.camera)?
+                        .into_iter()
+                        .map(|(page, quad)| DrawnQuad {
+                            page,
+                            quad,
+                            clip: None,
+                        })
+                        .collect(),
                     None => Vec::new(),
                 },
                 StageItemKind::Weekend1CanShotProp => match &self.weekend1 {
-                    Some(runtime) => runtime.draw_can_shot_prop(&self.camera)?,
+                    Some(runtime) => runtime
+                        .draw_can_shot_prop(&self.camera)?
+                        .into_iter()
+                        .map(|(page, quad)| DrawnQuad {
+                            page,
+                            quad,
+                            clip: None,
+                        })
+                        .collect(),
                     None => Vec::new(),
                 },
                 StageItemKind::Weekend1BigExplosion => match &self.weekend1 {
-                    Some(runtime) => runtime.draw_big_explosion(&self.camera)?,
+                    Some(runtime) => runtime
+                        .draw_big_explosion(&self.camera)?
+                        .into_iter()
+                        .map(|(page, quad)| DrawnQuad {
+                            page,
+                            quad,
+                            clip: None,
+                        })
+                        .collect(),
                     None => Vec::new(),
                 },
                 StageItemKind::Weekend1EzExplosion => match &self.weekend1 {
-                    Some(runtime) => runtime.draw_ez_explosion(&self.camera)?,
+                    Some(runtime) => runtime
+                        .draw_ez_explosion(&self.camera)?
+                        .into_iter()
+                        .map(|(page, quad)| DrawnQuad {
+                            page,
+                            quad,
+                            clip: None,
+                        })
+                        .collect(),
+                    None => Vec::new(),
+                },
+                StageItemKind::ABot(part) => match &self.abot {
+                    Some(runtime) => runtime.draw_part(&self.camera, part)?,
                     None => Vec::new(),
                 },
             };
-            for (page, quad) in quads {
-                let Some((_, layer)) = item.layers.iter().find(|(item_page, _)| *item_page == page)
-                else {
-                    return Err(RenderError::Renderer {
-                        detail: format!("stage item drew page {page:?} without a registered layer"),
-                    });
+            let composed_output = item
+                .layers
+                .iter()
+                .find(|layer| layer.composed_output)
+                .map(|layer| layer.layer);
+            let ordered = ordered_clips(&quads);
+            // Publish the live rects for every preallocated clip slot (an
+            // unused slot keeps no rect and therefore draws nothing when its
+            // base shader is the kind-6 clip-only material).
+            for layer in item.layers.iter().filter(|layer| layer.clip_slot.is_some()) {
+                let rect = layer.clip_slot.and_then(|slot| {
+                    ordered
+                        .get(&layer.page)
+                        .and_then(|rects| rects.get(slot))
+                        .copied()
+                });
+                clip_updates.push((layer.layer, rect));
+            }
+            for drawn in &quads {
+                let layer = match drawn.clip {
+                    None => regular_layer(item, drawn.page)?,
+                    Some(clip) => {
+                        let slot = ordered.get(&drawn.page).and_then(|rects| {
+                            rects
+                                .iter()
+                                .position(|rect| clip_bits(*rect) == clip_bits(clip))
+                        });
+                        match slot.and_then(|slot| {
+                            item.layers
+                                .iter()
+                                .find(|layer| {
+                                    layer.clip_slot == Some(slot) && layer.page == drawn.page
+                                })
+                                .map(|layer| layer.layer)
+                        }) {
+                            Some(layer) => layer,
+                            None => {
+                                CLIP_SLOT_OVERFLOW.call_once(|| {
+                                    eprintln!(
+                                        "oxide render: deviation kind=clip_slot_overflow \
+                                         page={:?} action=draw_unclipped detail=\"frame has more \
+                                         simultaneous mask rects than preallocated clip slots\"",
+                                        drawn.page
+                                    );
+                                });
+                                regular_layer(item, drawn.page)?
+                            }
+                        }
+                    }
                 };
-                layers[*layer].push(quad);
+                layers[layer].push(drawn.quad);
+            }
+            if let Some(layer) = composed_output
+                && let Some(quad) = composed_output_quad(&quads)
+            {
+                layers[layer].push(quad);
+            }
+        }
+        for (layer, rect) in clip_updates {
+            let Some(spec) = self.layer_specs.get_mut(layer) else {
+                continue;
+            };
+            spec.clip = rect;
+            // The clip-only material keeps its variant stable across frames;
+            // its rect is the fail-closed empty remainder when unused.
+            if let LayerShader::Clip { .. } = spec.shader {
+                spec.shader = LayerShader::Clip {
+                    rect: rect.unwrap_or([0.0; 4]),
+                };
             }
         }
         layers[self.overlay_start] = self.draw_backgrounds();
@@ -2852,10 +3618,7 @@ impl Scene {
         Ok(layers)
     }
 
-    fn draw_prop(
-        camera: &Camera,
-        rig: &PropRig,
-    ) -> Result<Vec<(Option<usize>, Quad)>, RenderError> {
+    fn draw_prop(camera: &Camera, rig: &PropRig) -> Result<Vec<DrawnQuad>, RenderError> {
         let prop = &rig.prop;
         if let PropVisual::Atlas {
             apply_stage_matrix: true,
@@ -2903,15 +3666,16 @@ impl Scene {
                     center,
                     prop.angle,
                 );
-                Ok(vec![(
-                    None,
-                    quad_from_matrix(
+                Ok(vec![DrawnQuad {
+                    page: None,
+                    quad: quad_from_matrix(
                         concat(projection, matrix),
                         width,
                         height,
                         [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
                     ),
-                )])
+                    clip: None,
+                }])
             }
             PropVisual::Static { page, image_size } => {
                 let hitbox = [image_size[0].round() as i32, image_size[1].round() as i32];
@@ -2932,15 +3696,16 @@ impl Scene {
                     prop.angle,
                     *image_size,
                 );
-                Ok(vec![(
-                    Some(*page),
-                    quad_from_matrix(
+                Ok(vec![DrawnQuad {
+                    page: Some(*page),
+                    quad: quad_from_matrix(
                         concat(projection, matrix),
                         frame.rect[2] as f64,
                         frame.rect[3] as f64,
                         uv,
                     ),
-                )])
+                    clip: None,
+                }])
             }
             PropVisual::Sprite { sheet, hitbox_dest } => {
                 let frame = sheet
@@ -2961,34 +3726,36 @@ impl Scene {
                     prop.angle,
                     sheet.page_size,
                 );
-                Ok(vec![(
-                    Some(sheet.page),
-                    quad_from_matrix(
+                Ok(vec![DrawnQuad {
+                    page: Some(sheet.page),
+                    quad: quad_from_matrix(
                         concat(projection, matrix),
                         frame.rect[2] as f64,
                         frame.rect[3] as f64,
                         uv,
                     ),
-                )])
+                    clip: None,
+                }])
             }
             PropVisual::Atlas { sheet, .. } => {
-                let quads = match animation.and_then(|animation| animation.symbol.as_deref()) {
+                let symbol = animation.and_then(|animation| animation.symbol.as_deref());
+                let quads = match symbol {
                     Some(symbol) => sheet
                         .stage
-                        .resolve_symbol_frame(symbol, frame_value)
+                        .resolve_symbol_frame_with_clips(symbol, frame_value)
                         .map_err(|source| RenderError::AtlasStage {
                             path: format!("stage prop {:?} ({sheet_index})", prop.name),
                             source,
                         })?,
                     None => sheet
                         .stage
-                        .resolve_main_frame(frame_value)
+                        .resolve_main_frame_with_clips(frame_value)
                         .map_err(|source| RenderError::AtlasStage {
                             path: format!("stage prop {:?} ({sheet_index})", prop.name),
                             source,
                         })?,
                 };
-                let bounds = sheet.bounds;
+                let bounds = sheet.timeline_bounds(symbol);
                 let world = prop_world_matrix(
                     bounds,
                     [scale[0], scale[1]],
@@ -3002,18 +3769,29 @@ impl Scene {
                     position[1] + shift[1] + bounds[3] * scale[1] / 2.0,
                 ];
                 let world = rotate_about(world, center, prop.angle);
+                let clip_space = concat(projection, world);
                 let mut out = Vec::with_capacity(quads.len());
-                for quad in &quads {
+                for resolved in &quads {
+                    let quad = &resolved.quad;
                     let [_, _, width, height] = quad.atlas_rect;
-                    out.push((
-                        Some(sheet.page),
-                        quad_from_matrix(
-                            concat(projection, concat(world, quad.matrix)),
-                            width as f64,
-                            height as f64,
-                            quad_uv(quad.atlas_rect, sheet.page_size),
-                        ),
-                    ));
+                    let drawn = quad_from_matrix(
+                        concat(clip_space, quad.matrix),
+                        width as f64,
+                        height as f64,
+                        quad_uv(quad.atlas_rect, sheet.page_size),
+                    );
+                    let clip = match resolved.clip {
+                        None => None,
+                        Some(rect) => match clipped_world_aabb(clip_space, rect, &drawn) {
+                            Some(clip) => Some(clip),
+                            None => continue,
+                        },
+                    };
+                    out.push(DrawnQuad {
+                        page: Some(sheet.page),
+                        quad: drawn,
+                        clip,
+                    });
                 }
                 Ok(out)
             }
@@ -3821,8 +4599,9 @@ mod tests {
         let rig = PropRig::from_loaded(prop);
         let quads = Scene::draw_prop(&Camera::new(1.0), &rig).expect("solid prop draws");
         assert_eq!(quads.len(), 1, "one solid rect");
-        let (page, quad) = &quads[0];
-        assert_eq!(*page, None, "solid props are untextured");
+        let drawn = &quads[0];
+        assert_eq!(drawn.page, None, "solid props are untextured");
+        let quad = &drawn.quad;
         close(quad.pos[1][0] - quad.pos[0][0], 2400.0);
         close(quad.pos[0][1] - quad.pos[3][1], 2000.0);
         // Camera::new(1.0) has scroll 0/zoom 1 and the prop scroll factor is
@@ -4032,6 +4811,180 @@ mod tests {
     }
 
     #[test]
+    fn sprite_character_draw_applies_the_camera_projection() {
+        let mut character = sheeted_character(Role::Player, "bf", bf_animations(), [100.0, 100.0]);
+        character.data_offsets = (0.0, 0.0);
+        let rig = CharacterRig::from_loaded(character);
+        let mut camera = Camera::new(1.0);
+        camera.focus_on([400.0, 300.0]);
+        let quads = rig.draw(&camera).expect("sprite character draws");
+        assert_eq!(quads.len(), 1);
+        // Idle frame 0 of the synthetic sheet: box 30x40 at scale 1, anchored
+        // at `position - idleSize/2` (100 - 15, 200 - 40) = (85, 160).
+        let projected = camera.project([85.0, 160.0], [1.0, 1.0]);
+        let quad = &quads[0].quad;
+        close(quad.pos[0][0], projected[0] - HALF_WIDTH);
+        close(quad.pos[0][1], HALF_HEIGHT - projected[1]);
+        // The Sheet::Sprite path must use the character scroll factor, like
+        // the atlas and prop paths.
+        assert!(
+            (quad.pos[0][0] - (85.0 - HALF_WIDTH)).abs() > 1.0,
+            "the camera scroll must move the sprite quad"
+        );
+    }
+
+    #[test]
+    fn character_anchor_uses_idle_origin_and_unscaled_global_offsets() {
+        let mut animations = BTreeMap::new();
+        animations.insert("idle".to_string(), animation(&[0], true));
+        let mut character = sheeted_character(Role::Player, "bf", animations, [100.0, 100.0]);
+        character.idle_size = [50.0, 60.0];
+        character.scale = 2.0;
+        character.data_offsets = (10.0, 20.0);
+        let rig = CharacterRig::from_loaded(character);
+        let camera = Camera::new(1.0);
+        let quad = rig
+            .draw(&camera)
+            .expect("sprite character draws")
+            .remove(0)
+            .quad;
+        // Native chain: x/y = position - idleOrigin * scale + globalOffsets,
+        // then the draw shift is `-(animOffsets - globalOffsets) * scale`.
+        // With no per-animation offsets the shift equals +global * scale:
+        // anchor (100 - 50, 200 - 120) + (10, 20) = (60, 100);
+        // content top-left = anchor + (20, 40) = (80, 140).
+        close(quad.pos[0][0], 80.0 - HALF_WIDTH);
+        close(quad.pos[0][1], HALF_HEIGHT - 140.0);
+
+        // An explicit per-animation offset equal to the global offset cancels
+        // the shift (Bopper.applyAnimationOffsets with a data override).
+        let mut animations = BTreeMap::new();
+        let mut idle = animation(&[0], true);
+        idle.offsets = Some((10.0, 20.0));
+        animations.insert("idle".to_string(), idle);
+        let mut character = sheeted_character(Role::Player, "bf", animations, [100.0, 100.0]);
+        character.idle_size = [50.0, 60.0];
+        character.scale = 2.0;
+        character.data_offsets = (10.0, 20.0);
+        let rig = CharacterRig::from_loaded(character);
+        let quad = rig
+            .draw(&camera)
+            .expect("sprite character draws")
+            .remove(0)
+            .quad;
+        close(quad.pos[0][0], 60.0 - HALF_WIDTH);
+        close(quad.pos[0][1], HALF_HEIGHT - 100.0);
+    }
+
+    #[test]
+    fn atlas_character_anchor_adds_the_unscaled_global_offsets() {
+        let animation_json = r#"{
+            "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": [
+                {"ASI": {"N": "p", "MX": [1, 0, 0, 1, 10, 20]}}
+            ]}]}]}},
+            "MD": {"FRT": 24, "W": 100, "H": 100}
+        }"#;
+        let spritemap = r#"{
+            "ATLAS": {"SPRITES": [
+                {"SPRITE": {"name": "p", "x": 0, "y": 0, "w": 10, "h": 20}}
+            ]},
+            "meta": {"image": "spritemap1.png", "size": {"w": 100, "h": 100}}
+        }"#;
+        let stage = oxide_atlas::AnimateStage::parse(animation_json, spritemap)
+            .expect("synthetic atlas parses");
+        let mut animations = BTreeMap::new();
+        animations.insert("idle".to_string(), animation(&[0], true));
+        let mut character = test_character(Role::Player, (100.0, 200.0), animations, Some("idle"));
+        character.idle_size = [10.0, 20.0];
+        character.data_offsets = (3.0, 4.0);
+        character.sheets = vec![Sheet::Atlas(Box::new(super::super::load::AtlasSheet {
+            bounds: stage.bounds(),
+            symbol_bounds: BTreeMap::new(),
+            stage,
+            page: 0,
+            page_size: [100.0, 100.0],
+        }))];
+        let rig = CharacterRig::from_loaded(character);
+        let camera = Camera::new(1.0);
+        let quad = rig
+            .draw(&camera)
+            .expect("atlas character draws")
+            .remove(0)
+            .quad;
+        // anchor = position - idle/2 + global = (98, 184); the no-override
+        // shift is +global * scale = (3, 4), and the quad at atlas (10, 20)
+        // maps to the content top-left (101, 188).
+        close(quad.pos[0][0], 101.0 - HALF_WIDTH);
+        close(quad.pos[0][1], HALF_HEIGHT - 188.0);
+    }
+
+    #[test]
+    fn camera_focus_uses_idle_height_data_and_camera_offsets() {
+        let mut character = test_character(Role::Player, (500.0, 600.0), BTreeMap::new(), None);
+        character.idle_size = [100.0, 200.0];
+        character.scale = 1.5;
+        character.data_offsets = (10.0, 25.0);
+        character.camera_offsets = (-30.0, 40.0);
+        character.slot.camera_offsets = (5.0, -15.0);
+        let rig = CharacterRig::from_loaded(character);
+        // x = 500 + 10 - 30 + 5 = 485
+        // y = 600 - (200 * 1.5 / 2) + 25 + 40 - 15 = 600 - 150 + 50 = 500
+        assert_eq!(rig.camera_focus, [485.0, 500.0]);
+    }
+
+    #[test]
+    fn atlas_symbol_animation_uses_symbol_timeline_bounds_when_drawing() {
+        let animation_json = r#"{
+            "AN": {"TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": [
+                {"ASI": {"N": "p", "MX": [1, 0, 0, 1, 500, 600]}}
+            ]}]}]}},
+            "SD": {"S": [{"SN": "Sym", "TL": {"L": [{"FR": [{"I": 0, "DU": 1, "E": [
+                {"ASI": {"N": "p", "MX": [1, 0, 0, 1, 10, 20]}}
+            ]}]}]}}]},
+            "MD": {"FRT": 24, "W": 100, "H": 100}
+        }"#;
+        let spritemap = r#"{
+            "ATLAS": {"SPRITES": [
+                {"SPRITE": {"name": "p", "x": 0, "y": 0, "w": 10, "h": 20}}
+            ]},
+            "meta": {"image": "spritemap1.png", "size": {"w": 100, "h": 100}}
+        }"#;
+        let stage = oxide_atlas::AnimateStage::parse(animation_json, spritemap)
+            .expect("synthetic atlas parses");
+        let sym_bounds = stage.symbol_bounds("Sym").expect("Sym bounds");
+        let mut symbol_bounds = BTreeMap::new();
+        symbol_bounds.insert("Sym".to_string(), sym_bounds);
+
+        let mut anim = animation(&[0], true);
+        anim.symbol = Some("Sym".to_string());
+        let mut animations = BTreeMap::new();
+        animations.insert("idle".to_string(), anim);
+
+        let mut character = test_character(Role::Player, (100.0, 200.0), animations, Some("idle"));
+        character.idle_size = [sym_bounds[2], sym_bounds[3]];
+        character.sheets = vec![Sheet::Atlas(Box::new(super::super::load::AtlasSheet {
+            bounds: stage.bounds(),
+            symbol_bounds,
+            stage,
+            page: 0,
+            page_size: [100.0, 100.0],
+        }))];
+
+        let rig = CharacterRig::from_loaded(character);
+        let camera = Camera::new(1.0);
+        let quad = rig
+            .draw(&camera)
+            .expect("symbol atlas character draws")
+            .remove(0)
+            .quad;
+        // Sym local quad sits at (10, 20) with Sym bounds [10, 20, 10, 20].
+        // character_world_matrix translates by -bounds.xy so content top-left
+        // lands right at anchor = (95, 180), NOT shifted by main bounds (-500, -600).
+        close(quad.pos[0][0], 95.0 - HALF_WIDTH);
+        close(quad.pos[0][1], HALF_HEIGHT - 180.0);
+    }
+
+    #[test]
     fn character_quad_matrix_keeps_the_atlas_tile_rotation() {
         // A rotated spritemap entry arrives with its tile matrix already
         // folded into SpriteQuad::matrix by oxide-atlas. The renderer applies
@@ -4193,7 +5146,7 @@ mod tests {
             role,
             id: role.label().to_string(),
             sheets: Vec::new(),
-            bounds: [0.0, 0.0, 100.0, 200.0],
+            idle_size: [100.0, 200.0],
             sprite_hitbox: None,
             animations,
             data_offsets: (0.0, 0.0),
@@ -4338,6 +5291,7 @@ mod tests {
             weekend1_props: None,
             cutscene_changes: None,
             shader_masks,
+            abot: None,
             note_desaturation,
         };
         Scene::new(loaded).expect("synthetic scene builds").0
@@ -4447,6 +5401,7 @@ mod tests {
             weekend1_props: None,
             cutscene_changes: None,
             shader_masks: ShaderMaskPages::default(),
+            abot: None,
             note_desaturation: true,
         };
         Scene::new(loaded)
@@ -5454,7 +6409,7 @@ mod tests {
             .iter()
             .position(|item| matches!(item.kind, StageItemKind::Weekend1CanShotProp))
             .expect("the Can Shot stage item is registered");
-        let can_shot_layer = scene.stage_items[can_shot_position].layers[0].1;
+        let can_shot_layer = scene.stage_items[can_shot_position].layers[0].layer;
         assert_eq!(
             scene.layer_specs[can_shot_layer].color,
             [1.0, 1.0, 1.0, 1.0],
@@ -5520,6 +6475,7 @@ mod tests {
     ) -> LoadedCharacter {
         let mut character = test_character(role, (100.0, 200.0), animations, Some("idle"));
         character.id = id.to_string();
+        character.idle_size = [30.0, 40.0];
         character.sprite_hitbox = Some([30, 40]);
         character.sheets = vec![Sheet::Sprite(crate::render::load::SpriteSheet {
             page: 0,
@@ -5551,8 +6507,8 @@ mod tests {
             if !matches!(item.kind, StageItemKind::Character(index) if index == character_index) {
                 continue;
             }
-            for (_, layer) in &item.layers {
-                if let LayerShader::DropShadow(shadow) = scene.layer_specs[*layer].shader {
+            for layer in &item.layers {
+                if let LayerShader::DropShadow(shadow) = scene.layer_specs[layer.layer].shader {
                     shadows.push(shadow);
                 }
             }
@@ -6399,7 +7355,7 @@ mod tests {
             .expect("character stage item");
         item.layers
             .iter()
-            .map(|(_, layer)| scene.layer_specs[*layer].shader)
+            .map(|layer| scene.layer_specs[layer.layer].shader)
             .collect()
     }
 
@@ -6796,5 +7752,583 @@ mod tests {
             )
             .expect("non-sserafim stage ignores the event");
         assert!(scene.sserafim.is_none());
+    }
+
+    // --- Wave 2: animate-atlas clips + composed DropShadow characters ------
+
+    fn clip_quad(matrix: [f64; 6], width: f64, height: f64) -> Quad {
+        quad_from_matrix(
+            matrix,
+            width,
+            height,
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        )
+    }
+
+    #[test]
+    fn clip_rect_projects_through_zoom_pan_and_drops_fully_clipped_quads() {
+        let world = [1.0, 0.0, 0.0, 1.0, 5.0, 7.0];
+        let projection = [2.0, 0.0, 0.0, 2.0, 30.0, -10.0];
+        let matrix = concat(projection, world);
+        let quad = clip_quad(matrix, 100.0, 80.0);
+        let clip = [10.0, 20.0, 40.0, 30.0];
+
+        let clipped = clipped_world_aabb(matrix, clip, &quad).expect("the clip overlaps the quad");
+        // The transform is a uniform scale by 2 plus translation, so the
+        // projected AABB is exact.
+        let corner = |x: f64, y: f64| {
+            let screen = apply(matrix, x, y);
+            [screen[0] - HALF_WIDTH, HALF_HEIGHT - screen[1]]
+        };
+        let top_left = corner(10.0, 20.0);
+        let bottom_right = corner(50.0, 50.0);
+        close(clipped[0], top_left[0]);
+        close(clipped[1], bottom_right[1]);
+        close(clipped[2], bottom_right[0]);
+        close(clipped[3], top_left[1]);
+
+        // A camera pan shifts the clip with the quad by the same delta.
+        let panned = [2.0, 0.0, 0.0, 2.0, 47.0, -3.0];
+        let panned_matrix = concat(panned, world);
+        let panned_quad = clip_quad(panned_matrix, 100.0, 80.0);
+        let panned_clip =
+            clipped_world_aabb(panned_matrix, clip, &panned_quad).expect("panned clip");
+        close(panned_clip[0] - clipped[0], 17.0);
+        close(panned_clip[1] - clipped[1], -7.0);
+        close(panned_clip[2] - clipped[2], 17.0);
+        close(panned_clip[3] - clipped[3], -7.0);
+
+        // A rect fully outside the quad is dropped.
+        assert_eq!(
+            clipped_world_aabb(matrix, [1000.0, 1000.0, 10.0, 10.0], &quad),
+            None
+        );
+        // A zero-size intersection is also dropped.
+        assert_eq!(
+            clipped_world_aabb(matrix, [-5.0, -5.0, 5.0, 5.0], &quad),
+            None,
+            "a mask ending at the quad origin has no overlap"
+        );
+        // Malformed (non-finite) clip data degrades to the caller's
+        // unclipped path rather than drawing with NaN geometry.
+        assert_eq!(
+            clipped_world_aabb(matrix, [f64::NAN, 0.0, 1.0, 1.0], &quad),
+            None
+        );
+    }
+
+    #[test]
+    fn rotated_clip_rect_is_rebounded_before_intersection() {
+        // A 90-degree world rotation turns the parent-space mask rect into a
+        // rotated quad; the engine uses its axis-aligned hull.
+        let world = [0.0, 1.0, -1.0, 0.0, 100.0, 0.0];
+        let projection = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let matrix = concat(projection, world);
+        let quad = clip_quad(matrix, 100.0, 100.0);
+        let clipped = clipped_world_aabb(matrix, [10.0, 20.0, 30.0, 40.0], &quad)
+            .expect("rotated clip overlaps");
+        assert!(clipped[0] < clipped[2]);
+        assert!(clipped[1] < clipped[3]);
+    }
+
+    #[test]
+    fn clip_slot_capacity_scans_the_clipper_layers() {
+        let animation_json = r#"{
+            "AN": {"TL": {"L": [
+                {"LN": "mask", "LT": "Clp", "FR": [{"I": 0, "DU": 1, "E": [
+                    {"ASI": {"N": "p", "MX": [1, 0, 0, 1, 0, 0]}}
+                ]}]},
+                {"LN": "hair", "Clpb": "mask", "FR": [{"I": 0, "DU": 1, "E": [
+                    {"ASI": {"N": "p", "MX": [1, 0, 0, 1, 10, 10]}}
+                ]}]}
+            ]}},
+            "MD": {"FRT": 24, "W": 100, "H": 100}
+        }"#;
+        let spritemap = r#"{
+            "ATLAS": {"SPRITES": [
+                {"SPRITE": {"name": "p", "x": 0, "y": 0, "w": 10, "h": 10}}
+            ]},
+            "meta": {"image": "spritemap1.png", "size": {"w": 100, "h": 100}}
+        }"#;
+        let stage = oxide_atlas::AnimateStage::parse(animation_json, spritemap)
+            .expect("synthetic clipped atlas parses");
+        let mut animations = BTreeMap::new();
+        animations.insert("idle".to_string(), animation(&[0], true));
+        let plan = atlas_clip_plan(&stage, &animations, 0);
+        assert_eq!(plan.slots, 1, "one distinct mask rect");
+        assert!(plan.before, "the hair quad clips below the page layer");
+
+        let quads = stage
+            .resolve_main_frame_with_clips(0)
+            .expect("clipped frame resolves");
+        assert_eq!(quads.len(), 1, "the clipper layer never draws");
+        assert_eq!(quads[0].quad.bitmap_name, "p");
+        assert!(
+            quads[0].clip.is_some(),
+            "the hair quad carries the mask rect"
+        );
+    }
+
+    #[test]
+    fn distinct_clip_rects_are_ordered_and_grouped_per_page() {
+        let quad = clip_quad([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 10.0, 10.0);
+        let first = [1.0, 2.0, 3.0, 4.0];
+        let second = [5.0, 6.0, 7.0, 8.0];
+        let quads = vec![
+            DrawnQuad {
+                page: Some(0),
+                quad,
+                clip: Some(second),
+            },
+            DrawnQuad {
+                page: Some(0),
+                quad,
+                clip: Some(first),
+            },
+            DrawnQuad {
+                page: Some(0),
+                quad,
+                clip: Some(first),
+            },
+            DrawnQuad {
+                page: Some(0),
+                quad,
+                clip: None,
+            },
+        ];
+        let ordered = ordered_clips(&quads);
+        let rects = ordered.get(&Some(0)).expect("one page");
+        assert_eq!(rects.len(), 2, "duplicate rects share one slot");
+        assert!(
+            rects.contains(&first) && rects.contains(&second),
+            "both distinct clips survive"
+        );
+        // Sorted by the bit pattern, deterministic across runs.
+        assert!(clip_bits(rects[0]) < clip_bits(rects[1]));
+    }
+
+    /// The shipped `sserafim-gf` hair is clipped by its Animate `Clp` mask
+    /// (`blue mask` bitmap `0006`), which must never contribute a draw.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the sserafim clip path"]
+    fn sserafim_girlfriend_hair_is_clipped_and_the_mask_never_draws() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let loaded = super::super::load::load_slice_for_song(
+            std::path::Path::new(&root),
+            "spaghetti-default",
+            "easy",
+        )
+        .expect("spaghetti-default loads");
+        let (mut scene, _pages) = Scene::new(loaded).expect("spaghetti scene builds");
+        let girlfriend = scene
+            .characters
+            .iter()
+            .position(|character| character.role == Role::Girlfriend)
+            .expect("girlfriend rig");
+        let rig = &scene.characters[girlfriend];
+        let (animation, frame, symbol) = rig
+            .scheduler
+            .current_visual_frame()
+            .map(|(animation, frame)| (animation.sheet, frame, animation.symbol.clone()))
+            .expect("girlfriend has a startup frame");
+        let Sheet::Atlas(sheet) = &rig.sheets[animation] else {
+            panic!("the sserafim girlfriend is an animate atlas");
+        };
+        let quads = match symbol.as_deref() {
+            Some(symbol) => sheet
+                .stage
+                .resolve_symbol_frame_with_clips(symbol, frame)
+                .expect("symbol resolves"),
+            None => sheet
+                .stage
+                .resolve_main_frame_with_clips(frame)
+                .expect("main frame resolves"),
+        };
+        assert!(
+            quads.iter().any(|quad| quad.clip.is_some()),
+            "the hair layer must carry its mask rect"
+        );
+        assert!(
+            quads.iter().all(|quad| quad.quad.bitmap_name != "0006"),
+            "the clipper bitmap itself is never drawn"
+        );
+
+        let layers = scene.draw().expect("spaghetti scene draws");
+        let item = scene
+            .stage_items
+            .iter()
+            .find(
+                |item| matches!(item.kind, StageItemKind::Character(index) if index == girlfriend),
+            )
+            .expect("girlfriend stage item");
+        let clipped_quads: usize = item
+            .layers
+            .iter()
+            .filter(|layer| layer.clip_slot.is_some())
+            .map(|layer| layers[layer.layer].len())
+            .sum();
+        let unclipped_quads: usize = item
+            .layers
+            .iter()
+            .filter(|layer| layer.clip_slot.is_none() && !layer.composed_output)
+            .map(|layer| layers[layer.layer].len())
+            .sum();
+        assert!(
+            clipped_quads > 0,
+            "clipped hair quads route to the dedicated clip layer"
+        );
+        assert!(
+            unclipped_quads > 0,
+            "unclipped body quads stay on the plain layer"
+        );
+        assert!(
+            item.layers
+                .iter()
+                .filter(|layer| layer.clip_slot.is_some())
+                .all(|layer| scene.layer_specs[layer.layer].clip.is_some()),
+            "the used clip slot carries its live world-space rect"
+        );
+    }
+
+    /// `stress-pico` is the tankmanBattlefieldErect chart with three animate
+    /// atlas characters (pico-holding-nene, otis-speaker, tankman-bloody), so
+    /// every DropShadow character must own a composed output layer.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the composed DropShadow pass"]
+    fn tankman_atlas_drop_shadow_characters_register_composed_groups() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let loaded = super::super::load::load_slice_for_song(
+            std::path::Path::new(&root),
+            "stress-pico",
+            "easy",
+        )
+        .expect("stress-pico loads");
+        let (mut scene, _pages) = Scene::new(loaded).expect("tankman scene builds");
+
+        let character_groups: Vec<(Role, usize)> = scene
+            .stage_items
+            .iter()
+            .filter_map(|item| {
+                let StageItemKind::Character(index) = item.kind else {
+                    return None;
+                };
+                item.layers
+                    .iter()
+                    .find(|layer| layer.composed_output)
+                    .map(|layer| (scene.characters[index].role, layer.layer))
+            })
+            .collect();
+        assert_eq!(character_groups.len(), 3, "all three characters compose");
+        for (role, output) in &character_groups {
+            let spec = &scene.layer_specs[*output];
+            assert_eq!(spec.page, None, "{role:?} output has no page");
+            assert!(
+                matches!(spec.shader, LayerShader::DropShadow(_)),
+                "{role:?} output keeps the rim shader"
+            );
+            assert_eq!(
+                spec.composed,
+                Some(ComposedLayer {
+                    group: spec.composed.expect("composed").group,
+                    output: true
+                })
+            );
+        }
+        // tankman-bloody loads the captain mask but keeps useAltMask false
+        // until the EnableMask event.
+        let dad_output = character_groups
+            .iter()
+            .find(|(role, _)| *role == Role::Opponent)
+            .map(|(_, layer)| *layer)
+            .expect("opponent output");
+        let LayerShader::DropShadow(dad) = scene.layer_specs[dad_output].shader else {
+            panic!("opponent output is DropShadow");
+        };
+        assert!(dad.mask_page.is_some(), "captain mask page is bound");
+        assert!(!dad.use_alt_mask);
+        scene.enable_mask();
+        let LayerShader::DropShadow(dad) = scene.layer_specs[dad_output].shader else {
+            panic!("opponent output stays DropShadow");
+        };
+        assert!(dad.use_alt_mask, "EnableMask toggles the mask");
+
+        let layers = scene.draw().expect("tankman scene draws");
+        for (role, output) in &character_groups {
+            assert_eq!(layers[*output].len(), 1, "{role:?} outputs one quad");
+            let output_aabb = quad_world_aabb(&layers[*output][0]);
+            let item = scene
+                .stage_items
+                .iter()
+                .find(|item| {
+                    matches!(item.kind, StageItemKind::Character(index)
+                        if scene.characters[index].role == *role)
+                })
+                .expect("character item");
+            for layer in item.layers.iter().filter(|layer| !layer.composed_output) {
+                for quad in &layers[layer.layer] {
+                    let aabb = quad_world_aabb(quad);
+                    assert!(
+                        output_aabb[0] <= aabb[0] + 1e-9
+                            && output_aabb[1] <= aabb[1] + 1e-9
+                            && output_aabb[2] >= aabb[2] - 1e-9
+                            && output_aabb[3] >= aabb[3] - 1e-9,
+                        "{role:?} output bounds cover every limb quad"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Scene-level bopeebo guard: no DropShadow and no `Clp` data means the
+    /// composition/clip machinery must allocate nothing, so the frozen
+    /// frame digests cannot change through these paths.
+    #[test]
+    #[ignore = "requires OXIDE_ASSETS_ROOT; run explicitly for the bopeebo digest guard"]
+    fn bopeebo_registers_no_clip_or_composed_layers() {
+        let Some(root) = std::env::var_os("OXIDE_ASSETS_ROOT") else {
+            return;
+        };
+        let loaded =
+            super::super::load::load_slice_for_fixture(std::path::Path::new(&root), "easy")
+                .expect("bopeebo fixture loads");
+        let (mut scene, _pages) = Scene::new(loaded).expect("bopeebo scene builds");
+        assert!(
+            scene
+                .layer_specs
+                .iter()
+                .all(|spec| spec.clip.is_none() && spec.composed.is_none()),
+            "bopeebo must not own clip slots or composed groups"
+        );
+        assert!(
+            scene
+                .layer_specs
+                .iter()
+                .all(|spec| !matches!(spec.shader, LayerShader::Clip { .. })),
+            "bopeebo must keep the plain/shader layer set"
+        );
+        let layers = scene.draw().expect("bopeebo scene draws");
+        assert!(
+            layers.iter().all(|quads| quads.iter().all(|quad| quad
+                .uv
+                .iter()
+                .all(|uv| { uv[0].is_finite() && uv[1].is_finite() }))),
+            "bopeebo geometry stays finite"
+        );
+    }
+
+    #[test]
+    fn sserafim_ship_payloads_select_the_documented_uniforms() {
+        let mut scene = sserafim_scene();
+        scene
+            .step(
+                0,
+                &[sserafim_event(
+                    0,
+                    "sserafimPulseLights",
+                    serde_json::json!({
+                        "colors": ["0xFF6D43FF", "0xFFFF43A1"],
+                        "durations": [0.5, 0.5],
+                        "enabled": true,
+                        "intensities": [0.7, 0.9],
+                    }),
+                )],
+                &[],
+            )
+            .expect("shipped pulse payload applies");
+        scene.sserafim_on_beat(0);
+        let runtime = scene.sserafim.as_ref().expect("runtime");
+        close(runtime.pulse_light_strength, 0.7 * 0.8);
+        close(runtime.pulse_white_strength, 0.7 * 0.7);
+        for (actual, expected) in runtime.pulse_light_color.iter().zip([
+            0x6D as f64 / 255.0,
+            0x43 as f64 / 255.0,
+            0xFF as f64 / 255.0,
+        ]) {
+            close(*actual, expected);
+        }
+        scene.sserafim_on_beat(1);
+        let runtime = scene.sserafim.as_ref().expect("runtime");
+        close(runtime.pulse_light_strength, 0.9 * 0.8);
+        close(runtime.pulse_light_color[2], 0xA1 as f64 / 255.0);
+
+        scene
+            .step(
+                1,
+                &[sserafim_event(
+                    1,
+                    "sserafimLights",
+                    serde_json::json!({ "amount": 0.7, "duration": 0.5 }),
+                )],
+                &[],
+            )
+            .expect("shipped lights payload applies");
+        close(
+            scene
+                .sserafim
+                .as_ref()
+                .expect("runtime")
+                .truck_light_strength,
+            0.7,
+        );
+        scene
+            .step(
+                2,
+                &[sserafim_event(
+                    2,
+                    "sserafimDark",
+                    serde_json::json!({ "amount": 0.83, "duration": 0.1 }),
+                )],
+                &[],
+            )
+            .expect("shipped dark payload applies");
+        step_empty(&mut scene, 3, 102);
+        close(
+            scene.sserafim.as_ref().expect("runtime").darken_amount,
+            0.83,
+        );
+    }
+
+    #[test]
+    fn abot_registers_sorted_sublayers_and_tracks_scene_events() {
+        use super::super::abot::ABotPart;
+        use super::super::abot::tests::{test_loaded_abot, verbose_stage};
+        use super::super::load::{PropVisual, Sheet};
+
+        let mut gf = test_character(Role::Girlfriend, (800.5, 775.0), BTreeMap::new(), None);
+        gf.id = "otis-speaker".to_string();
+        gf.slot.z_index = 100.0;
+        let sheet = verbose_stage(16, 0.0);
+        gf.sheets = vec![Sheet::Atlas(Box::new(sheet))];
+        gf.animations.insert(
+            "idle".to_string(),
+            AnimationDef {
+                sheet: 0,
+                frames: vec![0],
+                symbol: None,
+                frame_rate: 24.0,
+                looped: false,
+                flip_x: false,
+                flip_y: false,
+                offsets: None,
+            },
+        );
+        let mut bf = test_character(Role::Player, (1340.5, 885.0), gf.animations.clone(), None);
+        bf.slot.z_index = 200.0;
+        bf.sheets = vec![Sheet::Atlas(Box::new(verbose_stage(1, 0.0)))];
+        let mut dad = test_character(Role::Opponent, (230.5, 996.0), gf.animations.clone(), None);
+        dad.slot.z_index = 200.0;
+        dad.sheets = vec![Sheet::Atlas(Box::new(verbose_stage(1, 0.0)))];
+
+        let tank_bricks = LoadedStageProp {
+            name: "tankBricks".to_string(),
+            z_index: 101.0,
+            position: (445.0, 774.0),
+            scale: (1.0, 1.0),
+            scroll: (1.0, 1.0),
+            flip_x: false,
+            flip_y: false,
+            alpha: 1.0,
+            angle: 0.0,
+            visual: PropVisual::Solid {
+                size: [100, 100],
+                color: [1.0, 1.0, 1.0, 1.0],
+            },
+            animations: BTreeMap::new(),
+            starting_animation: None,
+            dance_every: 0.0,
+            bopper: false,
+        };
+
+        let loaded = LoadedSlice {
+            pages: Vec::new(),
+            song_id: "stress-pico".to_string(),
+            stage_id: "tankmanBattlefieldErect".to_string(),
+            stage_zoom: 0.7,
+            props: vec![tank_bricks],
+            characters: vec![bf, dad, gf],
+            note_style: test_note_style(),
+            notes: Vec::new(),
+            scroll_speed: 2.0,
+            conductor_changes: vec![TimeChange {
+                time_stamp: 0.0,
+                beat_time: 0.0,
+                bpm: 60.0,
+                time_signature_num: 4,
+                time_signature_den: 4,
+            }],
+            player_vocals: Vec::new(),
+            opponent_vocals: Vec::new(),
+            hud: None,
+            dialogue: None,
+            weekend1_props: None,
+            cutscene_changes: None,
+            shader_masks: ShaderMaskPages::default(),
+            abot: Some(test_loaded_abot(
+                super::super::abot::ABotVariant::OtisSpeaker,
+            )),
+            note_desaturation: true,
+        };
+        let (mut scene, _) = Scene::new(loaded).expect("scene builds with abot");
+
+        let pos_of = |pred: &dyn Fn(&StageItemKind) -> bool| {
+            scene
+                .stage_items
+                .iter()
+                .position(|item| pred(&item.kind))
+                .expect("stage item present")
+        };
+        let p_whites = pos_of(&|k| matches!(k, StageItemKind::ABot(ABotPart::EyeWhites)));
+        let p_stereo = pos_of(&|k| matches!(k, StageItemKind::ABot(ABotPart::StereoBg)));
+        let p_pupil = pos_of(&|k| matches!(k, StageItemKind::ABot(ABotPart::Pupil)));
+        let p_viz = pos_of(&|k| matches!(k, StageItemKind::ABot(ABotPart::Viz)));
+        let p_body = pos_of(&|k| matches!(k, StageItemKind::ABot(ABotPart::Body)));
+        let p_gf = pos_of(&|k| matches!(k, StageItemKind::Character(2)));
+        let p_bricks = pos_of(&|k| matches!(k, StageItemKind::Prop(0)));
+        assert!(p_whites < p_stereo);
+        assert!(p_stereo < p_pupil);
+        assert!(p_pupil < p_viz);
+        assert!(p_viz < p_body);
+        assert!(p_body < p_gf);
+        assert!(p_gf < p_bricks);
+
+        scene
+            .step(
+                0,
+                &[TraceEvent::CameraFocus {
+                    schema: "2",
+                    kind: "camera_focus",
+                    sim: 0,
+                    input_ms: 0.0,
+                    input_time_us: 0.0,
+                    target_char: 1,
+                    target_kind: "dad",
+                    x: 0.0,
+                    y: 0.0,
+                    world_focus: [0.0, 0.0],
+                    duration: 0.0,
+                    ease_kind: "classic",
+                    ease: None,
+                    ease_dir: None,
+                }],
+                &[],
+            )
+            .expect("step 0 with camera focus");
+        assert_eq!(scene.abot.as_ref().expect("abot").body_frame(), 0);
+        for tick in 1..=1000 {
+            scene.step(tick, &[], &[]).expect("tick");
+        }
+        assert_eq!(scene.abot.as_ref().expect("abot").body_frame(), 1);
+        for tick in 1001..=1650 {
+            scene.step(tick, &[], &[]).expect("tick");
+        }
+        let abot = scene.abot.as_ref().expect("abot");
+        assert_eq!(abot.body_frame(), 15);
+        assert_eq!(abot.pupil_frame(), 16);
+        let layers = scene.draw().expect("scene draws with abot");
+        assert!(!layers[scene.stage_items[p_body].layers[0].layer].is_empty());
     }
 }
