@@ -21,7 +21,6 @@ perf.data*
 # Never commit it: it is 1.3 GB of derived data.
 /assets-raw/
 /assets-dist/
-/assets/
 /assets.pak
 /assets-*.pak
 /media-ab-test/

@@ -1,0 +1,225 @@
+{
+  "gameplay": {
+    "strumline": {
+      "path": "note-strumline.png",
+      "scale": 0.7,
+      "alpha": 1.0,
+      "offsets": {
+        "static": [0, 0],
+        "press": [30, 30],
+        "confirm": [0, 0]
+      },
+      "animations": {
+        "left": {
+          "static": "staticLeft",
+          "press": "pressLeft",
+          "confirm": "confirmLeft"
+        },
+        "down": {
+          "static": "staticDown",
+          "press": "pressDown",
+          "confirm": "confirmDown"
+        },
+        "up": {
+          "static": "staticUp",
+          "press": "pressUp",
+          "confirm": "confirmUp"
+        },
+        "right": {
+          "static": "staticRight",
+          "press": "pressRight",
+          "confirm": "confirmRight"
+        }
+      }
+    },
+    "notes": {
+      "path": "notes.png",
+      "scale": 0.7,
+      "alpha": 1.0,
+      "Offset": [25, 25],
+      "animations": {
+        "left": "noteLeft",
+        "down": "noteDown",
+        "up": "noteUp",
+        "right": "noteRight"
+      }
+    },
+    "sustains": {
+      "path": "NOTE_hold_assets.png",
+      "scale": 0.7,
+      "alpha": 0.9,
+      "Offset": [-2, 0],
+      "OffsetHit": [0, 0],
+      "animations": {
+        "left": {
+          "body": "purple hold piece",
+          "end": "purple hold end"
+        },
+        "down": {
+          "body": "blue hold piece",
+          "end": "blue hold end"
+        },
+        "up": {
+          "body": "green hold piece",
+          "end": "green hold end"
+        },
+        "right": {
+          "body": "red hold piece",
+          "end": "red hold end"
+        }
+      }
+    },
+    "noteSplashes": {
+      "path": "note-splashes.png",
+      "scale": 0.9,
+      "alpha": 1,
+      "Offset": [50, 50],
+      "animations": {
+        "left": ["note impact 1 purple", "note impact 2 purple"],
+        "down": ["note impact 1 blue", "note impact 2 blue"],
+        "up": ["note impact 1 green", "note impact 2 green"],
+        "right": ["note impact 1 red", "note impact 2 red"]
+      }
+    },
+    "holdCovers": {
+      "scale": 1,
+      "alpha": 1.0,
+      "Offset": [13, 75],
+      "directions": {
+        "left": {
+          "path": "hold-cover-left.png",
+          "animations": {
+            "start": "holdCoverStartPurple",
+            "hold": "holdCoverPurple",
+            "end": "holdCoverEndPurple"
+          }
+        },
+        "down": {
+          "path": "hold-cover-down.png",
+          "animations": {
+            "start": "holdCoverStartBlue",
+            "hold": "holdCoverBlue",
+            "end": "holdCoverEndBlue"
+          }
+        },
+        "up": {
+          "path": "hold-cover-up.png",
+          "animations": {
+            "start": "holdCoverStartGreen",
+            "hold": "holdCoverGreen",
+            "end": "holdCoverEndGreen"
+          }
+        },
+        "right": {
+          "path": "hold-cover-right.png",
+          "animations": {
+            "start": "holdCoverStartRed",
+            "hold": "holdCoverRed",
+            "end": "holdCoverEndRed"
+          }
+        }
+      }
+    }
+  },
+  "misses": {
+    "sounds": {
+      "volume": 0.8,
+      "path": [
+        "miss-note-1.ogg",
+        "miss-note-2.ogg",
+        "miss-note-3.ogg"
+      ]
+    }
+  },
+  "ui": {
+    "countdown": {
+      "three": {
+        "audio": {
+          "path": "countdown/sound/intro-three.ogg",
+          "volume": 1.0
+        },
+        "image": {
+          "path": null
+        }
+      },
+      "two": {
+        "audio": {
+          "path": "countdown/sound/intro-two.ogg",
+          "volume": 1.0
+        },
+        "image": {
+          "path": "countdown/graphics/ready.png",
+          "scale": 1.0,
+          "alpha": 1.0
+        }
+      },
+      "one": {
+        "audio": {
+          "path": "countdown/sound/intro-one.ogg",
+          "volume": 1.0
+        },
+        "image": {
+          "path": "countdown/graphics/set.png",
+          "scale": 1.0,
+          "alpha": 1.0
+        }
+      },
+      "go": {
+        "audio": {
+          "path": "countdown/sound/intro-go.ogg",
+          "volume": 1.0
+        },
+        "image": {
+          "path": "countdown/graphics/go.png",
+          "scale": 1.0,
+          "alpha": 1.0
+        }
+      }
+    },
+    "judgments": {
+      "perfect": {
+        "path": null,
+        "scale": 0.65
+      },
+      "sick": {
+        "path": "popup/sick.png",
+        "scale": 0.65
+      },
+      "good": {
+        "path": "popup/good.png",
+        "scale": 0.65
+      },
+      "bad": {
+        "path": "popup/bad.png",
+        "scale": 0.65
+      },
+      "shit": {
+        "path": "popup/shit.png",
+        "scale": 0.65
+      }
+    },
+    "comboNumbers": {
+      "globalScale": 0.5,
+      "globalAlpha": 1.0,
+      "assets": {
+        "0": "popup/digit-0.png",
+        "1": "popup/digit-1.png",
+        "2": "popup/digit-2.png",
+        "3": "popup/digit-3.png",
+        "4": "popup/digit-4.png",
+        "5": "popup/digit-5.png",
+        "6": "popup/digit-6.png",
+        "7": "popup/digit-7.png",
+        "8": "popup/digit-8.png",
+        "9": "popup/digit-9.png"
+      }
+    },
+    "bars": {
+      "health": {
+        "path": "bars/healthBar.png",
+        "scale": 1.0,
+        "alpha": 1.0
+      }
+    }
+  }
+}

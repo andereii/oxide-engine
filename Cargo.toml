@@ -1,43 +1,27 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/oxide-data",
-    "crates/oxide-atlas",
-    "crates/oxide-font",
-    "crates/oxide-vfs",
-    "crates/oxide-audio",
-    "crates/oxide-game",
+    "crates/oxin-app",
 ]
-
-[workspace.package]
-version = "0.1.0"
-edition = "2024"
-license = "MIT OR Apache-2.0"
-repository = "https://example.invalid/oxide-engine/oxengine"
-
-[workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
 
 [package]
 name = "oxide"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [[bin]]
 name = "oxide"
 path = "src/main.rs"
 
 [dependencies]
-oxide-audio = { path = "crates/oxide-audio" }
-oxide-game = { path = "crates/oxide-game" }
+bevy = "=0.20.1"
+oxin-app = { path = "crates/oxin-app" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [features]
-# Opt-in real audio backend for `oxide play` (ADR-0021 decision 6b: feature
-# unification would otherwise force cpal/ALSA onto every workspace build).
-audio = ["oxide-audio/real-audio"]
+audio = []
 
 [profile.release]
 opt-level = 3

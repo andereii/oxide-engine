@@ -1,0 +1,96 @@
+{
+  "songName": "Bopeebo",
+  "base": {
+    "stage": "mainStage",
+    "scrollSpeed": 1,
+    "lanes": 4,
+    "characters": {
+      "players": ["bf"],
+      "opponents": ["dad"],
+      "spectator": ["gf"]
+    },
+    "credits": ["Artist: Kawai Sprite"],
+    "skins": {
+      "hud": "funkin",
+      "ui": "funkin"
+    },
+    "audio": {
+      "bpm": 100,
+      "needsVoices": true,
+      "multiVocal": true,
+      "instrumental": {
+        "inst": {
+          "file": "Inst.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      },
+      "vocals": {
+        "player": {
+          "file": "Voices-bf.ogg",
+          "offset": 0,
+          "vol": 1
+        },
+        "opponent": {
+          "file": "Voices-dad.ogg",
+          "offset": 0
+        }
+      }
+    }
+  },
+  "difficulties": {
+    "easy": {
+      "scrollSpeed": 1.2
+    },
+    "normal": {
+      "scrollSpeed": 1.3
+    },
+    "hard": {
+      "scrollSpeed": 1.6
+    },
+    "erect": {
+      "scrollSpeed": 2.2,
+      "stage": "mainStageErect",
+      "audio": {
+        "instrumental": {
+          "inst": {
+            "file": "Inst-erect.ogg",
+            "offset": 0
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-erect.ogg",
+            "offset": 0
+          },
+          "opponent": {
+            "file": "Voices-dad-erect.ogg",
+            "offset": 0
+          }
+        }
+      }
+    },
+    "nightmare": {
+      "scrollSpeed": 2.2,
+      "stage": "mainStageErect",
+      "audio": {
+        "instrumental": {
+          "inst": {
+            "file": "Inst-erect.ogg",
+            "offset": 0
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-erect.ogg",
+            "offset": 0
+          },
+          "opponent": {
+            "file": "Voices-dad-erect.ogg",
+            "offset": 0
+          }
+        }
+      }
+    }
+  }
+}
