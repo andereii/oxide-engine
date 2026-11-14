@@ -1,4 +1,4 @@
-name: Build Oxide Engine (Windows)
+name: Build Oxide Engine
 
 on:
   push:
@@ -28,8 +28,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            artifact: oxide-windows
+          - platform: linux
+            os: ubuntu-latest
+            artifact: oxide-linux
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,6 +50,21 @@ jobs:
             src
             crates
             .github
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev
 
       - name: Install Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@v1
@@ -57,7 +84,8 @@ jobs:
         if: ${{ inputs.profile == 'release' }}
         run: cargo build --release --features audio
 
-      - name: Stage binary artifact
+      - name: Stage binary artifact (Windows)
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -67,10 +95,22 @@ jobs:
             Copy-Item "target/$profileDir/oxide.pdb" "dist/oxide.pdb"
           }
 
-      - name: Upload oxide-windows artifact
+      - name: Stage binary artifact (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ inputs.profile }}" = "release" ]; then
+            PROFILE_DIR="release"
+          else
+            PROFILE_DIR="debug"
+          fi
+          cp "target/$PROFILE_DIR/oxide" "dist/oxide"
+          chmod +x "dist/oxide"
+
+      - name: Upload ${{ matrix.artifact }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: oxide-windows
+          name: ${{ matrix.artifact }}
           path: dist/
           retention-days: 7
-

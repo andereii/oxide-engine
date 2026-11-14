@@ -11,6 +11,7 @@ pub struct AnimationDef {
     pub fps: f32,
     pub looped: bool,
     pub offset: [f32; 2],
+    pub flip: [bool; 2],
 }
 
 #[derive(Component, Debug, Clone)]
@@ -73,6 +74,7 @@ impl AnimationController {
                 fps: fps.max(1.0),
                 looped,
                 offset: [0.0, 0.0],
+                flip: [false, false],
             },
         );
     }
@@ -83,8 +85,34 @@ impl AnimationController {
         }
     }
 
+    pub fn set_flip(&mut self, name: &str, flip: [bool; 2]) {
+        if let Some(anim) = self.animations.get_mut(name) {
+            anim.flip = flip;
+        }
+    }
+
     pub fn has_animation(&self, name: &str) -> bool {
         self.animations.contains_key(name)
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    pub fn current_name(&self) -> Option<&str> {
+        self.current.as_deref()
+    }
+
+    /// Resolves `name` by stripping trailing `-suffix` segments if missing (mirrors Funkin `Bopper.correctAnimationName`).
+    pub fn resolve_name(&self, name: &str) -> Option<String> {
+        let mut candidate = name;
+        loop {
+            if self.has_animation(candidate) {
+                return Some(candidate.to_string());
+            }
+            let pos = candidate.rfind('-')?;
+            candidate = &candidate[..pos];
+        }
     }
 
     pub fn play(&mut self, name: &str, force: bool, reversed: bool, start_frame: usize) {
@@ -195,6 +223,16 @@ impl AnimationController {
             .get(name)
             .and_then(|a| a.frame_offsets.get(self.frame_cursor).copied())
             .unwrap_or([0.0, 0.0])
+    }
+
+    pub fn current_flip(&self) -> [bool; 2] {
+        let Some(name) = self.current.as_deref() else {
+            return [false, false];
+        };
+        self.animations
+            .get(name)
+            .map(|a| a.flip)
+            .unwrap_or([false, false])
     }
 
     pub fn current_frame_rotated(&self) -> bool {

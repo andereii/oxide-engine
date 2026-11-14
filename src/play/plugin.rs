@@ -3,6 +3,7 @@ use bevy::prelude::*;
 
 use crate::audio::SongAudioPlayer;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
+use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::notes::NoteStyle;
 use super::notes::effects::{spawn_effect_pools, sync_note_effects};
@@ -11,6 +12,7 @@ use super::playlist::PlayStatePlaylist;
 use super::popups::{load_popup_assets, sync_popups};
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart};
+use super::stage::{StageSyncState, load_stage_resource, spawn_stage_props, sync_stage_props};
 use super::types::{PauseMode, PlayPhase, PlayStateParams, SongChart};
 
 pub struct PlayPlugin;
@@ -69,6 +71,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(PlayStatePlaylist::default())
             .insert_resource(SongAudioPlayer::default())
             .insert_resource(PlaySfxAssets::default())
+            .insert_resource(StageSyncState::default())
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,
@@ -80,6 +83,7 @@ impl Plugin for PlayPlugin {
                 (
                     handle_play_input,
                     tick_play_state,
+                    sync_stage_props,
                     sync_arrow_visuals,
                     sync_note_effects,
                     sync_popups,
@@ -113,6 +117,26 @@ fn setup_play_scene(
     }
 
     if !state.critical_failure {
+        if !state.is_minimal_mode {
+            let stage_id = state.chart.stage_id.clone();
+            match load_stage_resource(&stage_id, &asset_server, &mut layouts) {
+                Ok(stage) => {
+                    state.camera.stage_zoom = f64::from(stage.camera_zoom);
+                    if state.camera.follow_point == [0.0, 0.0] {
+                        state.camera.follow_point = [
+                            f64::from(SCREEN_WIDTH) * 0.5,
+                            f64::from(SCREEN_HEIGHT) * 0.5,
+                        ];
+                    }
+                    state.reset_camera(true, true, true);
+                    spawn_stage_props(&mut commands, &stage);
+                    commands.insert_resource(stage);
+                }
+                Err(err) => {
+                    state.status_message = format!("Stage error: {err}");
+                }
+            }
+        }
         commands.insert_resource(load_popup_assets(&state.player_strumline.note_style, &asset_server));
         audio.load_for_chart(&mut commands, &asset_server, &state.chart, state.playback_rate);
         match load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts) {

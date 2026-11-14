@@ -1,60 +1,75 @@
 {
-  "props": [
+  "stage": [
     {
-      "danceEvery": 0,
-      "zIndex": 10,
-      "position": [-600, -200],
-      "scale": [1, 1],
-      "animType": "sparrow",
-      "name": "stageBack",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStage/stage-back",
-      "scroll": [0.9, 0.9],
-      "animations": []
+      "characters": {
+        "spectator": {
+          "layer": 3,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [685, 632],
+          "camera_Offset": [300, 300],
+          "flip":[false, false],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 4,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [305, 702],
+          "camera_Offset": [300, 300],
+          "flip":[false, false],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 5,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [1088, 701],
+          "camera_Offset": [69, 113],
+          "flip":[false, false],
+          "scrollFactor": 1
+        }
+      }
     },
     {
-      "danceEvery": 0,
-      "zIndex": 20,
-      "position": [-650, 600],
-      "scale": [1.1, 1.1],
-      "animType": "sparrow",
-      "name": "stageFront",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStage/stage-front",
-      "scroll": [0.9, 0.9],
-      "animations": []
+      "name": "stage curtains",
+      "layer": 6,
+      "scale": 1,
+      "file": "stagecurtains.png",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [689, 289],
+      "flip":[false, false],
+      "scrollFactor": [1.3, 1.3]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 30,
-      "position": [-500, -300],
-      "scale": [0.9, 0.9],
-      "animType": "sparrow",
-      "name": "stageCurtains",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStage/stage-curtains",
-      "scroll": [1.3, 1.3],
-      "animations": []
+      "name": "stage front",
+      "layer": 2,
+      "scale": 1.2,
+      "file": "stagefront.png",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        820,
+        865
+      ],
+      "flip":[false, false],
+      "scrollFactor": [0.9, 0.9]
+    },
+    {
+      "name": "stage back",
+      "layer": 1,
+      "scale": 1,
+      "file": "stageback.png",
+      "visible": true,
+      "opacity": 1,
+      "position": [541, 305],
+      "flip":[false, false],
+      "scrollFactor": [0.9, 0.9]
     }
-  ],
-  "cameraZoom": 1.1,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 300,
-      "position": [989.5, 885],
-      "cameraOffsets": [-100, -100]
-    },
-    "dad": {
-      "zIndex": 200,
-      "position": [335, 885],
-      "cameraOffsets": [150, -100]
-    },
-    "gf": {
-      "zIndex": 100,
-      "cameraOffsets": [0, 0],
-      "position": [751.5, 787]
-    }
-  },
-  "name": "Main Stage"
+  ]
 }

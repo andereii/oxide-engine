@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::play::scene::PlayState;
+use crate::play::types::PlayPhase;
 
 use super::controller::AnimationController;
 
@@ -17,6 +18,12 @@ pub fn step_animations(
     play_state: Option<Res<PlayState>>,
     mut query: Query<(&mut AnimationController, &mut Sprite)>,
 ) {
+    if play_state
+        .as_ref()
+        .is_some_and(|s| matches!(s.phase, PlayPhase::Paused(_)))
+    {
+        return;
+    }
     let elapsed_s = time.delta_secs();
     let song_pos_ms = play_state.map(|s| s.conductor.song_position_ms);
 
