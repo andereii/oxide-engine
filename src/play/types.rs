@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
+use bevy::prelude::KeyCode;
+
 use crate::utils::constants::{DEFAULT_CAMERA_ZOOM, DEFAULT_DIFFICULTY, DEFAULT_VARIATION};
+use crate::utils::easing::EaseKind;
 
 use super::notes::{NoteDirection, NoteStyle, SongNoteData};
 
@@ -75,6 +78,7 @@ impl Default for SkinsMeta {
 #[derive(Debug, Clone, Copy)]
 pub struct PreciseInputEvent {
     pub direction: NoteDirection,
+    pub key_code: Option<KeyCode>,
     pub song_position_ms: f64,
     pub latency_ms: f64,
 }
@@ -103,7 +107,44 @@ pub struct SongEventData {
     pub target_y: f64,
     pub target_zoom: f64,
     pub duration_s: f64,
+    pub duration_steps: Option<f64>,
     pub scroll_speed: Option<f64>,
+    pub start_scroll: Option<f64>,
+    pub scroll_velocity: Option<f64>,
+    pub start_velocity: Option<f64>,
+    pub use_start: bool,
+    pub absolute: bool,
+    pub ease: String,
+    pub ease_dir: String,
+    pub strumline_target: String,
+    pub render_distance_ms: Option<f64>,
+    pub use_default_render_distance: bool,
+}
+
+impl Default for SongEventData {
+    fn default() -> Self {
+        Self {
+            time_ms: 0.0,
+            kind: String::new(),
+            triggered: false,
+            target_x: 0.0,
+            target_y: 0.0,
+            target_zoom: 1.0,
+            duration_s: 0.0,
+            duration_steps: None,
+            scroll_speed: None,
+            start_scroll: None,
+            scroll_velocity: None,
+            start_velocity: None,
+            use_start: false,
+            absolute: false,
+            ease: "linear".to_string(),
+            ease_dir: "In".to_string(),
+            strumline_target: "both".to_string(),
+            render_distance_ms: None,
+            use_default_render_distance: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -184,14 +225,24 @@ pub struct LinearTween {
     pub target: f64,
     pub elapsed_s: f64,
     pub duration_s: f64,
+    pub ease: EaseKind,
 }
 
 impl LinearTween {
+    pub fn linear(start: f64, target: f64, duration_s: f64) -> Self {
+        Self::eased(start, target, duration_s, EaseKind::Linear)
+    }
+
+    pub fn eased(start: f64, target: f64, duration_s: f64, ease: EaseKind) -> Self {
+        Self { start, target, elapsed_s: 0.0, duration_s, ease }
+    }
+
     pub fn value(&self) -> f64 {
         if self.duration_s <= 0.0 {
             return self.target;
         }
-        let t = (self.elapsed_s / self.duration_s).clamp(0.0, 1.0);
+        let raw_t = (self.elapsed_s / self.duration_s).clamp(0.0, 1.0);
+        let t = self.ease.eval(raw_t);
         self.start + (self.target - self.start) * t
     }
 

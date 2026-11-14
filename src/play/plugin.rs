@@ -5,8 +5,9 @@ use crate::audio::SongAudioPlayer;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 
 use super::notes::NoteStyle;
+use super::notes::effects::{spawn_effect_pools, sync_note_effects};
 use super::notes::render_sync::sync_arrow_visuals;
-use super::notes::visuals::{load_noteskin_assets, spawn_strumline_and_notes};
+use super::notes::visuals::{load_noteskin_assets, spawn_strumline_and_pools};
 use super::playlist::PlayStatePlaylist;
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart};
@@ -80,6 +81,7 @@ impl Plugin for PlayPlugin {
                     handle_play_input,
                     tick_play_state,
                     sync_arrow_visuals,
+                    sync_note_effects,
                     sync_hud_text,
                 )
                     .chain(),
@@ -113,7 +115,8 @@ fn setup_play_scene(
         audio.load_for_chart(&mut commands, &asset_server, &state.chart, state.playback_rate);
         match load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts) {
             Ok(skin_assets) => {
-                spawn_strumline_and_notes(&mut commands, &state, &skin_assets);
+                spawn_strumline_and_pools(&mut commands, &state, &skin_assets);
+                spawn_effect_pools(&mut commands, &skin_assets);
                 commands.insert_resource(skin_assets);
             }
             Err(err) => {
@@ -163,11 +166,11 @@ fn handle_play_input(
 
     for ev in precise.drain_presses() {
         let latency = precise.latency_ms(&ev);
-        state.on_key_press_precise(ev.direction, ev.song_position_ms, latency);
+        state.on_key_press_precise(ev.direction, Some(ev.key_code), ev.song_position_ms, latency);
     }
     for ev in precise.drain_releases() {
         let latency = precise.latency_ms(&ev);
-        state.on_key_release_precise(ev.direction, ev.song_position_ms, latency);
+        state.on_key_release_precise(ev.direction, Some(ev.key_code), ev.song_position_ms, latency);
     }
 }
 

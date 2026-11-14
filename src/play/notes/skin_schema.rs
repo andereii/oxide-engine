@@ -13,10 +13,13 @@ pub struct NoteskinFileRaw {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GameplaySectionRaw {
     pub strumline: StrumlineSectionRaw,
     pub notes: NotesSectionRaw,
     pub sustains: SustainsSectionRaw,
+    pub note_splashes: Option<NoteSplashesSectionRaw>,
+    pub hold_covers: Option<HoldCoversSectionRaw>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +49,8 @@ pub struct StrumAnimRaw {
     pub static_anim: String,
     pub press: String,
     pub confirm: String,
+    #[serde(rename = "confirmHold", default)]
+    pub confirm_hold: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +83,44 @@ pub struct SustainsSectionRaw {
 #[derive(Debug, Deserialize)]
 pub struct SustainAnimRaw {
     pub body: String,
+    pub end: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NoteSplashesSectionRaw {
+    pub path: String,
+    #[serde(default = "default_one")]
+    pub scale: f32,
+    #[serde(default = "default_one")]
+    pub alpha: f32,
+    #[serde(rename = "Offset", default)]
+    pub offset: [f32; 2],
+    #[serde(default)]
+    pub animations: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HoldCoversSectionRaw {
+    #[serde(default = "default_one")]
+    pub scale: f32,
+    #[serde(default = "default_one")]
+    pub alpha: f32,
+    #[serde(rename = "Offset", default)]
+    pub offset: [f32; 2],
+    #[serde(default)]
+    pub directions: HashMap<String, HoldCoverDirRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HoldCoverDirRaw {
+    pub path: String,
+    pub animations: HoldCoverAnimRaw,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HoldCoverAnimRaw {
+    pub start: String,
+    pub hold: String,
     pub end: String,
 }
 
@@ -128,4 +171,3 @@ fn default_one() -> f32 {
 fn default_miss_volume() -> f32 {
     0.8
 }
-

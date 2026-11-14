@@ -1,4 +1,5 @@
 use crate::utils::constants::DEFAULT_CAMERA_ZOOM;
+use crate::utils::easing::EaseKind;
 use super::scene::PlayState;
 use super::types::LinearTween;
 
@@ -22,18 +23,8 @@ impl PlayState {
             self.camera.follow_point = [x, y];
             return;
         }
-        self.camera.follow_x_tween = Some(LinearTween {
-            start: self.camera.follow_point[0],
-            target: x,
-            elapsed_s: 0.0,
-            duration_s,
-        });
-        self.camera.follow_y_tween = Some(LinearTween {
-            start: self.camera.follow_point[1],
-            target: y,
-            elapsed_s: 0.0,
-            duration_s,
-        });
+        self.camera.follow_x_tween = Some(LinearTween::linear(self.camera.follow_point[0], x, duration_s));
+        self.camera.follow_y_tween = Some(LinearTween::linear(self.camera.follow_point[1], y, duration_s));
     }
 
     pub fn cancel_camera_follow_tween(&mut self) {
@@ -48,12 +39,7 @@ impl PlayState {
             self.camera.current_zoom = target;
             return;
         }
-        self.camera.zoom_tween = Some(LinearTween {
-            start: self.camera.current_zoom,
-            target,
-            elapsed_s: 0.0,
-            duration_s,
-        });
+        self.camera.zoom_tween = Some(LinearTween::linear(self.camera.current_zoom, target, duration_s));
     }
 
     pub fn cancel_camera_zoom_tween(&mut self) {
@@ -66,6 +52,40 @@ impl PlayState {
     }
 
     pub fn tween_scroll_speed(&mut self, speed: f64, duration_s: f64, apply_player: bool, apply_opponent: bool) {
+        self.tween_scroll_speed_eased(speed, duration_s, Some(EaseKind::Linear), None, apply_player, apply_opponent);
+    }
+
+    pub fn tween_scroll_speed_eased(
+        &mut self,
+        speed: f64,
+        duration_s: f64,
+        ease: Option<EaseKind>,
+        start_scroll: Option<f64>,
+        apply_player: bool,
+        apply_opponent: bool,
+    ) {
+        self.scroll_speed_tweens
+            .retain(|(is_p, _)| !((*is_p && apply_player) || (!*is_p && apply_opponent)));
+
+        if let Some(start) = start_scroll {
+            if apply_player {
+                self.player_strumline.scroll_speed = start;
+            }
+            if apply_opponent {
+                self.opponent_strumline.scroll_speed = start;
+            }
+        }
+
+        let Some(ease_kind) = ease else {
+            if apply_player {
+                self.player_strumline.scroll_speed = speed;
+            }
+            if apply_opponent {
+                self.opponent_strumline.scroll_speed = speed;
+            }
+            return;
+        };
+
         if duration_s <= 0.0 {
             if apply_player {
                 self.player_strumline.scroll_speed = speed;
@@ -78,23 +98,13 @@ impl PlayState {
         if apply_player {
             self.scroll_speed_tweens.push((
                 true,
-                LinearTween {
-                    start: self.player_strumline.scroll_speed,
-                    target: speed,
-                    elapsed_s: 0.0,
-                    duration_s,
-                },
+                LinearTween::eased(self.player_strumline.scroll_speed, speed, duration_s, ease_kind),
             ));
         }
         if apply_opponent {
             self.scroll_speed_tweens.push((
                 false,
-                LinearTween {
-                    start: self.opponent_strumline.scroll_speed,
-                    target: speed,
-                    elapsed_s: 0.0,
-                    duration_s,
-                },
+                LinearTween::eased(self.opponent_strumline.scroll_speed, speed, duration_s, ease_kind),
             ));
         }
     }
@@ -113,12 +123,50 @@ impl PlayState {
             }
         }
         for event in due {
+            let target_lower = event.strumline_target.to_ascii_lowercase();
+            let apply_player = target_lower != "opponent";
+            let apply_opponent = target_lower != "player";
             match event.kind.as_str() {
                 "FocusCamera" => self.tween_camera_to_position(event.target_x, event.target_y, event.duration_s),
                 "ZoomCamera" => self.tween_camera_zoom(event.target_zoom, event.duration_s, false),
                 "ScrollSpeed" => {
-                    if let Some(speed) = event.scroll_speed {
-                        self.tween_scroll_speed(speed, event.duration_s, true, true);
+                    if let Some(raw_speed) = event.scroll_speed {
+                        let base = if event.absolute { 1.0 } else { self.chart.scroll_speed };
+                        let target_speed = raw_speed * base;
+                        let start_scroll = event
+                            .use_start
+                            .then_some(event.start_scroll)
+                            .flatten()
+                            .map(|s| s * base);
+                        let duration_s = event
+                            .duration_steps
+                            .map(|steps| steps * self.conductor.step_length_ms() / 1000.0)
+                            .unwrap_or(event.duration_s);
+                        let ease = EaseKind::from_name(&event.ease, &event.ease_dir);
+                        self.tween_scroll_speed_eased(
+                            target_speed,
+                            duration_s,
+                            ease,
+                            start_scroll,
+                            apply_player,
+                            apply_opponent,
+                        );
+                    }
+                }
+                "RenderDistance" => {
+                    for (apply, strum) in [
+                        (apply_player, &mut self.player_strumline),
+                        (apply_opponent, &mut self.opponent_strumline),
+                    ] {
+                        if !apply {
+                            continue;
+                        }
+                        if event.use_default_render_distance {
+                            strum.use_custom_render_distance = false;
+                        } else if let Some(ms) = event.render_distance_ms {
+                            strum.use_custom_render_distance = true;
+                            strum.custom_render_distance_ms = ms;
+                        }
                     }
                 }
                 _ => {}

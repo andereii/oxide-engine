@@ -105,9 +105,35 @@ impl SparrowAtlas {
             .filter(|f| f.name.starts_with(prefix))
             .filter_map(|f| indices.get(&f.name).copied().map(|idx| (f.name.as_str(), idx)))
             .collect();
+        if matched.is_empty() {
+            let norm_prefix = collapse_spaces(prefix);
+            matched = self
+                .frames
+                .iter()
+                .filter(|f| collapse_spaces(&f.name).starts_with(&norm_prefix))
+                .filter_map(|f| indices.get(&f.name).copied().map(|idx| (f.name.as_str(), idx)))
+                .collect();
+        }
         matched.sort_by(|a, b| a.0.cmp(b.0));
         matched.into_iter().map(|(_, idx)| idx).collect()
     }
+}
+
+fn collapse_spaces(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut prev_space = false;
+    for ch in input.chars() {
+        if ch == ' ' {
+            if !prev_space {
+                out.push(ch);
+            }
+            prev_space = true;
+        } else {
+            out.push(ch);
+            prev_space = false;
+        }
+    }
+    out
 }
 
 fn extract_attr(tag: &str, key: &str) -> Option<String> {

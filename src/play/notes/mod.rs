@@ -1,16 +1,23 @@
 pub mod direction;
+pub mod effects;
 pub mod gameplay;
 pub mod hold_logic;
 pub mod note;
+pub mod note_kind;
 pub mod noteskin;
+pub mod receptor;
 pub mod render_sync;
+pub mod render_sync_sustains;
+pub mod scroll_velocity;
 pub mod skin_schema;
 pub mod strumline;
+pub mod strumline_window;
 pub mod sustain_trail;
+pub mod visual_pools;
 pub mod visuals;
 
 pub use direction::NoteDirection;
 pub use note::SongNoteData;
+pub use note_kind::NoteKindManager;
 pub use noteskin::NoteStyle;
 pub use strumline::Strumline;
-

@@ -14,12 +14,21 @@ pub struct StrumAnimNames {
     pub static_anim: String,
     pub press_anim: String,
     pub confirm_anim: String,
+    pub confirm_hold_anim: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct SustainAnimNames {
     pub body: String,
     pub end: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HoldCoverDirStyle {
+    pub path: String,
+    pub start_anim: String,
+    pub hold_anim: String,
+    pub end_anim: String,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +52,17 @@ pub struct NoteStyle {
     pub sustains_offset_hit: [f32; 2],
     pub sustains_end_offset: [f32; 2],
     pub sustain_anims: [SustainAnimNames; 4],
+    pub splash_enabled: bool,
+    pub splash_path: String,
+    pub splash_scale: f32,
+    pub splash_alpha: f32,
+    pub splash_offset: [f32; 2],
+    pub splash_anims: [Vec<String>; 4],
+    pub hold_cover_enabled: bool,
+    pub hold_cover_scale: f32,
+    pub hold_cover_alpha: f32,
+    pub hold_cover_offset: [f32; 2],
+    pub hold_cover_dirs: [HoldCoverDirStyle; 4],
     pub miss_sounds: Vec<String>,
     pub miss_volume: f32,
     pub countdown_sounds: [Option<String>; 4],
@@ -59,6 +79,33 @@ impl Default for NoteStyle {
 
 impl NoteStyle {
     pub fn fallback_funkin() -> Self {
+        let strum_anims = ["Left", "Down", "Up", "Right"].map(|d| StrumAnimNames {
+            static_anim: format!("static{d}"),
+            press_anim: format!("press{d}"),
+            confirm_anim: format!("confirm{d}"),
+            confirm_hold_anim: format!("confirmHold{d}"),
+        });
+        let note_anims = ["noteLeft", "noteDown", "noteUp", "noteRight"].map(str::to_string);
+        let sustain_anims = ["purple", "blue", "green", "red"].map(|c| SustainAnimNames {
+            body: format!("{c} hold piece"),
+            end: format!("{c} hold end"),
+        });
+        let splash_anims = ["purple", "blue", "green", "red"].map(|c| {
+            vec![format!("note impact 1 {c}"), format!("note impact 2 {c}")]
+        });
+        let hold_cover_dirs = [
+            ("left", "Purple"),
+            ("down", "Blue"),
+            ("up", "Green"),
+            ("right", "Red"),
+        ]
+        .map(|(dir, color)| HoldCoverDirStyle {
+            path: format!("hold-cover-{dir}.png"),
+            start_anim: format!("holdCoverStart{color}"),
+            hold_anim: format!("holdCover{color}"),
+            end_anim: format!("holdCoverEnd{color}"),
+        });
+
         Self {
             id: "funkin".to_string(),
             is_pixel: false,
@@ -66,62 +113,30 @@ impl NoteStyle {
             strum_scale: 0.7,
             strum_alpha: 1.0,
             strum_offsets: [[0.0, 0.0], [30.0, 30.0], [0.0, 0.0]],
-            strum_anims: [
-                StrumAnimNames {
-                    static_anim: "staticLeft".to_string(),
-                    press_anim: "pressLeft".to_string(),
-                    confirm_anim: "confirmLeft".to_string(),
-                },
-                StrumAnimNames {
-                    static_anim: "staticDown".to_string(),
-                    press_anim: "pressDown".to_string(),
-                    confirm_anim: "confirmDown".to_string(),
-                },
-                StrumAnimNames {
-                    static_anim: "staticUp".to_string(),
-                    press_anim: "pressUp".to_string(),
-                    confirm_anim: "confirmUp".to_string(),
-                },
-                StrumAnimNames {
-                    static_anim: "staticRight".to_string(),
-                    press_anim: "pressRight".to_string(),
-                    confirm_anim: "confirmRight".to_string(),
-                },
-            ],
+            strum_anims,
             notes_path: "notes.png".to_string(),
             notes_scale: 0.7,
             notes_alpha: 1.0,
             notes_offset: [25.0, 25.0],
-            note_anims: [
-                "noteLeft".to_string(),
-                "noteDown".to_string(),
-                "noteUp".to_string(),
-                "noteRight".to_string(),
-            ],
+            note_anims,
             sustains_path: "NOTE_hold_assets.png".to_string(),
             sustains_scale: 0.7,
             sustains_alpha: 0.9,
             sustains_offset: [-2.0, 0.0],
             sustains_offset_hit: [0.0, 0.0],
             sustains_end_offset: [0.0, 6.0],
-            sustain_anims: [
-                SustainAnimNames {
-                    body: "purple hold piece".to_string(),
-                    end: "purple hold end".to_string(),
-                },
-                SustainAnimNames {
-                    body: "blue hold piece".to_string(),
-                    end: "blue hold end".to_string(),
-                },
-                SustainAnimNames {
-                    body: "green hold piece".to_string(),
-                    end: "green hold end".to_string(),
-                },
-                SustainAnimNames {
-                    body: "red hold piece".to_string(),
-                    end: "red hold end".to_string(),
-                },
-            ],
+            sustain_anims,
+            splash_enabled: true,
+            splash_path: "note-splashes.png".to_string(),
+            splash_scale: 0.9,
+            splash_alpha: 1.0,
+            splash_offset: [50.0, 50.0],
+            splash_anims,
+            hold_cover_enabled: true,
+            hold_cover_scale: 1.0,
+            hold_cover_alpha: 1.0,
+            hold_cover_offset: [13.0, 75.0],
+            hold_cover_dirs,
             miss_sounds: vec![
                 "miss-note-1.ogg".to_string(),
                 "miss-note-2.ogg".to_string(),
@@ -141,11 +156,7 @@ impl NoteStyle {
     }
 
     pub fn load(skin_id: &str) -> Result<Self, String> {
-        let id = if skin_id.trim().is_empty() {
-            "funkin"
-        } else {
-            skin_id.trim()
-        };
+        let id = if skin_id.trim().is_empty() { "funkin" } else { skin_id.trim() };
         let json_path = resolve_assets_dir()
             .join("gameplay")
             .join("noteskins")
@@ -159,7 +170,6 @@ impl NoteStyle {
         let mut style = Self::fallback_funkin();
         style.id = id.to_string();
         style.is_pixel = parsed.is_pixel;
-
         let gp = parsed.gameplay;
         style.strum_path = gp.strumline.path;
         style.strum_scale = gp.strumline.scale;
@@ -171,10 +181,15 @@ impl NoteStyle {
         let dirs = ["left", "down", "up", "right"];
         for (i, dir) in dirs.iter().enumerate() {
             if let Some(a) = gp.strumline.animations.get(*dir) {
+                let confirm_hold = a
+                    .confirm_hold
+                    .clone()
+                    .unwrap_or_else(|| a.confirm_anim.replacen("confirm", "confirmHold", 1));
                 style.strum_anims[i] = StrumAnimNames {
                     static_anim: a.static_anim.clone(),
                     press_anim: a.press.clone(),
-                    confirm_anim: a.confirm.clone(),
+                    confirm_anim: a.confirm_anim.clone(),
+                    confirm_hold_anim: confirm_hold,
                 };
             }
             if let Some(n) = gp.notes.animations.get(*dir) {
@@ -192,7 +207,6 @@ impl NoteStyle {
         style.notes_scale = gp.notes.scale;
         style.notes_alpha = gp.notes.alpha;
         style.notes_offset = gp.notes.offset;
-
         style.sustains_path = gp.sustains.path;
         style.sustains_scale = gp.sustains.scale;
         style.sustains_alpha = gp.sustains.alpha;
@@ -200,23 +214,54 @@ impl NoteStyle {
         style.sustains_offset_hit = gp.sustains.offset_hit;
         style.sustains_end_offset = gp.sustains.end_offset;
 
+        if let Some(sp) = gp.note_splashes {
+            style.splash_enabled = true;
+            style.splash_path = sp.path;
+            style.splash_scale = sp.scale;
+            style.splash_alpha = sp.alpha;
+            style.splash_offset = sp.offset;
+            for (i, dir) in dirs.iter().enumerate() {
+                if let Some(anims) = sp.animations.get(*dir) {
+                    style.splash_anims[i] = anims.clone();
+                }
+            }
+        } else {
+            style.splash_enabled = false;
+        }
+
+        if let Some(hc) = gp.hold_covers {
+            style.hold_cover_enabled = true;
+            style.hold_cover_scale = hc.scale;
+            style.hold_cover_alpha = hc.alpha;
+            style.hold_cover_offset = hc.offset;
+            for (i, dir) in dirs.iter().enumerate() {
+                if let Some(d) = hc.directions.get(*dir) {
+                    style.hold_cover_dirs[i] = HoldCoverDirStyle {
+                        path: d.path.clone(),
+                        start_anim: d.animations.start.clone(),
+                        hold_anim: d.animations.hold.clone(),
+                        end_anim: d.animations.end.clone(),
+                    };
+                }
+            }
+        } else {
+            style.hold_cover_enabled = false;
+        }
+
         if let Some(misses) = parsed.misses {
             if !misses.sounds.path.is_empty() {
                 style.miss_sounds = misses.sounds.path;
             }
             style.miss_volume = misses.sounds.volume;
         }
-
         if let Some(cd) = parsed.ui.and_then(|u| u.countdown) {
-            let steps = [cd.three, cd.two, cd.one, cd.go];
-            for (idx, step) in steps.into_iter().enumerate() {
+            for (idx, step) in [cd.three, cd.two, cd.one, cd.go].into_iter().enumerate() {
                 if let Some(audio) = step.and_then(|s| s.audio) {
                     style.countdown_sounds[idx] = audio.path.or(audio.asset_path);
                     style.countdown_volume = audio.volume;
                 }
             }
         }
-
         Ok(style)
     }
 
@@ -238,11 +283,6 @@ impl NoteStyle {
     }
 
     pub fn lane_color(&self, dir: NoteDirection) -> Color {
-        match dir {
-            NoteDirection::Left => Color::srgb(0.76, 0.29, 0.60),
-            NoteDirection::Down => Color::srgb(0.00, 0.85, 0.95),
-            NoteDirection::Up => Color::srgb(0.07, 0.90, 0.05),
-            NoteDirection::Right => Color::srgb(0.98, 0.22, 0.25),
-        }
+        dir.color()
     }
 }

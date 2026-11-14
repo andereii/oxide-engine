@@ -4,11 +4,18 @@ use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 
 use super::noteskin::NoteStyle;
-use super::strumline::{ReceptorAnimState, Strumline};
-use super::sustain_trail::compute_sustain_geometry;
+use super::receptor::ReceptorAnimState;
+use super::render_sync_sustains::{sync_sustain_body_pool, sync_sustain_end_pool};
+use super::strumline::Strumline;
 use super::visuals::{
     NoteVisual, NoteskinAssets, ReceptorVisual, SustainBodyVisual, SustainEndVisual,
 };
+
+#[derive(Default)]
+pub struct PoolSyncScratch {
+    pub(super) free_entities: Vec<Entity>,
+    pub(super) assigned_indices: Vec<usize>,
+}
 
 fn strumline(state: &PlayState, is_player: bool) -> &Strumline {
     if is_player {
@@ -19,16 +26,37 @@ fn strumline(state: &PlayState, is_player: bool) -> &Strumline {
 }
 
 pub fn sync_arrow_visuals(
-    state: Res<PlayState>,
+    mut state: ResMut<PlayState>,
     skin_assets: Option<Res<NoteskinAssets>>,
-    mut receptors: Query<(&ReceptorVisual, &mut Transform, &mut AnimationController)>,
-    mut notes: Query<(&NoteVisual, &mut Transform, &mut Visibility), Without<ReceptorVisual>>,
+    mut scratch: Local<PoolSyncScratch>,
+    mut receptors: Query<(
+        &ReceptorVisual,
+        &mut Sprite,
+        &mut Transform,
+        &mut AnimationController,
+    )>,
+    mut notes: Query<
+        (Entity, &mut NoteVisual, &mut Sprite, &mut Transform, &mut Visibility),
+        Without<ReceptorVisual>,
+    >,
     mut sustain_bodies: Query<
-        (&SustainBodyVisual, &mut Sprite, &mut Transform, &mut Visibility),
+        (
+            Entity,
+            &mut SustainBodyVisual,
+            &mut Sprite,
+            &mut Transform,
+            &mut Visibility,
+        ),
         (Without<ReceptorVisual>, Without<NoteVisual>),
     >,
     mut sustain_ends: Query<
-        (&SustainEndVisual, &mut Sprite, &mut Transform, &mut Visibility),
+        (
+            Entity,
+            &mut SustainEndVisual,
+            &mut Sprite,
+            &mut Transform,
+            &mut Visibility,
+        ),
         (
             Without<ReceptorVisual>,
             Without<NoteVisual>,
@@ -36,132 +64,158 @@ pub fn sync_arrow_visuals(
         ),
     >,
 ) {
+    let fallback_style = state.player_strumline.note_style.clone();
     let style = skin_assets
         .as_ref()
         .map(|s| &s.style)
-        .unwrap_or(&state.player_strumline.note_style);
+        .unwrap_or(&fallback_style);
+    let note_indices = skin_assets
+        .as_ref()
+        .map(|s| s.note_indices)
+        .unwrap_or([0; 4]);
+    let sustain_indices = skin_assets
+        .as_ref()
+        .map(|s| s.sustain_indices)
+        .unwrap_or([(0, 0, 52.0, 44.0); 4]);
 
-    sync_receptors(&state, &mut receptors);
-    let pos_ms = state.conductor.song_position_ms;
-    sync_note_heads(&state, style, pos_ms, &mut notes);
-    sync_sustain_bodies(&state, style, pos_ms, &mut sustain_bodies);
-    sync_sustain_ends(&state, style, pos_ms, &mut sustain_ends);
+    sync_receptors(&mut state, style, &mut receptors);
+    for is_player in [false, true] {
+        sync_note_pool(
+            strumline(&state, is_player),
+            is_player,
+            style,
+            note_indices,
+            &mut scratch,
+            &mut notes,
+        );
+        sync_sustain_body_pool(
+            strumline(&state, is_player),
+            is_player,
+            style,
+            sustain_indices,
+            &mut scratch,
+            &mut sustain_bodies,
+        );
+        sync_sustain_end_pool(
+            strumline(&state, is_player),
+            is_player,
+            style,
+            sustain_indices,
+            &mut scratch,
+            &mut sustain_ends,
+        );
+    }
 }
 
 fn sync_receptors(
-    state: &PlayState,
-    receptors: &mut Query<(&ReceptorVisual, &mut Transform, &mut AnimationController)>,
+    state: &mut PlayState,
+    style: &NoteStyle,
+    receptors: &mut Query<(
+        &ReceptorVisual,
+        &mut Sprite,
+        &mut Transform,
+        &mut AnimationController,
+    )>,
 ) {
-    for (rec, mut transform, mut anim) in receptors.iter_mut() {
-        let strum = strumline(state, rec.is_player);
+    for (rec, mut sprite, mut transform, mut anim) in receptors.iter_mut() {
+        let strum = if rec.is_player {
+            &mut state.player_strumline
+        } else {
+            &mut state.opponent_strumline
+        };
+        if anim.finished && anim.current.as_deref() == Some("confirm") {
+            strum.receptors[rec.lane].on_confirm_anim_finished();
+        }
+        let rec_state = &strum.receptors[rec.lane];
         transform.translation.x = strum.lane_x(rec.lane);
-        transform.translation.y = strum.receptor_y();
+        transform.translation.y = strum.receptor_y() + rec_state.y_offset;
+        transform.scale = Vec3::splat(style.strum_scale * strum.strumline_scale);
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, style.strum_alpha * rec_state.alpha);
 
-        match strum.anim_state[rec.lane] {
+        match rec_state.anim_state {
             ReceptorAnimState::Confirm => anim.play("confirm", false, false, 0),
+            ReceptorAnimState::ConfirmHold => anim.play("confirm-hold", false, false, 0),
             ReceptorAnimState::Press => anim.play("press", false, false, 0),
             ReceptorAnimState::Static => anim.play("static", false, false, 0),
         }
     }
 }
 
-fn sync_note_heads(
-    state: &PlayState,
+fn sync_note_pool(
+    strum: &Strumline,
+    is_player: bool,
     style: &NoteStyle,
-    pos_ms: f64,
-    notes: &mut Query<(&NoteVisual, &mut Transform, &mut Visibility), Without<ReceptorVisual>>,
+    note_indices: [usize; 4],
+    scratch: &mut PoolSyncScratch,
+    notes: &mut Query<
+        (Entity, &mut NoteVisual, &mut Sprite, &mut Transform, &mut Visibility),
+        Without<ReceptorVisual>,
+    >,
 ) {
-    for (vis, mut transform, mut visibility) in notes.iter_mut() {
-        let strum = strumline(state, vis.is_player);
-        let Some(note) = strum.notes.iter().find(|n| n.data.id == vis.note_id) else {
+    scratch.free_entities.clear();
+    scratch.assigned_indices.clear();
+    let start = strum.active_start_index;
+    let end = strum.next_note_index.min(strum.notes.len());
+    let vis_pos = strum.visual_song_position;
+
+    for (entity, mut vis, mut sprite, mut transform, mut visibility) in notes.iter_mut() {
+        if vis.is_player != is_player {
+            continue;
+        }
+        let valid = vis.assigned_idx.and_then(|idx| {
+            (idx >= start && idx < end)
+                .then(|| strum.notes.get(idx).map(|n| (idx, n)))
+                .flatten()
+                .filter(|(_, n)| n.data.id == vis.assigned_id && n.is_head_alive())
+        });
+        let Some((idx, note)) = valid else {
+            vis.assigned_idx = None;
             *visibility = Visibility::Hidden;
+            scratch.free_entities.push(entity);
             continue;
         };
-        if note.has_been_hit {
-            *visibility = Visibility::Hidden;
+        scratch.assigned_indices.push(idx);
+        apply_note_transform(strum, style, vis_pos, note, &mut sprite, &mut transform, &mut visibility);
+    }
+
+    for idx in start..end {
+        let note = &strum.notes[idx];
+        if !note.is_head_alive() || scratch.assigned_indices.contains(&idx) {
             continue;
         }
-        let y = strum.note_y_at(note.data.time_ms, pos_ms) + style.notes_offset[1];
-        if y < -500.0 || y > 500.0 {
-            *visibility = Visibility::Hidden;
-            continue;
+        let Some(entity) = scratch.free_entities.pop() else {
+            break;
+        };
+        if let Ok((_, mut vis, mut sprite, mut transform, mut visibility)) = notes.get_mut(entity) {
+            vis.assigned_idx = Some(idx);
+            vis.assigned_id = note.data.id;
+            vis.lane = note.lane.index();
+            if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                atlas.index = note_indices[vis.lane];
+            }
+            apply_note_transform(strum, style, vis_pos, note, &mut sprite, &mut transform, &mut visibility);
         }
-        *visibility = Visibility::Visible;
-        transform.translation.x = strum.lane_x(vis.lane) + style.notes_offset[0];
-        transform.translation.y = y;
     }
 }
 
-fn sync_sustain_bodies(
-    state: &PlayState,
+fn apply_note_transform(
+    strum: &Strumline,
     style: &NoteStyle,
-    pos_ms: f64,
-    bodies: &mut Query<
-        (&SustainBodyVisual, &mut Sprite, &mut Transform, &mut Visibility),
-        (Without<ReceptorVisual>, Without<NoteVisual>),
-    >,
+    vis_pos: f64,
+    note: &super::note::NoteSprite,
+    sprite: &mut Sprite,
+    transform: &mut Transform,
+    visibility: &mut Visibility,
 ) {
-    for (vis, mut sprite, mut transform, mut visibility) in bodies.iter_mut() {
-        let strum = strumline(state, vis.is_player);
-        let Some(note) = strum.notes.iter().find(|n| n.data.id == vis.note_id) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        let geom = compute_sustain_geometry(note, strum, style, pos_ms, vis.end_raw_h);
-        if !geom.visible {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        let x_offset = if note.hold_hit {
-            style.sustains_offset_hit[0]
-        } else {
-            style.sustains_offset[0]
-        };
-        *visibility = Visibility::Visible;
-        transform.translation.x = strum.lane_x(vis.lane) + x_offset;
-        transform.translation.y = geom.body_y;
-        sprite.flip_y = geom.flip_y;
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, geom.alpha);
-        sprite.custom_size = Some(Vec2::new(
-            vis.raw_width_px,
-            (geom.body_height_px / style.sustains_scale.max(0.01)).max(1.0),
-        ));
+    let y = strum.note_y_at(note.data.time_ms, vis_pos) + style.notes_offset[1] + note.y_offset;
+    if y < -520.0 || y > 520.0 {
+        *visibility = Visibility::Hidden;
+        return;
     }
-}
-
-fn sync_sustain_ends(
-    state: &PlayState,
-    style: &NoteStyle,
-    pos_ms: f64,
-    ends: &mut Query<
-        (&SustainEndVisual, &mut Sprite, &mut Transform, &mut Visibility),
-        (
-            Without<ReceptorVisual>,
-            Without<NoteVisual>,
-            Without<SustainBodyVisual>,
-        ),
-    >,
-) {
-    for (vis, mut sprite, mut transform, mut visibility) in ends.iter_mut() {
-        let strum = strumline(state, vis.is_player);
-        let Some(note) = strum.notes.iter().find(|n| n.data.id == vis.note_id) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        let geom = compute_sustain_geometry(note, strum, style, pos_ms, vis.end_raw_h);
-        if !geom.visible {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        let x_offset = if note.hold_hit {
-            style.sustains_offset_hit[0]
-        } else {
-            style.sustains_offset[0]
-        };
-        *visibility = Visibility::Visible;
-        transform.translation.x = strum.lane_x(vis.lane) + x_offset + geom.end_x_offset;
-        transform.translation.y = geom.end_y;
-        sprite.flip_y = geom.flip_y;
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, geom.alpha);
-    }
+    *visibility = Visibility::Visible;
+    transform.translation.x = strum.lane_x(note.lane.index()) + style.notes_offset[0];
+    transform.translation.y = y;
+    transform.scale = Vec3::splat(style.notes_scale * strum.strumline_scale);
+    let tint = if note.desaturated { 0.65 } else { 1.0 };
+    sprite.color = Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha);
 }

@@ -90,7 +90,7 @@ pub fn score_note(note_diff_ms: f64) -> i32 {
     if abs_timing > PBOT1_SHIT_THRESHOLD {
         return PBOT1_MISS_SCORE;
     }
-    if abs_timing <= PBOT1_PERFECT_THRESHOLD {
+    if abs_timing < PBOT1_PERFECT_THRESHOLD {
         return PBOT1_MAX_SCORE;
     }
     let factor = 1.0 - (1.0 / (1.0 + (-PBOT1_SCORING_SLOPE * (abs_timing - PBOT1_SCORING_OFFSET)).exp()));

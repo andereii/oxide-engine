@@ -9,7 +9,7 @@ use crate::utils::constants::{
 };
 
 use super::judgement::Tallies;
-use super::notes::Strumline;
+use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
 use super::types::{
     CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent,
@@ -48,6 +48,7 @@ pub struct PlayState {
     pub camera: CameraState,
     pub player_strumline: Strumline,
     pub opponent_strumline: Strumline,
+    pub note_kinds: NoteKindManager,
     pub song_events: Vec<SongEventData>,
     pub scroll_speed_tweens: Vec<(bool, LinearTween)>,
     pub input_press_queue: VecDeque<PreciseInputEvent>,
@@ -101,6 +102,7 @@ impl PlayState {
             camera,
             player_strumline: Strumline::new(!params.bot_play_mode, scroll_speed, params.note_style.clone()),
             opponent_strumline: Strumline::new(false, scroll_speed, params.note_style),
+            note_kinds: NoteKindManager::default(),
             song_events: Vec::new(),
             scroll_speed_tweens: Vec::new(),
             input_press_queue: VecDeque::new(),
@@ -118,6 +120,8 @@ impl PlayState {
 
     pub fn create(&mut self) {
         self.generate_song();
+        self.player_strumline.fade_in_arrows();
+        self.opponent_strumline.fade_in_arrows();
         self.start_countdown();
         self.update_score_text();
     }
@@ -154,8 +158,6 @@ impl PlayState {
 
         self.update_health_bar();
         self.update_score_text();
-        self.player_strumline.tick_timers(elapsed_s);
-        self.opponent_strumline.tick_timers(elapsed_s);
         self.advance_tweens(elapsed_s);
 
         let delta_ms = elapsed_s * 1000.0 * self.playback_rate;
@@ -165,6 +167,8 @@ impl PlayState {
             _ => self.conductor.song_position_ms + delta_ms,
         };
         let tick = self.conductor.update(next_pos);
+        self.player_strumline.update_notes(elapsed_s, next_pos, self.start_timestamp_ms);
+        self.opponent_strumline.update_notes(elapsed_s, next_pos, self.start_timestamp_ms);
 
         if self.is_in_countdown {
             let beat_s = self.conductor.beat_length_ms() / 1000.0;
@@ -219,7 +223,12 @@ impl PlayState {
         self.camera.zoom_rate_offset = DEFAULT_ZOOM_OFFSET;
         self.player_strumline.clean();
         self.opponent_strumline.clean();
+        self.player_strumline.use_custom_render_distance = false;
+        self.opponent_strumline.use_custom_render_distance = false;
+        self.rebuild_scroll_velocities();
         self.regen_note_data(self.start_timestamp_ms);
+        self.player_strumline.fade_in_arrows();
+        self.opponent_strumline.fade_in_arrows();
         self.start_countdown();
     }
 
@@ -244,11 +253,7 @@ impl PlayState {
 
     pub fn resume(&mut self) {
         if matches!(self.phase, PlayPhase::Paused(_)) {
-            self.phase = if self.is_in_countdown {
-                PlayPhase::Countdown
-            } else {
-                PlayPhase::Playing
-            };
+            self.phase = if self.is_in_countdown { PlayPhase::Countdown } else { PlayPhase::Playing };
             self.status_message = format!("Playing: {} [{}]", self.chart.song_name, self.current_difficulty);
         }
     }
@@ -283,10 +288,7 @@ impl PlayState {
     pub fn update_score_text(&mut self) {
         self.score_text = format!(
             "Score: {} | Combo: {} | Misses: {} | Health: {:.0}%",
-            self.song_score.round() as i64,
-            self.tallies.combo,
-            self.tallies.missed,
-            (self.health / HEALTH_MAX) * 100.0
+            self.song_score.round() as i64, self.tallies.combo, self.tallies.missed, (self.health / HEALTH_MAX) * 100.0
         );
     }
 }

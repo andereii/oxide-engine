@@ -15,6 +15,7 @@ pub const HEALTH_MAX: f64 = 2.0;
 pub const HEALTH_STARTING: f64 = 1.0;
 pub const HEALTH_LERP_FACTOR: f64 = 0.15;
 
+pub const HEALTH_KILLER_BONUS: f64 = 0.04;
 pub const HEALTH_SICK_BONUS: f64 = 0.03;
 pub const HEALTH_GOOD_BONUS: f64 = 0.015;
 pub const HEALTH_BAD_BONUS: f64 = 0.0;
@@ -23,6 +24,7 @@ pub const HEALTH_MISS_BONUS: f64 = -0.08;
 pub const HEALTH_GHOST_MISS_PENALTY: f64 = -0.08;
 pub const HEALTH_HOLD_BONUS_PER_SECOND: f64 = 0.12;
 pub const HEALTH_HOLD_DROP_PENALTY_PER_SECOND: f64 = 0.0;
+pub const HEALTH_HOLD_DROP_PENALTY_MAX: f64 = 0.0;
 
 pub const SCORE_GHOST_MISS_PENALTY: f64 = -10.0;
 pub const SCORE_HOLD_BONUS_PER_SECOND: f64 = 250.0;
@@ -52,7 +54,11 @@ pub const TURBO_DEFAULT_DELAY: f64 = 0.5;
 pub const TURBO_DEFAULT_INTERVAL: f64 = 0.05;
 
 pub const PIXELS_PER_MS: f64 = 0.45;
+pub const KEY_COUNT: usize = 4;
+pub const NOTE_SPLASH_CAP: usize = 6;
 pub const STRUMLINE_SIZE: f32 = 104.0;
+pub const STRUMLINE_INITIAL_OFFSET: f32 = -0.275 * STRUMLINE_SIZE;
+pub const NOTE_NUDGE: f32 = 2.0;
 pub const NOTE_SPACING: f32 = STRUMLINE_SIZE + 8.0;
 pub const STRUMLINE_X_OFFSET: f32 = 48.0;
 pub const STRUMLINE_Y_OFFSET: f32 = 24.0;
@@ -60,3 +66,7 @@ pub const CONFIRM_HOLD_TIME_S: f64 = 0.15;
 pub const GHOST_TAP_DELAY_S: f64 = 3.0 / 8.0;
 pub const COUNTDOWN_VOLUME: f32 = 0.6;
 pub const SUSTAIN_MISSED_ALPHA: f32 = 0.6;
+pub const SUSTAIN_MIN_REMAINING_MS: f64 = 10.0;
+pub const VWOOSH_DURATION_S: f64 = 0.5;
+pub const SCREEN_WIDTH: f32 = 1280.0;
+pub const SCREEN_HEIGHT: f32 = 720.0;

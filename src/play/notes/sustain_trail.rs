@@ -1,4 +1,4 @@
-use crate::utils::constants::{PIXELS_PER_MS, SUSTAIN_MISSED_ALPHA};
+use crate::utils::constants::{PIXELS_PER_MS, SUSTAIN_MIN_REMAINING_MS, SUSTAIN_MISSED_ALPHA};
 
 use super::note::NoteSprite;
 use super::noteskin::NoteStyle;
@@ -23,7 +23,7 @@ pub fn compute_sustain_geometry(
     note: &NoteSprite,
     strum: &Strumline,
     style: &NoteStyle,
-    pos_ms: f64,
+    vis_pos_ms: f64,
     end_raw_h: f32,
 ) -> SustainGeometry {
     let hidden = SustainGeometry {
@@ -36,7 +36,12 @@ pub fn compute_sustain_geometry(
         flip_y: strum.is_downscroll,
     };
 
-    if note.data.sustain_length_ms <= 0.0 {
+    if !note.is_hold_alive() {
+        return hidden;
+    }
+
+    // In Funkin Strumline.hx: dropping an already-hit hold note hides it immediately (alpha = 0).
+    if note.hold_hit && note.hold_dropped {
         return hidden;
     }
 
@@ -48,7 +53,7 @@ pub fn compute_sustain_geometry(
         note.data.sustain_length_ms
     };
 
-    if remaining_ms <= 10.0 {
+    if remaining_ms <= SUSTAIN_MIN_REMAINING_MS {
         return hidden;
     }
 
@@ -57,20 +62,21 @@ pub fn compute_sustain_geometry(
         return hidden;
     }
 
-    let end_px = end_raw_h * style.sustains_scale;
+    let end_clip_factor = if style.is_pixel { 1.0 } else { 0.9 };
+    let end_px = end_raw_h * style.sustains_scale * end_clip_factor;
     let body_px = (total_px - end_px).max(1.0);
     let sign = if strum.is_downscroll { 1.0 } else { -1.0 };
 
     let start_y = if note.hold_hit && !note.hold_dropped {
-        strum.receptor_y()
+        strum.receptor_y() + note.y_offset
     } else if note.hold_dropped && note.hold_remaining_ms < note.data.sustain_length_ms {
         let elapsed_held_px = sustain_height_px(
             note.data.sustain_length_ms - note.hold_remaining_ms,
             strum.scroll_speed,
         );
-        strum.note_y_at(note.data.time_ms, pos_ms) + sign * elapsed_held_px
+        strum.note_y_at(note.data.time_ms, vis_pos_ms) + note.y_offset + sign * elapsed_held_px
     } else {
-        strum.note_y_at(note.data.time_ms, pos_ms)
+        strum.note_y_at(note.data.time_ms, vis_pos_ms) + note.y_offset
     };
 
     let body_y = start_y + sign * (body_px * 0.5);
@@ -80,7 +86,7 @@ pub fn compute_sustain_geometry(
 
     let min_vis = body_y.min(end_y);
     let max_vis = body_y.max(end_y);
-    if max_vis < -500.0 || min_vis > 500.0 {
+    if max_vis < -520.0 || min_vis > 520.0 {
         return hidden;
     }
 
@@ -100,4 +106,3 @@ pub fn compute_sustain_geometry(
         flip_y: strum.is_downscroll,
     }
 }
-
