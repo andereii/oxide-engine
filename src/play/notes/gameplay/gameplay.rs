@@ -6,6 +6,7 @@ use crate::play::judgement::{Judgement, judge_note, score_note};
 use crate::play::notes::data::{
     ActiveHold, NoteDirection, NoteSprite, ScrollVelocityTimeline, process_note_window,
 };
+use crate::play::notes::strum::CharNoteSignal;
 use crate::play::popups::PopupEvent;
 use crate::play::scene::PlayState;
 use crate::play::types::PreciseInputEvent;
@@ -141,6 +142,9 @@ impl PlayState {
                 None => {
                     if !self.player_strumline.may_ghost_tap() {
                         self.ghost_note_miss(input.direction, has_any_may_hit);
+                        self.player_strumline.pending_char_events.push(CharNoteSignal::GhostMiss {
+                            direction: input.direction,
+                        });
                     }
                     self.player_strumline.play_press(input.direction);
                 }
@@ -173,7 +177,7 @@ impl PlayState {
             };
 
             if res.botplay_hit {
-                let (is_hold, lane, note_id, end_ms, rem, scoreable) = {
+                let (is_hold, lane, note_id, end_ms, rem, scoreable, note_kind) = {
                     let note = &self.player_strumline.notes[idx];
                     let end_ms = note.data.time_ms + note.data.sustain_length_ms;
                     let rem = (end_ms - pos_ms).clamp(0.0, note.data.sustain_length_ms);
@@ -184,9 +188,16 @@ impl PlayState {
                         end_ms,
                         rem,
                         note.data.scoreable,
+                        note.data.kind.clone(),
                     )
                 };
                 self.player_strumline.hit_note(idx, true);
+                self.player_strumline.pending_char_events.push(CharNoteSignal::Hit {
+                    direction: lane,
+                    note_kind,
+                    good_judgement: Some(true),
+                    combo: self.tallies.combo,
+                });
                 if is_hold {
                     self.player_strumline.active_holds[lane.index()] = Some(ActiveHold {
                         note_idx: idx,
@@ -217,7 +228,13 @@ impl PlayState {
                 }
             };
             if should_miss {
+                let miss_dir = self.player_strumline.notes[idx].lane;
+                let prev_combo = self.tallies.combo;
                 self.on_note_miss(HEALTH_MISS_BONUS);
+                self.player_strumline.pending_char_events.push(CharNoteSignal::Miss {
+                    direction: miss_dir,
+                    combo_before: prev_combo,
+                });
             }
         }
 
@@ -238,8 +255,10 @@ impl PlayState {
         let lane = note.lane;
         let note_id = note.data.id;
         let scoreable = note.data.scoreable;
+        let note_kind = note.data.kind.clone();
         let rem = (hold_end_ms - self.conductor.song_position_ms).clamp(0.0, note.data.sustain_length_ms);
         let is_combo_break = judgement.is_combo_break();
+        let prev_combo = self.tallies.combo;
 
         self.player_strumline.hit_note(note_idx, !is_combo_break);
         if matches!(judgement, Judgement::Sick) && self.player_strumline.show_notesplash {
@@ -267,5 +286,11 @@ impl PlayState {
             let combo = (self.tallies.combo >= 10).then_some(self.tallies.combo);
             self.pending_popups.push(PopupEvent { judgement: Some(judgement), combo });
         }
+        self.player_strumline.pending_char_events.push(CharNoteSignal::Hit {
+            direction: lane,
+            note_kind,
+            good_judgement: scoreable.then_some(!is_combo_break),
+            combo: if is_combo_break { prev_combo } else { self.tallies.combo },
+        });
     }
 }

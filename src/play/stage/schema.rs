@@ -137,3 +137,8 @@ impl Default for StagePropData {
 pub fn parse_stage_json(stage_id: &str, raw_json: &str) -> Result<StageData, String> {
     parse_stage_raw(stage_id, raw_json)
 }
+
+#[inline]
+pub fn stage_layer_z(layer: i32, sub_order: usize) -> f32 {
+    -500.0 + (layer as f32) * 2.0 + (sub_order as f32) * 0.001
+}

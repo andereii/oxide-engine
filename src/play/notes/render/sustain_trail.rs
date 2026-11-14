@@ -86,8 +86,9 @@ pub fn compute_sustain_geometry(
     let anti_seam = if !style.is_pixel && body_px > 0.5 { -sign * 0.5 } else { 0.0 };
     let end_y = body_end_edge + sign * (end_height_px * 0.5) + anti_seam + sign * style.sustains_end_offset[1];
 
-    let min_vis = body_y.min(end_y);
-    let max_vis = body_y.max(end_y);
+    let end_edge_y = end_y + sign * (end_height_px * 0.5);
+    let min_vis = start_y.min(end_edge_y);
+    let max_vis = start_y.max(end_edge_y);
     if max_vis < -520.0 || min_vis > 520.0 {
         return hidden;
     }

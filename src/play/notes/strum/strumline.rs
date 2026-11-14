@@ -18,6 +18,29 @@ pub enum HoldCoverCmd {
 }
 
 #[derive(Debug, Clone)]
+pub enum CharNoteSignal {
+    Hit {
+        direction: NoteDirection,
+        note_kind: Option<String>,
+        good_judgement: Option<bool>,
+        combo: u32,
+    },
+    HoldTick,
+    Miss {
+        direction: NoteDirection,
+        combo_before: u32,
+    },
+    HoldDrop {
+        direction: NoteDirection,
+        is_combo_break: bool,
+        combo_before: u32,
+    },
+    GhostMiss {
+        direction: NoteDirection,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct Strumline {
     pub is_player: bool,
     pub is_downscroll: bool,
@@ -43,6 +66,7 @@ pub struct Strumline {
     pub vibrations: NoteVibrationsState,
     pub pending_splashes: Vec<NoteDirection>,
     pub pending_hold_covers: Vec<HoldCoverCmd>,
+    pub pending_char_events: Vec<CharNoteSignal>,
     pub vwoosh_tweens: Vec<VwooshTween>,
 }
 
@@ -78,6 +102,7 @@ impl Strumline {
             vibrations: NoteVibrationsState::default(),
             pending_splashes: Vec::new(),
             pending_hold_covers: Vec::new(),
+            pending_char_events: Vec::new(),
             vwoosh_tweens: Vec::new(),
         }
     }
@@ -137,6 +162,7 @@ impl Strumline {
         self.ghost_tap_timer = 0.0;
         self.pending_splashes.clear();
         self.pending_hold_covers.clear();
+        self.pending_char_events.clear();
         self.vwoosh_tweens.clear();
         self.lag_state = ScrollLagState::default();
         self.scroll_speed = self.base_scroll_speed;
@@ -263,5 +289,9 @@ impl Strumline {
         let start = self.active_start_index.min(self.notes.len());
         let end = self.next_note_index.min(self.notes.len());
         &self.notes[start..end]
+    }
+
+    pub fn has_any_held_key(&self) -> bool {
+        self.held_keys.iter().any(|k| !k.is_empty())
     }
 }

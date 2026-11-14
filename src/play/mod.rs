@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod characters;
 pub mod judgement;
 pub mod notes;
 pub mod playlist;

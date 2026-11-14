@@ -5,6 +5,7 @@ use crate::audio::SongAudioPlayer;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
+use super::characters::{CharacterSyncState, load_characters_resource, spawn_characters, sync_characters};
 use super::notes::NoteStyle;
 use super::notes::effects::{spawn_effect_pools, sync_note_effects};
 use super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools, sync_arrow_visuals};
@@ -72,6 +73,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(SongAudioPlayer::default())
             .insert_resource(PlaySfxAssets::default())
             .insert_resource(StageSyncState::default())
+            .insert_resource(CharacterSyncState::default())
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,
@@ -84,6 +86,7 @@ impl Plugin for PlayPlugin {
                     handle_play_input,
                     tick_play_state,
                     sync_stage_props,
+                    sync_characters,
                     sync_arrow_visuals,
                     sync_note_effects,
                     sync_popups,
@@ -119,7 +122,7 @@ fn setup_play_scene(
     if !state.critical_failure {
         if !state.is_minimal_mode {
             let stage_id = state.chart.stage_id.clone();
-            match load_stage_resource(&stage_id, &asset_server, &mut layouts) {
+            let loaded_stage = match load_stage_resource(&stage_id, &asset_server, &mut layouts) {
                 Ok(stage) => {
                     state.camera.stage_zoom = f64::from(stage.camera_zoom);
                     if state.camera.follow_point == [0.0, 0.0] {
@@ -130,11 +133,23 @@ fn setup_play_scene(
                     }
                     state.reset_camera(true, true, true);
                     spawn_stage_props(&mut commands, &stage);
-                    commands.insert_resource(stage);
+                    Some(stage)
                 }
                 Err(err) => {
                     state.status_message = format!("Stage error: {err}");
+                    None
                 }
+            };
+            let chars = load_characters_resource(
+                &state.chart.characters,
+                loaded_stage.as_ref(),
+                &asset_server,
+                &mut layouts,
+            );
+            spawn_characters(&mut commands, &chars);
+            commands.insert_resource(chars);
+            if let Some(stage) = loaded_stage {
+                commands.insert_resource(stage);
             }
         }
         commands.insert_resource(load_popup_assets(&state.player_strumline.note_style, &asset_server));

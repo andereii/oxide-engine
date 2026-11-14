@@ -4,7 +4,8 @@ use std::path::Path;
 
 use bevy::math::URect;
 use bevy::prelude::{TextureAtlasLayout, UVec2};
-use serde::Deserialize;
+
+use super::animate_atlas_raw::{AnimationJsonRoot, SpritemapJsonRoot, convert_layer};
 
 #[derive(Debug, Clone)]
 pub struct AnimateSpriteEntry {
@@ -20,7 +21,9 @@ pub struct AnimateSpriteEntry {
 pub struct AnimateElement {
     pub symbol_name: Option<String>,
     pub sprite_name: Option<String>,
-    pub matrix: [f32; 16],
+    pub matrix: [f32; 6],
+    pub first_frame: usize,
+    pub loop_mode: String,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +41,7 @@ pub struct AnimateTimelineLayer {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct AnimateAtlas {
     pub name: String,
     pub framerate: f32,
@@ -55,13 +59,15 @@ impl AnimateAtlas {
 
         let anim_raw = fs::read_to_string(&anim_path)
             .map_err(|e| format!("failed to read {}: {e}", anim_path.display()))?;
-        let anim_json: AnimationJsonRoot = serde_json::from_str(&anim_raw)
-            .map_err(|e| format!("failed to parse {}: {e}", anim_path.display()))?;
+        let anim_json: AnimationJsonRoot =
+            serde_json::from_str(anim_raw.trim_start_matches('\u{feff}'))
+                .map_err(|e| format!("failed to parse {}: {e}", anim_path.display()))?;
 
         let sprite_raw = fs::read_to_string(&spritemap_path)
             .map_err(|e| format!("failed to read {}: {e}", spritemap_path.display()))?;
-        let sprite_json: SpritemapJsonRoot = serde_json::from_str(&sprite_raw)
-            .map_err(|e| format!("failed to parse {}: {e}", spritemap_path.display()))?;
+        let sprite_json: SpritemapJsonRoot =
+            serde_json::from_str(sprite_raw.trim_start_matches('\u{feff}'))
+                .map_err(|e| format!("failed to parse {}: {e}", spritemap_path.display()))?;
 
         let sprites = sprite_json
             .atlas
@@ -132,165 +138,11 @@ impl AnimateAtlas {
     }
 }
 
-fn convert_layer(raw: LayerRaw) -> AnimateTimelineLayer {
-    let frames = raw
-        .frames
-        .into_iter()
-        .map(|f| AnimateTimelineFrame {
-            index: f.index,
-            duration: f.duration.max(1),
-            name: f.name,
-            elements: f
-                .elements
-                .into_iter()
-                .filter_map(|e| {
-                    if let Some(si) = e.symbol_instance {
-                        Some(AnimateElement {
-                            symbol_name: Some(si.symbol_name),
-                            sprite_name: None,
-                            matrix: si.matrix.unwrap_or(IDENTITY_M3D),
-                        })
-                    } else {
-                        e.atlas_sprite_instance.map(|asi| AnimateElement {
-                            symbol_name: None,
-                            sprite_name: Some(asi.name),
-                            matrix: asi.matrix.unwrap_or(IDENTITY_M3D),
-                        })
-                    }
-                })
-                .collect(),
-        })
-        .collect();
-    AnimateTimelineLayer {
-        name: raw.layer_name.unwrap_or_default(),
-        frames,
-    }
+pub fn layers_duration(layers: &[AnimateTimelineLayer]) -> usize {
+    layers
+        .iter()
+        .flat_map(|l| l.frames.iter())
+        .map(|f| f.index + f.duration)
+        .max()
+        .unwrap_or(0)
 }
-
-const IDENTITY_M3D: [f32; 16] = [
-    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-];
-
-#[derive(Deserialize)]
-struct SpritemapJsonRoot {
-    #[serde(rename = "ATLAS")]
-    atlas: SpritemapAtlasRaw,
-}
-
-#[derive(Deserialize)]
-struct SpritemapAtlasRaw {
-    #[serde(rename = "SPRITES")]
-    sprites: Vec<SpriteWrapperRaw>,
-}
-
-#[derive(Deserialize)]
-struct SpriteWrapperRaw {
-    #[serde(rename = "SPRITE")]
-    sprite: SpriteEntryRaw,
-}
-
-#[derive(Deserialize)]
-struct SpriteEntryRaw {
-    name: String,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-    #[serde(default)]
-    rotated: bool,
-}
-
-#[derive(Deserialize)]
-struct AnimationJsonRoot {
-    #[serde(rename = "ANIMATION")]
-    animation: AnimationHeaderRaw,
-    #[serde(rename = "SYMBOL_DICTIONARY")]
-    symbol_dictionary: Option<SymbolDictionaryRaw>,
-    #[serde(rename = "metadata")]
-    metadata: Option<MetadataRaw>,
-}
-
-#[derive(Deserialize)]
-struct MetadataRaw {
-    #[serde(rename = "FRT", default = "default_fps")]
-    framerate: f32,
-}
-
-fn default_fps() -> f32 {
-    24.0
-}
-
-#[derive(Deserialize)]
-struct AnimationHeaderRaw {
-    #[serde(rename = "N")]
-    name: Option<String>,
-    #[serde(rename = "SN")]
-    symbol_name: Option<String>,
-    #[serde(rename = "TL")]
-    timeline: TimelineRaw,
-}
-
-#[derive(Deserialize)]
-struct SymbolDictionaryRaw {
-    #[serde(rename = "Symbols", default)]
-    symbols: Vec<SymbolEntryRaw>,
-}
-
-#[derive(Deserialize)]
-struct SymbolEntryRaw {
-    #[serde(rename = "SN")]
-    symbol_name: String,
-    #[serde(rename = "TL")]
-    timeline: TimelineRaw,
-}
-
-#[derive(Deserialize)]
-struct TimelineRaw {
-    #[serde(rename = "L", default)]
-    layers: Vec<LayerRaw>,
-}
-
-#[derive(Deserialize)]
-struct LayerRaw {
-    #[serde(rename = "Layer_name")]
-    layer_name: Option<String>,
-    #[serde(rename = "FR", default)]
-    frames: Vec<FrameRaw>,
-}
-
-#[derive(Deserialize)]
-struct FrameRaw {
-    #[serde(rename = "I", default)]
-    index: usize,
-    #[serde(rename = "DU", default)]
-    duration: usize,
-    #[serde(rename = "N")]
-    name: Option<String>,
-    #[serde(rename = "E", default)]
-    elements: Vec<ElementRaw>,
-}
-
-#[derive(Deserialize)]
-struct ElementRaw {
-    #[serde(rename = "SI")]
-    symbol_instance: Option<SymbolInstanceRaw>,
-    #[serde(rename = "ASI")]
-    atlas_sprite_instance: Option<AtlasSpriteInstanceRaw>,
-}
-
-#[derive(Deserialize)]
-struct SymbolInstanceRaw {
-    #[serde(rename = "SN")]
-    symbol_name: String,
-    #[serde(rename = "M3D")]
-    matrix: Option<[f32; 16]>,
-}
-
-#[derive(Deserialize)]
-struct AtlasSpriteInstanceRaw {
-    #[serde(rename = "N")]
-    name: String,
-    #[serde(rename = "M3D")]
-    matrix: Option<[f32; 16]>,
-}
-

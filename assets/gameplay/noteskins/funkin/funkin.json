@@ -48,7 +48,7 @@
       "path": "NOTE_hold_assets.png",
       "scale": 0.7,
       "alpha": 0.9,
-      "Offset": [-2, 0],
+      "Offset": [0, 0],
       "OffsetHit": [0, 0],
       "endOffset": [0, 0],
       "animations": {

@@ -9,7 +9,7 @@ use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::loader::{StagePropKind, StageResource};
 use super::paths::parse_hex_color;
-use super::schema::StageCoordMode;
+use super::schema::{StageCoordMode, stage_layer_z};
 
 #[derive(Component)]
 #[allow(dead_code)]
@@ -34,7 +34,7 @@ pub struct StageSyncState {
 pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
     for (rank, resolved) in stage.props.iter().enumerate() {
         let d = &resolved.data;
-        let z_layer = -500.0 + (rank as f32) * 0.1;
+        let z_layer = stage_layer_z(d.layer, rank);
         let tint = apply_opacity(parse_hex_color(&d.color), d.opacity);
         let visibility = if d.visible {
             Visibility::Visible

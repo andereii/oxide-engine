@@ -7,4 +7,4 @@ pub mod strum;
 
 pub use data::{NoteDirection, NoteKindManager, SongNoteData};
 pub use skin::NoteStyle;
-pub use strum::Strumline;
+pub use strum::{CharNoteSignal, Strumline};

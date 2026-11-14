@@ -7,7 +7,7 @@ use crate::utils::constants::{
 
 use crate::play::judgement::{Judgement, miss_score};
 use crate::play::notes::data::{ActiveHold, NoteDirection, process_note_window};
-use crate::play::notes::strum::HoldCoverCmd;
+use crate::play::notes::strum::{CharNoteSignal, HoldCoverCmd};
 use crate::play::scene::PlayState;
 
 impl PlayState {
@@ -26,7 +26,7 @@ impl PlayState {
             if !res.botplay_hit {
                 continue;
             }
-            let (is_hold, lane, note_id, end_ms, rem, scoreable) = {
+            let (is_hold, lane, note_id, end_ms, rem, scoreable, note_kind) = {
                 let note = &self.opponent_strumline.notes[idx];
                 let end_ms = note.data.time_ms + note.data.sustain_length_ms;
                 let rem = (end_ms - pos_ms).clamp(0.0, note.data.sustain_length_ms);
@@ -37,10 +37,17 @@ impl PlayState {
                     end_ms,
                     rem,
                     note.data.scoreable,
+                    note.data.kind.clone(),
                 )
             };
             self.opponent_vocals_volume = 1.0;
             self.opponent_strumline.hit_note(idx, true);
+            self.opponent_strumline.pending_char_events.push(CharNoteSignal::Hit {
+                direction: lane,
+                note_kind,
+                good_judgement: None,
+                combo: 0,
+            });
             if is_hold {
                 self.opponent_strumline.active_holds[lane.index()] = Some(ActiveHold {
                     note_idx: idx,
@@ -76,6 +83,7 @@ impl PlayState {
                     .push(HoldCoverCmd::Kill(hold.lane));
             } else {
                 self.opponent_strumline.hold_confirm(hold.lane);
+                self.opponent_strumline.pending_char_events.push(CharNoteSignal::HoldTick);
                 self.opponent_strumline.active_holds[lane_idx] = Some(hold);
             }
         }
@@ -118,6 +126,7 @@ impl PlayState {
                         .clamp(HEALTH_MIN, HEALTH_MAX);
                 }
                 self.player_strumline.hold_confirm(hold.lane);
+                self.player_strumline.pending_char_events.push(CharNoteSignal::HoldTick);
                 self.player_strumline.active_holds[lane_idx] = Some(hold);
             } else {
                 hold.dropped = true;
@@ -131,12 +140,15 @@ impl PlayState {
                     .pending_hold_covers
                     .push(HoldCoverCmd::Kill(hold.lane));
 
+                let mut is_combo_break = false;
+                let prev_combo = self.tallies.combo;
                 if !hold.handled_miss
                     && !self.is_bot_play_mode
                     && hold.scoreable
                     && hold.remaining_ms > HOLD_DROP_PENALTY_THRESHOLD_MS
                 {
                     hold.handled_miss = true;
+                    is_combo_break = true;
                     let rem_sec = hold.remaining_ms / MS_PER_SEC;
                     let score_change = SCORE_HOLD_DROP_PENALTY_PER_SECOND * rem_sec;
                     let health_uncapped = rem_sec * HEALTH_HOLD_DROP_PENALTY_PER_SECOND;
@@ -150,6 +162,11 @@ impl PlayState {
                     self.song_score += score_change;
                     self.health = (self.health + health_change).clamp(HEALTH_MIN, HEALTH_MAX);
                 }
+                self.player_strumline.pending_char_events.push(CharNoteSignal::HoldDrop {
+                    direction: hold.lane,
+                    is_combo_break,
+                    combo_before: prev_combo,
+                });
                 self.player_strumline.active_holds[lane_idx] = None;
             }
         }
