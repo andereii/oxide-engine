@@ -1,12 +1,13 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::Color;
 use oxin_app::resolve_assets_dir;
-use serde::Deserialize;
+
+use crate::utils::constants::{CONFIRM_HOLD_TIME_S, COUNTDOWN_VOLUME};
 
 use super::direction::NoteDirection;
+use super::skin_schema::NoteskinFileRaw;
 
 #[derive(Debug, Clone)]
 pub struct StrumAnimNames {
@@ -28,6 +29,7 @@ pub struct NoteStyle {
     pub strum_path: String,
     pub strum_scale: f32,
     pub strum_alpha: f32,
+    pub strum_offsets: [[f32; 2]; 3],
     pub strum_anims: [StrumAnimNames; 4],
     pub notes_path: String,
     pub notes_scale: f32,
@@ -37,9 +39,14 @@ pub struct NoteStyle {
     pub sustains_path: String,
     pub sustains_scale: f32,
     pub sustains_alpha: f32,
+    pub sustains_offset: [f32; 2],
+    pub sustains_offset_hit: [f32; 2],
+    pub sustains_end_offset: [f32; 2],
     pub sustain_anims: [SustainAnimNames; 4],
     pub miss_sounds: Vec<String>,
     pub miss_volume: f32,
+    pub countdown_sounds: [Option<String>; 4],
+    pub countdown_volume: f32,
     pub confirm_duration_s: f64,
     pub press_duration_s: f64,
 }
@@ -58,6 +65,7 @@ impl NoteStyle {
             strum_path: "note-strumline.png".to_string(),
             strum_scale: 0.7,
             strum_alpha: 1.0,
+            strum_offsets: [[0.0, 0.0], [30.0, 30.0], [0.0, 0.0]],
             strum_anims: [
                 StrumAnimNames {
                     static_anim: "staticLeft".to_string(),
@@ -93,6 +101,9 @@ impl NoteStyle {
             sustains_path: "NOTE_hold_assets.png".to_string(),
             sustains_scale: 0.7,
             sustains_alpha: 0.9,
+            sustains_offset: [-2.0, 0.0],
+            sustains_offset_hit: [0.0, 0.0],
+            sustains_end_offset: [0.0, 6.0],
             sustain_anims: [
                 SustainAnimNames {
                     body: "purple hold piece".to_string(),
@@ -117,7 +128,14 @@ impl NoteStyle {
                 "miss-note-3.ogg".to_string(),
             ],
             miss_volume: 0.8,
-            confirm_duration_s: 0.15,
+            countdown_sounds: [
+                Some("countdown/sound/intro-three.ogg".to_string()),
+                Some("countdown/sound/intro-two.ogg".to_string()),
+                Some("countdown/sound/intro-one.ogg".to_string()),
+                Some("countdown/sound/intro-go.ogg".to_string()),
+            ],
+            countdown_volume: COUNTDOWN_VOLUME,
+            confirm_duration_s: CONFIRM_HOLD_TIME_S,
             press_duration_s: 0.10,
         }
     }
@@ -146,6 +164,9 @@ impl NoteStyle {
         style.strum_path = gp.strumline.path;
         style.strum_scale = gp.strumline.scale;
         style.strum_alpha = gp.strumline.alpha;
+        if let Some(off) = gp.strumline.offsets {
+            style.strum_offsets = [off.static_offset, off.press, off.confirm];
+        }
 
         let dirs = ["left", "down", "up", "right"];
         for (i, dir) in dirs.iter().enumerate() {
@@ -175,6 +196,9 @@ impl NoteStyle {
         style.sustains_path = gp.sustains.path;
         style.sustains_scale = gp.sustains.scale;
         style.sustains_alpha = gp.sustains.alpha;
+        style.sustains_offset = gp.sustains.offset;
+        style.sustains_offset_hit = gp.sustains.offset_hit;
+        style.sustains_end_offset = gp.sustains.end_offset;
 
         if let Some(misses) = parsed.misses {
             if !misses.sounds.path.is_empty() {
@@ -183,10 +207,20 @@ impl NoteStyle {
             style.miss_volume = misses.sounds.volume;
         }
 
+        if let Some(cd) = parsed.ui.and_then(|u| u.countdown) {
+            let steps = [cd.three, cd.two, cd.one, cd.go];
+            for (idx, step) in steps.into_iter().enumerate() {
+                if let Some(audio) = step.and_then(|s| s.audio) {
+                    style.countdown_sounds[idx] = audio.path.or(audio.asset_path);
+                    style.countdown_volume = audio.volume;
+                }
+            }
+        }
+
         Ok(style)
     }
 
-    pub fn asset_image(&self, rel: &str) -> String {
+    pub fn asset_path(&self, rel: &str) -> String {
         format!("gameplay/noteskins/{}/{rel}", self.id)
     }
 
@@ -211,84 +245,4 @@ impl NoteStyle {
             NoteDirection::Right => Color::srgb(0.98, 0.22, 0.25),
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NoteskinFileRaw {
-    #[serde(default)]
-    is_pixel: bool,
-    gameplay: GameplaySectionRaw,
-    misses: Option<MissesSectionRaw>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MissesSectionRaw {
-    sounds: MissSoundsRaw,
-}
-
-#[derive(Debug, Deserialize)]
-struct MissSoundsRaw {
-    #[serde(default = "default_miss_volume")]
-    volume: f32,
-    #[serde(default)]
-    path: Vec<String>,
-}
-
-fn default_miss_volume() -> f32 {
-    0.8
-}
-
-#[derive(Debug, Deserialize)]
-struct GameplaySectionRaw {
-    strumline: StrumlineSectionRaw,
-    notes: NotesSectionRaw,
-    sustains: SustainsSectionRaw,
-}
-
-#[derive(Debug, Deserialize)]
-struct StrumlineSectionRaw {
-    path: String,
-    scale: f32,
-    #[serde(default = "default_one")]
-    alpha: f32,
-    animations: HashMap<String, StrumAnimRaw>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StrumAnimRaw {
-    #[serde(rename = "static")]
-    static_anim: String,
-    press: String,
-    confirm: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct NotesSectionRaw {
-    path: String,
-    scale: f32,
-    #[serde(default = "default_one")]
-    alpha: f32,
-    #[serde(rename = "Offset", default)]
-    offset: [f32; 2],
-    animations: HashMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SustainsSectionRaw {
-    path: String,
-    scale: f32,
-    #[serde(default = "default_one")]
-    alpha: f32,
-    animations: HashMap<String, SustainAnimRaw>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SustainAnimRaw {
-    body: String,
-    end: String,
-}
-
-fn default_one() -> f32 {
-    1.0
 }

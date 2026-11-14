@@ -54,6 +54,8 @@ pub struct PlayState {
     pub input_release_queue: VecDeque<PreciseInputEvent>,
     pub countdown_ticks_remaining: i32,
     pub countdown_timer_s: f64,
+    pub pending_countdown_step: Option<usize>,
+    pub pending_miss_sfx: bool,
     pub score_text: String,
     pub status_message: String,
 }
@@ -105,6 +107,8 @@ impl PlayState {
             input_release_queue: VecDeque::new(),
             countdown_ticks_remaining: 4,
             countdown_timer_s: 0.0,
+            pending_countdown_step: None,
+            pending_miss_sfx: false,
             score_text: String::new(),
             status_message: String::new(),
         };
@@ -124,7 +128,8 @@ impl PlayState {
         self.phase = PlayPhase::Countdown;
         self.countdown_ticks_remaining = 4;
         self.countdown_timer_s = 0.0;
-        let offset_ms = self.start_timestamp_ms - self.conductor.beat_length_ms() * 5.0;
+        self.pending_countdown_step = Some(0);
+        let offset_ms = self.start_timestamp_ms - self.conductor.beat_length_ms() * 4.0;
         self.conductor.update(offset_ms);
         self.status_message = "3... 2... 1... GO!".to_string();
     }
@@ -167,15 +172,17 @@ impl PlayState {
             if self.countdown_timer_s >= beat_s {
                 self.countdown_timer_s -= beat_s;
                 self.countdown_ticks_remaining -= 1;
-                if self.countdown_ticks_remaining <= 0 {
+                if self.countdown_ticks_remaining > 0 {
+                    let step = (4 - self.countdown_ticks_remaining) as usize;
+                    if step < 4 {
+                        self.pending_countdown_step = Some(step);
+                    }
+                } else {
                     self.start_song();
                 }
             }
         }
 
-        if tick.step_changed {
-            self.step_hit();
-        }
         if tick.beat_changed {
             self.beat_hit();
         }
@@ -215,8 +222,6 @@ impl PlayState {
         self.regen_note_data(self.start_timestamp_ms);
         self.start_countdown();
     }
-
-    pub fn step_hit(&mut self) {}
 
     pub fn beat_hit(&mut self) {
         if self.camera.zoom_rate > 0.0 {
@@ -265,12 +270,8 @@ impl PlayState {
         }
         self.status_message = format!(
             "Song Complete! Score: {} | Sick: {} Good: {} Bad: {} Shit: {} Miss: {}",
-            self.song_score.round() as i64,
-            self.tallies.sick,
-            self.tallies.good,
-            self.tallies.bad,
-            self.tallies.shit,
-            self.tallies.missed
+            self.song_score.round() as i64, self.tallies.sick, self.tallies.good,
+            self.tallies.bad, self.tallies.shit, self.tallies.missed
         );
     }
 

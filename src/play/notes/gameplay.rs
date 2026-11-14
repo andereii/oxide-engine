@@ -1,7 +1,6 @@
 use crate::utils::constants::{
-    HEALTH_GHOST_MISS_PENALTY, HEALTH_HOLD_BONUS_PER_SECOND, HEALTH_HOLD_DROP_PENALTY_PER_SECOND,
-    HEALTH_MAX, HEALTH_MIN, HEALTH_MISS_BONUS, HIT_WINDOW_MS, HOLD_DROP_PENALTY_THRESHOLD_MS,
-    SCORE_GHOST_MISS_PENALTY, SCORE_HOLD_BONUS_PER_SECOND, SCORE_HOLD_DROP_PENALTY_PER_SECOND,
+    HEALTH_GHOST_MISS_PENALTY, HEALTH_MAX, HEALTH_MIN, HEALTH_MISS_BONUS, HIT_WINDOW_MS,
+    SCORE_GHOST_MISS_PENALTY,
 };
 
 use super::super::judgement::{Judgement, judge_note, miss_score, score_note};
@@ -67,7 +66,7 @@ impl PlayState {
             return;
         }
 
-        let has_any_may_hit = self.player_strumline.notes.iter().any(|n| n.may_hit);
+        let has_any_may_hit = self.player_strumline.has_notes_on_screen();
 
         while let Some(input) = self.input_press_queue.pop_front() {
             self.player_strumline.press_key(input.direction);
@@ -90,7 +89,9 @@ impl PlayState {
                     self.player_strumline.play_confirm(input.direction);
                 }
                 None => {
-                    if !self.player_strumline.ghost_tap_enabled {
+                    let allow_ghost = self.player_strumline.ghost_tap_enabled
+                        && (!has_any_may_hit || self.player_strumline.ghost_tap_timer > 0.0);
+                    if !allow_ghost {
                         self.ghost_note_miss(input.direction, has_any_may_hit);
                     }
                     self.player_strumline.play_press(input.direction);
@@ -99,28 +100,13 @@ impl PlayState {
         }
 
         while let Some(input) = self.input_release_queue.pop_front() {
-            self.player_strumline.play_static(input.direction);
             self.player_strumline.release_key(input.direction);
         }
     }
 
     pub fn process_notes(&mut self, elapsed_s: f64) {
         let pos_ms = self.conductor.song_position_ms;
-
-        let mut confirm_lanes = [false; 4];
-        for note in &mut self.opponent_strumline.notes {
-            if !note.has_been_hit && pos_ms >= note.data.time_ms {
-                note.has_been_hit = true;
-                confirm_lanes[note.lane.index()] = true;
-            }
-        }
-        for (i, triggered) in confirm_lanes.into_iter().enumerate() {
-            if triggered {
-                if let Some(dir) = super::direction::NoteDirection::from_index(i) {
-                    self.opponent_strumline.play_confirm(dir);
-                }
-            }
-        }
+        self.process_opponent_notes(pos_ms);
 
         let mut missed_indices = Vec::new();
         let mut bot_hits = Vec::new();
@@ -139,6 +125,9 @@ impl PlayState {
             if diff_ms > HIT_WINDOW_MS {
                 note.has_missed = true;
                 note.handled_miss = true;
+                if note.is_hold_note() {
+                    note.hold_dropped = true;
+                }
                 missed_indices.push(idx);
             }
         }
@@ -159,34 +148,7 @@ impl PlayState {
             self.on_note_miss(HEALTH_MISS_BONUS);
         }
 
-        self.process_active_holds(elapsed_s, pos_ms);
-    }
-
-    fn process_active_holds(&mut self, elapsed_s: f64, pos_ms: f64) {
-        for lane_idx in 0..4 {
-            let Some(mut hold) = self.player_strumline.active_holds[lane_idx] else {
-                continue;
-            };
-            hold.remaining_ms = (hold.end_ms - pos_ms).max(0.0);
-            if hold.remaining_ms <= 0.0 {
-                self.player_strumline.active_holds[lane_idx] = None;
-                continue;
-            }
-            let held = self.is_bot_play_mode || self.player_strumline.held_lanes[lane_idx];
-            if held {
-                self.song_score += SCORE_HOLD_BONUS_PER_SECOND * elapsed_s;
-                self.health = (self.health + HEALTH_HOLD_BONUS_PER_SECOND * elapsed_s).clamp(HEALTH_MIN, HEALTH_MAX);
-                self.player_strumline.play_confirm(hold.lane);
-            } else if !hold.dropped {
-                hold.dropped = true;
-                if hold.remaining_ms > HOLD_DROP_PENALTY_THRESHOLD_MS {
-                    self.tallies.combo = 0;
-                    self.song_score += SCORE_HOLD_DROP_PENALTY_PER_SECOND * elapsed_s;
-                    self.health = (self.health + HEALTH_HOLD_DROP_PENALTY_PER_SECOND * elapsed_s).clamp(HEALTH_MIN, HEALTH_MAX);
-                }
-            }
-            self.player_strumline.active_holds[lane_idx] = Some(hold);
-        }
+        self.process_player_holds(elapsed_s, pos_ms);
     }
 
     pub fn good_note_hit(&mut self, note_idx: usize, input: PreciseInputEvent) {
@@ -203,17 +165,24 @@ impl PlayState {
         let lane = note.lane;
         let note_id = note.data.id;
         let scoreable = note.data.scoreable;
+        let rem = (hold_end_ms - self.conductor.song_position_ms).clamp(0.0, note.data.sustain_length_ms);
+        if is_hold {
+            note.hold_hit = true;
+            note.hold_dropped = false;
+            note.hold_remaining_ms = rem;
+        }
 
         if is_hold {
             self.player_strumline.active_holds[lane.index()] = Some(ActiveHold {
                 note_id,
                 lane,
                 end_ms: hold_end_ms,
-                remaining_ms: (hold_end_ms - input.song_position_ms).max(0.0),
+                remaining_ms: rem,
                 dropped: false,
             });
         }
 
+        self.player_vocals_volume = 1.0;
         if scoreable {
             self.tallies.total_notes_hit += 1;
             self.apply_score(score, judgement, judgement.health_change(), judgement.is_combo_break());
@@ -221,10 +190,14 @@ impl PlayState {
     }
 
     pub fn on_note_miss(&mut self, health_change: f64) {
+        self.player_vocals_volume = 0.0;
+        self.pending_miss_sfx = true;
         self.apply_score(f64::from(miss_score()), Judgement::Miss, health_change, true);
     }
 
     pub fn ghost_note_miss(&mut self, _direction: NoteDirection, has_possible_notes: bool) {
+        self.player_vocals_volume = 0.0;
+        self.pending_miss_sfx = true;
         if has_possible_notes {
             self.apply_score(SCORE_GHOST_MISS_PENALTY, Judgement::Miss, HEALTH_GHOST_MISS_PENALTY, true);
         } else {
@@ -245,4 +218,3 @@ impl PlayState {
         }
     }
 }
-

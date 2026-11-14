@@ -51,6 +51,7 @@
       "alpha": 0.9,
       "Offset": [2, 1],
       "OffsetHit": [0, 0],
+      "endOffset": [0, 0],
       "animations": {
         "left": {
           "body": "purple hold piece",

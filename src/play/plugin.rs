@@ -1,15 +1,12 @@
-use bevy::audio::AudioSink;
+use bevy::audio::{AudioPlayer, AudioSink, PlaybackMode, PlaybackSettings, Volume};
 use bevy::prelude::*;
 
-use crate::animations::AnimationController;
 use crate::audio::SongAudioPlayer;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 
 use super::notes::NoteStyle;
-use super::notes::visuals::{
-    NoteVisual, ReceptorVisual, SustainBodyVisual, SustainEndVisual, load_noteskin_assets,
-    spawn_strumline_and_notes,
-};
+use super::notes::render_sync::sync_arrow_visuals;
+use super::notes::visuals::{load_noteskin_assets, spawn_strumline_and_notes};
 use super::playlist::PlayStatePlaylist;
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart};
@@ -24,6 +21,15 @@ struct HudTextVisual;
 struct AudioSyncState {
     was_countdown: bool,
     was_paused: bool,
+}
+
+#[derive(Resource, Default)]
+struct PlaySfxAssets {
+    miss_sounds: Vec<Handle<AudioSource>>,
+    miss_volume: f32,
+    countdown_sounds: [Option<Handle<AudioSource>>; 4],
+    countdown_volume: f32,
+    miss_cursor: usize,
 }
 
 impl Plugin for PlayPlugin {
@@ -61,6 +67,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(CursorState::default())
             .insert_resource(PlayStatePlaylist::default())
             .insert_resource(SongAudioPlayer::default())
+            .insert_resource(PlaySfxAssets::default())
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,
@@ -86,7 +93,22 @@ fn setup_play_scene(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut state: ResMut<PlayState>,
     mut audio: ResMut<SongAudioPlayer>,
+    mut sfx: ResMut<PlaySfxAssets>,
 ) {
+    let style = &state.player_strumline.note_style;
+    sfx.miss_sounds = style
+        .miss_sounds
+        .iter()
+        .map(|rel| asset_server.load(NoteStyle::miss_sound_asset(rel)))
+        .collect();
+    sfx.miss_volume = style.miss_volume;
+    sfx.countdown_volume = style.countdown_volume;
+    for (idx, path_opt) in style.countdown_sounds.iter().enumerate() {
+        sfx.countdown_sounds[idx] = path_opt
+            .as_ref()
+            .map(|p| asset_server.load(style.asset_path(p)));
+    }
+
     if !state.critical_failure {
         audio.load_for_chart(&mut commands, &asset_server, &state.chart, state.playback_rate);
         match load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts) {
@@ -150,11 +172,13 @@ fn handle_play_input(
 }
 
 fn tick_play_state(
+    mut commands: Commands,
     time: Res<Time>,
     mut state: ResMut<PlayState>,
     mut playlist: ResMut<PlayStatePlaylist>,
     mut audio: ResMut<SongAudioPlayer>,
     mut sync: ResMut<AudioSyncState>,
+    mut sfx: ResMut<PlaySfxAssets>,
     mut sinks: Query<&mut AudioSink>,
 ) {
     let is_paused = matches!(
@@ -177,6 +201,21 @@ fn tick_play_state(
     let master_ms = audio.master_time_ms(&sinks);
     state.update(f64::from(time.delta_secs()), master_ms, &mut playlist);
 
+    if let Some(step) = state.pending_countdown_step.take() {
+        if let Some(handle) = sfx.countdown_sounds.get(step).and_then(|h| h.clone()) {
+            spawn_one_shot(&mut commands, handle, sfx.countdown_volume);
+        }
+    }
+
+    if state.pending_miss_sfx {
+        state.pending_miss_sfx = false;
+        if !sfx.miss_sounds.is_empty() {
+            let idx = sfx.miss_cursor % sfx.miss_sounds.len();
+            sfx.miss_cursor = sfx.miss_cursor.wrapping_add(1);
+            spawn_one_shot(&mut commands, sfx.miss_sounds[idx].clone(), sfx.miss_volume);
+        }
+    }
+
     if sync.was_countdown && !state.is_in_countdown && state.phase == PlayPhase::Playing {
         audio.play_from(state.start_timestamp_ms, &mut sinks);
         sync.was_countdown = false;
@@ -193,101 +232,15 @@ fn tick_play_state(
     }
 }
 
-fn sync_arrow_visuals(
-    state: Res<PlayState>,
-    mut receptors: Query<(&ReceptorVisual, &mut AnimationController)>,
-    mut notes: Query<(&NoteVisual, &mut Transform, &mut Visibility)>,
-    mut sustain_bodies: Query<
-        (&SustainBodyVisual, &mut Transform, &mut Visibility),
-        Without<NoteVisual>,
-    >,
-    mut sustain_ends: Query<
-        (&SustainEndVisual, &mut Transform, &mut Visibility),
-        (Without<NoteVisual>, Without<SustainBodyVisual>),
-    >,
-) {
-    for (rec, mut anim) in &mut receptors {
-        let strum = if rec.is_player {
-            &state.player_strumline
-        } else {
-            &state.opponent_strumline
-        };
-        if strum.lane_confirm_timer[rec.lane] > 0.0 {
-            anim.play("confirm", false, false, 0);
-        } else if strum.held_lanes[rec.lane] || strum.lane_press_timer[rec.lane] > 0.0 {
-            anim.play("press", false, false, 0);
-        } else {
-            anim.play("static", false, false, 0);
-        }
-    }
-
-    let pos_ms = state.conductor.song_position_ms;
-
-    for (vis, mut transform, mut visibility) in &mut notes {
-        let strum = if vis.is_player {
-            &state.player_strumline
-        } else {
-            &state.opponent_strumline
-        };
-        let Some(note) = strum.notes.iter().find(|n| n.data.id == vis.note_id) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        if note.has_been_hit || (note.data.time_ms - pos_ms).abs() > 2000.0 {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        *visibility = Visibility::Visible;
-        transform.translation.y =
-            240.0 - ((note.data.time_ms - pos_ms) * 0.45 * strum.scroll_speed) as f32;
-    }
-
-    for (vis, mut transform, mut visibility) in &mut sustain_bodies {
-        let strum = if vis.is_player {
-            &state.player_strumline
-        } else {
-            &state.opponent_strumline
-        };
-        let Some(note) = strum.notes.iter().find(|n| n.data.id == vis.note_id) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        if note.has_been_hit && !strum.active_holds.iter().flatten().any(|h| h.note_id == vis.note_id) {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        let head_y = 240.0 - ((note.data.time_ms - pos_ms) * 0.45 * strum.scroll_speed) as f32;
-        if head_y < -600.0 || head_y - vis.height_px > 420.0 {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        *visibility = Visibility::Visible;
-        transform.translation.y = head_y - vis.height_px * 0.5;
-    }
-
-    for (vis, mut transform, mut visibility) in &mut sustain_ends {
-        let strum = if vis.is_player {
-            &state.player_strumline
-        } else {
-            &state.opponent_strumline
-        };
-        let Some(note) = strum.notes.iter().find(|n| n.data.id == vis.note_id) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        if note.has_been_hit && !strum.active_holds.iter().flatten().any(|h| h.note_id == vis.note_id) {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        let head_y = 240.0 - ((note.data.time_ms - pos_ms) * 0.45 * strum.scroll_speed) as f32;
-        let end_y = head_y - vis.body_height_px - vis.half_end_px;
-        if end_y < -600.0 || end_y > 420.0 {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        *visibility = Visibility::Visible;
-        transform.translation.y = end_y;
-    }
+fn spawn_one_shot(commands: &mut Commands, handle: Handle<AudioSource>, volume: f32) {
+    commands.spawn((
+        AudioPlayer(handle),
+        PlaybackSettings {
+            mode: PlaybackMode::Despawn,
+            volume: Volume::Linear(volume.clamp(0.0, 2.0)),
+            ..default()
+        },
+    ));
 }
 
 fn sync_hud_text(state: Res<PlayState>, mut hud_text: Query<&mut Text, With<HudTextVisual>>) {

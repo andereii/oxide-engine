@@ -50,3 +50,13 @@ pub const PBOT1_SHIT_THRESHOLD: f64 = 160.0;
 pub const NS_PER_MS: f64 = 1_000_000.0;
 pub const TURBO_DEFAULT_DELAY: f64 = 0.5;
 pub const TURBO_DEFAULT_INTERVAL: f64 = 0.05;
+
+pub const PIXELS_PER_MS: f64 = 0.45;
+pub const STRUMLINE_SIZE: f32 = 104.0;
+pub const NOTE_SPACING: f32 = STRUMLINE_SIZE + 8.0;
+pub const STRUMLINE_X_OFFSET: f32 = 48.0;
+pub const STRUMLINE_Y_OFFSET: f32 = 24.0;
+pub const CONFIRM_HOLD_TIME_S: f64 = 0.15;
+pub const GHOST_TAP_DELAY_S: f64 = 3.0 / 8.0;
+pub const COUNTDOWN_VOLUME: f32 = 0.6;
+pub const SUSTAIN_MISSED_ALPHA: f32 = 0.6;
