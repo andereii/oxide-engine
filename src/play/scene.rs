@@ -12,10 +12,7 @@ use super::judgement::Tallies;
 use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
 use super::popups::PopupEvent;
-use super::types::{
-    CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent,
-    SongChart, SongEventData,
-};
+use super::types::{CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent, SongChart, SongEventData};
 
 #[derive(Resource)]
 pub struct PlayState {
@@ -61,6 +58,7 @@ pub struct PlayState {
     pub pending_popups: Vec<PopupEvent>,
     pub score_text: String,
     pub status_message: String,
+    pub last_hud_key: (i64, u32, u32, i32),
 }
 
 impl PlayState {
@@ -116,6 +114,7 @@ impl PlayState {
             pending_popups: Vec::new(),
             score_text: String::new(),
             status_message: String::new(),
+            last_hud_key: (i64::MIN, u32::MAX, u32::MAX, i32::MIN),
         };
         state.create();
         state
@@ -290,10 +289,10 @@ impl PlayState {
     }
 
     pub fn update_score_text(&mut self) {
-        self.score_text = format!(
-            "Score: {} | Combo: {} | Misses: {} | Health: {:.0}%",
-            self.song_score.round() as i64, self.tallies.combo, self.tallies.missed, (self.health / HEALTH_MAX) * 100.0
-        );
+        let key = (self.song_score.round() as i64, self.tallies.combo, self.tallies.missed, ((self.health / HEALTH_MAX) * 100.0).round() as i32);
+        if self.last_hud_key == key { return; }
+        self.last_hud_key = key;
+        self.score_text = format!("Score: {} | Combo: {} | Misses: {} | Health: {}%", key.0, key.1, key.2, key.3);
     }
 }
 

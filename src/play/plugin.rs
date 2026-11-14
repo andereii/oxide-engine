@@ -168,16 +168,8 @@ fn setup_play_scene(
 
     commands.spawn((
         Text::new(""),
-        TextFont {
-            font_size: FontSize::Px(20.0),
-            ..default()
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(24.0),
-            bottom: Val::Px(20.0),
-            ..default()
-        },
+        TextFont { font_size: FontSize::Px(20.0), ..default() },
+        Node { position_type: PositionType::Absolute, left: Val::Px(24.0), bottom: Val::Px(20.0), ..default() },
         HudTextVisual,
     ));
 }
@@ -287,8 +279,18 @@ fn spawn_one_shot(commands: &mut Commands, handle: Handle<AudioSource>, volume: 
     ));
 }
 
-fn sync_hud_text(state: Res<PlayState>, mut hud_text: Query<&mut Text, With<HudTextVisual>>) {
+fn sync_hud_text(
+    state: Res<PlayState>,
+    mut cache: Local<(String, String)>,
+    mut hud_text: Query<&mut Text, With<HudTextVisual>>,
+) {
+    if cache.0 == state.score_text && cache.1 == state.status_message {
+        return;
+    }
+    cache.0.clone_from(&state.score_text);
+    cache.1.clone_from(&state.status_message);
+    let combined = format!("{}  |  {}", cache.0, cache.1);
     for mut text in &mut hud_text {
-        **text = format!("{}  |  {}", state.score_text, state.status_message);
+        **text = combined.clone();
     }
 }

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::utils::constants::KEY_COUNT;
+use crate::utils::ecs::{set_sprite_color, set_visibility};
 
 use super::judgement::Judgement;
 use super::notes::NoteStyle;
@@ -95,13 +96,14 @@ pub fn sync_popups(
     time: Res<Time>,
     mut state: ResMut<PlayState>,
     assets_opt: Option<ResMut<PopupAssets>>,
+    mut pending_buf: Local<Vec<PopupEvent>>,
     mut pool: Query<(&mut PopupVisual, &mut Sprite, &mut Transform, &mut Visibility)>,
 ) {
     if state.is_in_countdown && state.starting_song {
         for (mut vis, _, _, mut visibility) in &mut pool {
             if vis.active {
                 vis.active = false;
-                *visibility = Visibility::Hidden;
+                set_visibility(&mut visibility, Visibility::Hidden);
             }
         }
         state.pending_popups.clear();
@@ -127,14 +129,21 @@ pub fn sync_popups(
         if vis.age_s >= vis.delay_s {
             let raw_t = ((vis.age_s - vis.delay_s) / vis.fade_s).clamp(0.0, 1.0);
             let t = if vis.is_pixel { (raw_t * 2.0).floor() * 0.5 } else { raw_t };
-            sprite.color = Color::srgba(1.0, 1.0, 1.0, vis.base_alpha * (1.0 - t));
+            set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, vis.base_alpha * (1.0 - t)));
             if raw_t >= 1.0 {
                 vis.active = false;
-                *visibility = Visibility::Hidden;
+                set_visibility(&mut visibility, Visibility::Hidden);
                 continue;
             }
         }
         active_any = true;
+    }
+
+    if state.pending_popups.is_empty() {
+        if !active_any && let Some(mut assets) = assets_opt {
+            assets.next_z_step = 0;
+        }
+        return;
     }
 
     let Some(mut assets) = assets_opt else {
@@ -145,9 +154,10 @@ pub fn sync_popups(
         assets.next_z_step = 0;
     }
     let beat_s = (state.conductor.beat_length_ms() / 1000.0).max(0.1) as f32;
-    let events: Vec<PopupEvent> = state.pending_popups.drain(..).collect();
+    pending_buf.clear();
+    pending_buf.extend(state.pending_popups.drain(..));
 
-    for ev in events {
+    for ev in pending_buf.iter().copied() {
         if let Some(idx) = ev.judgement.and_then(judgement_index)
             && let Some((tex, scale, alpha, offset)) = assets.ratings[idx].clone()
         {
@@ -174,7 +184,8 @@ pub fn sync_popups(
             );
         }
         if let Some(combo) = ev.combo {
-            for (i, digit) in split_combo_digits(combo).into_iter().enumerate() {
+            let (digits, len) = split_combo_digits(combo);
+            for (i, &digit) in digits[..len].iter().enumerate() {
                 let Some(tex) = assets.digits[digit].clone() else {
                     continue;
                 };
@@ -255,16 +266,15 @@ fn judgement_index(j: Judgement) -> Option<usize> {
     }
 }
 
-fn split_combo_digits(mut combo: u32) -> Vec<usize> {
-    let mut out = Vec::with_capacity(4);
-    while combo != 0 {
-        out.push((combo % 10) as usize);
+fn split_combo_digits(mut combo: u32) -> ([usize; 10], usize) {
+    let mut out = [0usize; 10];
+    let mut len = 0;
+    while combo != 0 && len < 10 {
+        out[len] = (combo % 10) as usize;
+        len += 1;
         combo /= 10;
     }
-    while out.len() < 3 {
-        out.push(0);
-    }
-    out
+    (out, len.max(3))
 }
 
 fn xorshift32(state: &mut u32) -> u32 {

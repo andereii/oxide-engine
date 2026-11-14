@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
+use crate::utils::ecs::{set_atlas_index, set_sprite_color, set_transform_pos_scale, set_visibility};
 
 use crate::play::notes::data::NoteSprite;
 use crate::play::notes::skin::NoteStyle;
@@ -64,11 +65,13 @@ pub fn sync_arrow_visuals(
         ),
     >,
 ) {
-    let fallback_style = state.player_strumline.note_style.clone();
-    let style = skin_assets
-        .as_ref()
-        .map(|s| &s.style)
-        .unwrap_or(&fallback_style);
+    let fallback_style;
+    let style = if let Some(s) = skin_assets.as_ref() {
+        &s.style
+    } else {
+        fallback_style = state.player_strumline.note_style.clone();
+        &fallback_style
+    };
     let note_indices = skin_assets
         .as_ref()
         .map(|s| s.note_indices)
@@ -127,10 +130,13 @@ fn sync_receptors(
             strum.receptors[rec.lane].on_confirm_anim_finished();
         }
         let rec_state = &strum.receptors[rec.lane];
-        transform.translation.x = strum.lane_x(rec.lane);
-        transform.translation.y = strum.receptor_y() + rec_state.y_offset;
-        transform.scale = Vec3::splat(style.strum_scale * strum.strumline_scale);
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, style.strum_alpha * rec_state.alpha);
+        let z = { let t: &Transform = &*transform; t.translation.z };
+        set_transform_pos_scale(
+            &mut transform,
+            Vec3::new(strum.lane_x(rec.lane), strum.receptor_y() + rec_state.y_offset, z),
+            Vec3::splat(style.strum_scale * strum.strumline_scale),
+        );
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.strum_alpha * rec_state.alpha));
 
         if rec.last_anim_gen != rec_state.anim_gen {
             rec.last_anim_gen = rec_state.anim_gen;
@@ -141,8 +147,8 @@ fn sync_receptors(
                 ReceptorAnimState::Static => "static",
             };
             anim.play(anim_name, true, false, 0);
-            if let (Some(atlas), Some(idx)) = (sprite.texture_atlas.as_mut(), anim.current_atlas_index()) {
-                atlas.index = idx;
+            if let Some(idx) = anim.current_atlas_index() {
+                set_atlas_index(&mut sprite, idx);
             }
         }
     }
@@ -177,7 +183,7 @@ fn sync_note_pool(
         });
         let Some((idx, note)) = valid else {
             vis.assigned_idx = None;
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
             scratch.free_entities.push(entity);
             continue;
         };
@@ -197,9 +203,7 @@ fn sync_note_pool(
             vis.assigned_idx = Some(idx);
             vis.assigned_id = note.data.id;
             vis.lane = note.lane.index();
-            if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                atlas.index = note_indices[vis.lane];
-            }
+            set_atlas_index(&mut sprite, note_indices[vis.lane]);
             apply_note_transform(strum, style, vis_pos, note, &mut sprite, &mut transform, &mut visibility);
         }
     }
@@ -210,19 +214,22 @@ fn apply_note_transform(
     style: &NoteStyle,
     vis_pos: f64,
     note: &NoteSprite,
-    sprite: &mut Sprite,
-    transform: &mut Transform,
-    visibility: &mut Visibility,
+    sprite: &mut Mut<'_, Sprite>,
+    transform: &mut Mut<'_, Transform>,
+    visibility: &mut Mut<'_, Visibility>,
 ) {
     let y = strum.note_y_at(note.data.time_ms, vis_pos) + style.notes_offset[1] + note.y_offset;
     if y < -520.0 || y > 520.0 {
-        *visibility = Visibility::Hidden;
+        set_visibility(visibility, Visibility::Hidden);
         return;
     }
-    *visibility = Visibility::Visible;
-    transform.translation.x = strum.lane_x(note.lane.index()) + style.notes_offset[0];
-    transform.translation.y = y;
-    transform.scale = Vec3::splat(style.notes_scale * strum.strumline_scale);
+    set_visibility(visibility, Visibility::Visible);
+    let z = { let t: &Mut<'_, Transform> = &*transform; t.translation.z };
+    set_transform_pos_scale(
+        transform,
+        Vec3::new(strum.lane_x(note.lane.index()) + style.notes_offset[0], y, z),
+        Vec3::splat(style.notes_scale * strum.strumline_scale),
+    );
     let tint = if note.desaturated { 0.65 } else { 1.0 };
-    sprite.color = Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha);
+    set_sprite_color(sprite, Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha));
 }

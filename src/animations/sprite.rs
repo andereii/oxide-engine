@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
+use crate::utils::ecs::set_atlas_index;
 
 use super::controller::AnimationController;
 
@@ -28,14 +29,13 @@ pub fn step_animations(
     let song_pos_ms = play_state.map(|s| s.conductor.song_position_ms);
 
     for (mut controller, sprite_opt) in &mut query {
+        let ctrl_ref: &AnimationController = &*controller;
+        if ctrl_ref.finished || ctrl_ref.current.is_none() {
+            continue;
+        }
         controller.update(elapsed_s, song_pos_ms);
-        if let (Some(idx), Some(mut sprite)) = (
-            controller.current_atlas_index(),
-            sprite_opt,
-        ) {
-            if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                atlas.index = idx;
-            }
+        if let (Some(idx), Some(mut sprite)) = (controller.current_atlas_index(), sprite_opt) {
+            set_atlas_index(&mut sprite, idx);
         }
     }
 }

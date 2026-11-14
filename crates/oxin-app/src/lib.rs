@@ -19,7 +19,7 @@ impl Default for WindowConfig {
             title: "Oxide Engine".to_string(),
             width: 1280,
             height: 720,
-            vsync: true,
+            vsync: false,
             assets_dir: None,
         }
     }
@@ -89,7 +89,8 @@ pub fn build_app(config: WindowConfig) -> App {
                     ..default()
                 }),
                 ..default()
-            }),
+            })
+            .disable::<bevy::gilrs::GilrsPlugin>(),
     )
     .add_systems(Startup, spawn_main_camera);
     app
@@ -102,5 +103,5 @@ pub fn run_window(config: WindowConfig, configure: impl FnOnce(&mut App)) {
 }
 
 fn spawn_main_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, Msaa::Off));
 }

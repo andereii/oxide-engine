@@ -115,6 +115,9 @@ impl PlayState {
 
     pub fn process_song_events(&mut self) {
         let pos_ms = self.conductor.song_position_ms;
+        if !self.song_events.iter().any(|e| !e.triggered && pos_ms >= e.time_ms) {
+            return;
+        }
         let mut due = Vec::new();
         for event in &mut self.song_events {
             if !event.triggered && pos_ms >= event.time_ms {
@@ -195,20 +198,25 @@ impl PlayState {
         self.camera.bop_multiplier += (1.0 - self.camera.bop_multiplier) * decay;
         self.camera.hud_zoom += (self.camera.default_hud_zoom - self.camera.hud_zoom) * decay;
 
-        let mut remaining = Vec::new();
-        for (is_player, mut tween) in self.scroll_speed_tweens.drain(..) {
-            tween.elapsed_s += elapsed_s;
-            let value = tween.value();
-            if is_player {
-                self.player_strumline.scroll_speed = value;
-            } else {
-                self.opponent_strumline.scroll_speed = value;
-            }
-            if !tween.finished() {
-                remaining.push((is_player, tween));
+        if !self.scroll_speed_tweens.is_empty() {
+            let mut idx = 0;
+            while idx < self.scroll_speed_tweens.len() {
+                let (is_player, mut tween) = self.scroll_speed_tweens[idx];
+                tween.elapsed_s += elapsed_s;
+                let value = tween.value();
+                if is_player {
+                    self.player_strumline.scroll_speed = value;
+                } else {
+                    self.opponent_strumline.scroll_speed = value;
+                }
+                if tween.finished() {
+                    self.scroll_speed_tweens.swap_remove(idx);
+                } else {
+                    self.scroll_speed_tweens[idx].1 = tween;
+                    idx += 1;
+                }
             }
         }
-        self.scroll_speed_tweens = remaining;
     }
 }
 

@@ -17,6 +17,8 @@ pub struct SongAudioPlayer {
     pub is_paused: bool,
     pub playback_rate: f32,
     pub instrumental_volume: f32,
+    last_synced_vols: Option<[f32; 3]>,
+    all_tracks_ready: bool,
 }
 
 impl SongAudioPlayer {
@@ -33,6 +35,8 @@ impl SongAudioPlayer {
         self.is_paused = false;
         self.playback_rate = playback_rate as f32;
         self.instrumental_volume = 1.0;
+        self.last_synced_vols = None;
+        self.all_tracks_ready = false;
 
         self.voices = VoicesGroup {
             needs_voices: chart.audio.needs_voices,
@@ -153,6 +157,8 @@ impl SongAudioPlayer {
     pub fn play_from(&mut self, start_ms: f64, sinks: &mut Query<&mut AudioSink>) {
         self.is_playing = true;
         self.is_paused = false;
+        self.last_synced_vols = None;
+        self.all_tracks_ready = false;
         for track in &mut self.tracks {
             let Some(entity) = track.entity else { continue };
             let Ok(mut sink) = sinks.get_mut(entity) else {
@@ -217,10 +223,15 @@ impl SongAudioPlayer {
         opponent_vol: f32,
         sinks: &mut Query<&mut AudioSink>,
     ) {
+        let next_vols = [inst_vol, player_vol, opponent_vol];
+        if self.all_tracks_ready && self.last_synced_vols == Some(next_vols) {
+            return;
+        }
         self.instrumental_volume = inst_vol;
         self.voices.player_volume = player_vol;
         self.voices.opponent_volume = opponent_vol;
 
+        let mut synced_all = true;
         for track in &self.tracks {
             let Some(entity) = track.entity else { continue };
             if let Ok(mut sink) = sinks.get_mut(entity) {
@@ -229,7 +240,14 @@ impl SongAudioPlayer {
                     _ => self.voices.role_volume(track.role, track.base_volume),
                 };
                 sink.set_volume(Volume::Linear(vol));
+            } else {
+                synced_all = false;
             }
+        }
+        if synced_all && self.all_tracks_ready {
+            self.last_synced_vols = Some(next_vols);
+        } else {
+            self.last_synced_vols = None;
         }
     }
 
@@ -247,7 +265,7 @@ impl SongAudioPlayer {
     }
 
     pub fn tick(&mut self, master_time_ms: f64, sinks: &mut Query<&mut AudioSink>) {
-        if !self.is_playing || self.is_paused {
+        if !self.is_playing || self.is_paused || self.all_tracks_ready {
             return;
         }
         for track in &mut self.tracks {
@@ -276,6 +294,7 @@ impl SongAudioPlayer {
             self.playback_rate,
             sinks,
         );
+        self.all_tracks_ready = self.tracks.iter().all(|t| t.started && !t.pending);
     }
 }
 

@@ -6,6 +6,7 @@ use crate::animations::{AnimationController, Bopper};
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::utils::ecs::{set_atlas_index, set_sprite_flip, set_transform_full, set_visibility};
 
 use super::loader::{StagePropKind, StageResource};
 use super::paths::parse_hex_color;
@@ -161,6 +162,10 @@ pub fn sync_stage_props(
     let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
 
     for (vis, mut sprite, mut transform, mut visibility, anim_opt, bopper_opt) in &mut animated_props {
+        if !vis.visible {
+            set_visibility(&mut visibility, Visibility::Hidden);
+            continue;
+        }
         let (anim_off, frame_off, anim_flip, rotated) = match (anim_opt, bopper_opt) {
             (Some(mut anim), Some(mut bopper)) => {
                 bopper.sync_finished(&anim);
@@ -168,9 +173,7 @@ pub fn sync_stage_props(
                     bopper.on_step_hit(current_step, &mut anim);
                 }
                 if let Some(idx) = anim.current_atlas_index() {
-                    if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                        atlas.index = idx;
-                    }
+                    set_atlas_index(&mut sprite, idx);
                 }
                 (
                     anim.current_offset(),
@@ -204,18 +207,15 @@ pub fn sync_stage_props(
         let bx = (screen_cx - SCREEN_WIDTH * 0.5) * zoom + frame_off[0] * vis.base_scale[0] * zoom;
         let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * zoom + frame_off[1] * vis.base_scale[1] * zoom;
 
-        transform.translation = Vec3::new(bx, by, vis.z_layer);
-        transform.scale = Vec3::new(vis.base_scale[0] * zoom, vis.base_scale[1] * zoom, 1.0);
         let base_rot = -vis.base_angle_deg.to_radians();
-        transform.rotation = Quat::from_rotation_z(if rotated { base_rot - FRAC_PI_2 } else { base_rot });
-
-        sprite.flip_x = vis.base_flip[0] ^ anim_flip[0];
-        sprite.flip_y = vis.base_flip[1] ^ anim_flip[1];
-        *visibility = if vis.visible {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
+        set_transform_full(
+            &mut transform,
+            Vec3::new(bx, by, vis.z_layer),
+            Vec3::new(vis.base_scale[0] * zoom, vis.base_scale[1] * zoom, 1.0),
+            Quat::from_rotation_z(if rotated { base_rot - FRAC_PI_2 } else { base_rot }),
+        );
+        set_sprite_flip(&mut sprite, vis.base_flip[0] ^ anim_flip[0], vis.base_flip[1] ^ anim_flip[1]);
+        set_visibility(&mut visibility, Visibility::Visible);
     }
 }
 

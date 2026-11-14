@@ -4,9 +4,17 @@ use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
+use crate::utils::ecs::{set_atlas_index, set_sprite_color, set_transform_full, set_visibility};
 
+use crate::play::notes::data::NoteDirection;
 use crate::play::notes::render::{AnimClipFrames, NoteskinAssets};
 use crate::play::notes::strum::HoldCoverCmd;
+
+#[derive(Default)]
+pub struct EffectsScratch {
+    splashes: Vec<NoteDirection>,
+    covers: Vec<HoldCoverCmd>,
+}
 
 #[derive(Component)]
 pub struct NoteSplashVisual {
@@ -34,6 +42,7 @@ pub struct HoldCoverVisual {
 pub fn sync_note_effects(
     mut state: ResMut<PlayState>,
     skin_assets: Option<Res<NoteskinAssets>>,
+    mut scratch: Local<EffectsScratch>,
     mut splashes: Query<(
         &mut NoteSplashVisual,
         &mut Sprite,
@@ -60,13 +69,14 @@ pub fn sync_note_effects(
     for (mut vis, _, anim, _, mut visibility) in &mut splashes {
         if vis.active && anim.finished {
             vis.active = false;
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
         }
     }
 
-    let pending_splashes: Vec<_> = state.player_strumline.pending_splashes.drain(..).collect();
+    scratch.splashes.clear();
+    scratch.splashes.extend(state.player_strumline.pending_splashes.drain(..));
     if style.splash_enabled && state.player_strumline.show_notesplash {
-        for dir in pending_splashes {
+        for dir in scratch.splashes.iter().copied() {
             let variants = &assets.splash_variants[dir.index()];
             if variants.is_empty() {
                 continue;
@@ -91,10 +101,10 @@ pub fn sync_note_effects(
             continue;
         }
         if !style.splash_enabled || !p_strum.show_notesplash {
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, style.splash_alpha);
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.splash_alpha));
         apply_frame_transform(
             &mut transform,
             &anim,
@@ -109,8 +119,9 @@ pub fn sync_note_effects(
     for is_player in [false, true] {
         let strum = if is_player { &mut state.player_strumline } else { &mut state.opponent_strumline };
         let allow = style.hold_cover_enabled && strum.show_notesplash;
-        let cmds: Vec<HoldCoverCmd> = strum.pending_hold_covers.drain(..).collect();
-        for cmd in cmds {
+        scratch.covers.clear();
+        scratch.covers.extend(strum.pending_hold_covers.drain(..));
+        for cmd in scratch.covers.iter().copied() {
             apply_cover_cmd(is_player, allow, cmd, &mut covers);
         }
     }
@@ -119,7 +130,7 @@ pub fn sync_note_effects(
         let strum = if cov.is_player { &state.player_strumline } else { &state.opponent_strumline };
         if !style.hold_cover_enabled || !strum.show_notesplash {
             cov.phase = HoldCoverPhase::Hidden;
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
         if cov.phase == HoldCoverPhase::Start && anim.finished {
@@ -128,12 +139,12 @@ pub fn sync_note_effects(
             sync_atlas_frame(&mut sprite, &anim);
         } else if cov.phase == HoldCoverPhase::End && anim.finished {
             cov.phase = HoldCoverPhase::Hidden;
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
         }
         if cov.phase == HoldCoverPhase::Hidden {
             continue;
         }
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha);
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha));
         apply_frame_transform(
             &mut transform,
             &anim,
@@ -148,9 +159,9 @@ pub fn sync_note_effects(
 
 fn activate_splash(
     vis: &mut NoteSplashVisual,
-    sprite: &mut Sprite,
+    sprite: &mut Mut<'_, Sprite>,
     anim: &mut AnimationController,
-    visibility: &mut Visibility,
+    visibility: &mut Mut<'_, Visibility>,
     lane: usize,
     variants: &[AnimClipFrames],
 ) {
@@ -170,7 +181,7 @@ fn activate_splash(
     sync_atlas_frame(sprite, anim);
     vis.lane = lane;
     vis.active = true;
-    *visibility = Visibility::Visible;
+    set_visibility(visibility, Visibility::Visible);
 }
 
 fn apply_cover_cmd(
@@ -196,7 +207,7 @@ fn apply_cover_cmd(
                 cov.phase = HoldCoverPhase::Start;
                 anim.play("start", true, false, 0);
                 sync_atlas_frame(&mut sprite, &anim);
-                *visibility = Visibility::Visible;
+                set_visibility(&mut visibility, Visibility::Visible);
             }
             HoldCoverPhase::End if allow && cov.phase != HoldCoverPhase::Hidden => {
                 cov.phase = HoldCoverPhase::End;
@@ -205,21 +216,21 @@ fn apply_cover_cmd(
             }
             _ => {
                 cov.phase = HoldCoverPhase::Hidden;
-                *visibility = Visibility::Hidden;
+                set_visibility(&mut visibility, Visibility::Hidden);
             }
         }
         break;
     }
 }
 
-fn sync_atlas_frame(sprite: &mut Sprite, anim: &AnimationController) {
-    if let (Some(atlas), Some(idx)) = (sprite.texture_atlas.as_mut(), anim.current_atlas_index()) {
-        atlas.index = idx;
+fn sync_atlas_frame(sprite: &mut Mut<'_, Sprite>, anim: &AnimationController) {
+    if let Some(idx) = anim.current_atlas_index() {
+        set_atlas_index(sprite, idx);
     }
 }
 
 fn apply_frame_transform(
-    transform: &mut Transform,
+    transform: &mut Mut<'_, Transform>,
     anim: &AnimationController,
     base_x: f32,
     base_y: f32,
@@ -229,14 +240,18 @@ fn apply_frame_transform(
 ) {
     let scale = effect_scale * strum_scale;
     let f_off = anim.current_frame_offset();
-    transform.translation.x = base_x + (offset[0] + f_off[0]) * scale;
-    transform.translation.y = base_y + (-offset[1] + f_off[1]) * scale;
-    transform.rotation = if anim.current_frame_rotated() {
+    let z = { let t: &Mut<'_, Transform> = &*transform; t.translation.z };
+    let rot = if anim.current_frame_rotated() {
         Quat::from_rotation_z(-FRAC_PI_2)
     } else {
         Quat::IDENTITY
     };
-    transform.scale = Vec3::splat(scale);
+    set_transform_full(
+        transform,
+        Vec3::new(base_x + (offset[0] + f_off[0]) * scale, base_y + (-offset[1] + f_off[1]) * scale, z),
+        Vec3::splat(scale),
+        rot,
+    );
 }
 
 fn xorshift32(state: &mut u32) -> u32 {

@@ -3,6 +3,10 @@ use bevy::prelude::*;
 use crate::play::notes::data::NoteSprite;
 use crate::play::notes::skin::NoteStyle;
 use crate::play::notes::strum::Strumline;
+use crate::utils::ecs::{
+    set_atlas_index, set_sprite_color, set_sprite_custom_size, set_sprite_flip,
+    set_transform_pos_scale, set_visibility,
+};
 use super::render_sync::PoolSyncScratch;
 use super::sustain_trail::compute_sustain_geometry;
 use super::visuals::{NoteVisual, ReceptorVisual, SustainBodyVisual, SustainEndVisual};
@@ -36,7 +40,7 @@ pub(super) fn sync_sustain_body_pool(
         });
         let Some((idx, note)) = valid else {
             vis.assigned_idx = None;
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
             scratch.free_entities.push(entity);
             continue;
         };
@@ -60,9 +64,7 @@ pub(super) fn sync_sustain_body_pool(
             vis.lane = lane;
             vis.raw_width_px = raw_w;
             vis.end_raw_h = end_h;
-            if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                atlas.index = body_idx;
-            }
+            set_atlas_index(&mut sprite, body_idx);
             apply_body_geom(strum, style, vis_pos, note, &vis, &mut sprite, &mut transform, &mut visibility);
         }
     }
@@ -74,25 +76,33 @@ fn apply_body_geom(
     vis_pos: f64,
     note: &NoteSprite,
     vis: &SustainBodyVisual,
-    sprite: &mut Sprite,
-    transform: &mut Transform,
-    visibility: &mut Visibility,
+    sprite: &mut Mut<'_, Sprite>,
+    transform: &mut Mut<'_, Transform>,
+    visibility: &mut Mut<'_, Visibility>,
 ) {
     let geom = compute_sustain_geometry(note, strum, style, vis_pos, vis.end_raw_h);
     if !geom.visible || geom.body_height_px <= 0.5 {
-        *visibility = Visibility::Hidden;
+        set_visibility(visibility, Visibility::Hidden);
         return;
     }
     let x_off = if note.hold_hit { style.sustains_offset_hit[0] } else { style.sustains_offset[0] };
-    *visibility = Visibility::Visible;
-    transform.translation.x = strum.lane_x(vis.lane) + x_off;
-    transform.translation.y = geom.body_y;
-    sprite.flip_y = geom.flip_y;
-    sprite.color = Color::srgba(1.0, 1.0, 1.0, geom.alpha);
-    sprite.custom_size = Some(Vec2::new(
-        vis.raw_width_px,
-        (geom.body_height_px / style.sustains_scale.max(0.01)).max(1.0),
-    ));
+    set_visibility(visibility, Visibility::Visible);
+    let (z, scale) = { let t: &Mut<'_, Transform> = &*transform; (t.translation.z, t.scale) };
+    set_transform_pos_scale(
+        transform,
+        Vec3::new(strum.lane_x(vis.lane) + x_off, geom.body_y, z),
+        scale,
+    );
+    let flip_x = { let s: &Mut<'_, Sprite> = &*sprite; s.flip_x };
+    set_sprite_flip(sprite, flip_x, geom.flip_y);
+    set_sprite_color(sprite, Color::srgba(1.0, 1.0, 1.0, geom.alpha));
+    set_sprite_custom_size(
+        sprite,
+        Some(Vec2::new(
+            vis.raw_width_px,
+            (geom.body_height_px / style.sustains_scale.max(0.01)).max(1.0),
+        )),
+    );
 }
 
 pub(super) fn sync_sustain_end_pool(
@@ -124,7 +134,7 @@ pub(super) fn sync_sustain_end_pool(
         });
         let Some((idx, note)) = valid else {
             vis.assigned_idx = None;
-            *visibility = Visibility::Hidden;
+            set_visibility(&mut visibility, Visibility::Hidden);
             scratch.free_entities.push(entity);
             continue;
         };
@@ -148,9 +158,7 @@ pub(super) fn sync_sustain_end_pool(
             vis.lane = lane;
             vis.end_raw_w = raw_w;
             vis.end_raw_h = end_h;
-            if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                atlas.index = end_idx;
-            }
+            set_atlas_index(&mut sprite, end_idx);
             apply_end_geom(strum, style, vis_pos, note, &vis, &mut sprite, &mut transform, &mut visibility);
         }
     }
@@ -162,28 +170,36 @@ fn apply_end_geom(
     vis_pos: f64,
     note: &NoteSprite,
     vis: &SustainEndVisual,
-    sprite: &mut Sprite,
-    transform: &mut Transform,
-    visibility: &mut Visibility,
+    sprite: &mut Mut<'_, Sprite>,
+    transform: &mut Mut<'_, Transform>,
+    visibility: &mut Mut<'_, Visibility>,
 ) {
     let geom = compute_sustain_geometry(note, strum, style, vis_pos, vis.end_raw_h);
     if !geom.visible || geom.body_height_px <= 0.5 {
-        *visibility = Visibility::Hidden;
+        set_visibility(visibility, Visibility::Hidden);
         return;
     }
     let x_off = if note.hold_hit { style.sustains_offset_hit[0] } else { style.sustains_offset[0] };
-    *visibility = Visibility::Visible;
-    transform.translation.x = strum.lane_x(vis.lane) + x_off + geom.end_x_offset;
-    transform.translation.y = geom.end_y;
-    sprite.flip_y = geom.flip_y;
-    sprite.color = Color::srgba(1.0, 1.0, 1.0, geom.alpha);
-    sprite.custom_size = if geom.end_height_px + 0.5 < vis.end_raw_h * style.sustains_scale {
-        Some(Vec2::new(
-            vis.end_raw_w,
-            (geom.end_height_px / style.sustains_scale.max(0.01)).max(1.0),
-        ))
-    } else {
-        None
-    };
+    set_visibility(visibility, Visibility::Visible);
+    let (z, scale) = { let t: &Mut<'_, Transform> = &*transform; (t.translation.z, t.scale) };
+    set_transform_pos_scale(
+        transform,
+        Vec3::new(strum.lane_x(vis.lane) + x_off + geom.end_x_offset, geom.end_y, z),
+        scale,
+    );
+    let flip_x = { let s: &Mut<'_, Sprite> = &*sprite; s.flip_x };
+    set_sprite_flip(sprite, flip_x, geom.flip_y);
+    set_sprite_color(sprite, Color::srgba(1.0, 1.0, 1.0, geom.alpha));
+    set_sprite_custom_size(
+        sprite,
+        if geom.end_height_px + 0.5 < vis.end_raw_h * style.sustains_scale {
+            Some(Vec2::new(
+                vis.end_raw_w,
+                (geom.end_height_px / style.sustains_scale.max(0.01)).max(1.0),
+            ))
+        } else {
+            None
+        },
+    );
 }
 

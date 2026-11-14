@@ -9,23 +9,17 @@ use crate::play::scene::PlayState;
 use crate::play::stage::schema::stage_layer_z;
 use crate::play::types::PlayPhase;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::utils::ecs::{
+    set_sprite_atlas, set_sprite_color, set_sprite_flip, set_transform_full, set_visibility,
+};
 
 use super::behavior::{CharacterActor, ClipVisual};
 use super::spawn::CharacterPartVisual;
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct CharacterSyncState {
     pub last_step: Option<i32>,
     pub last_song_pos_ms: Option<f64>,
-}
-
-impl Default for CharacterSyncState {
-    fn default() -> Self {
-        Self {
-            last_step: None,
-            last_song_pos_ms: None,
-        }
-    }
 }
 
 pub fn sync_characters(
@@ -33,11 +27,15 @@ pub fn sync_characters(
     mut state: ResMut<PlayState>,
     mut sync_state: ResMut<CharacterSyncState>,
     mut images: ResMut<Assets<Image>>,
+    mut signals: Local<(Vec<CharNoteSignal>, Vec<CharNoteSignal>)>,
     mut actors: Query<&mut CharacterActor>,
     mut parts: Query<(&mut Sprite, &mut Transform, &mut Visibility), With<CharacterPartVisual>>,
 ) {
-    let player_signals: Vec<CharNoteSignal> = state.player_strumline.pending_char_events.drain(..).collect();
-    let opponent_signals: Vec<CharNoteSignal> = state.opponent_strumline.pending_char_events.drain(..).collect();
+    let (player_signals, opponent_signals) = &mut *signals;
+    player_signals.clear();
+    player_signals.extend(state.player_strumline.pending_char_events.drain(..));
+    opponent_signals.clear();
+    opponent_signals.extend(state.opponent_strumline.pending_char_events.drain(..));
 
     let paused = matches!(
         state.phase,
@@ -87,10 +85,10 @@ pub fn sync_characters(
             actor.reset_character();
         } else if !paused {
             actor.on_update(elapsed_s, song_pos_ms, step_len_ms, player_holding);
-            for sig in &player_signals {
+            for sig in player_signals.iter() {
                 actor.handle_player_signal(sig, &state.note_kinds);
             }
-            for sig in &opponent_signals {
+            for sig in opponent_signals.iter() {
                 actor.handle_opponent_signal(sig, &state.note_kinds);
             }
             if step_changed {
@@ -173,23 +171,18 @@ fn sync_sheet_part(
     cam_scroll_x: f32,
     cam_scroll_y: f32,
     zoom: f32,
-    sprite: &mut Sprite,
-    tf: &mut Transform,
-    vis: &mut Visibility,
+    sprite: &mut Mut<'_, Sprite>,
+    tf: &mut Mut<'_, Transform>,
+    vis: &mut Mut<'_, Visibility>,
 ) {
     let Some(src) = actor.sources.get(source_idx) else {
-        *vis = Visibility::Hidden;
+        set_visibility(vis, Visibility::Hidden);
         return;
     };
     let frame_idx = actor.controller.current_atlas_index().unwrap_or(0);
-    sprite.image = src.texture.clone();
-    sprite.texture_atlas = Some(TextureAtlas {
-        layout: src.layout.clone(),
-        index: frame_idx,
-    });
-    sprite.color = tint;
-    sprite.flip_x = flip[0];
-    sprite.flip_y = flip[1];
+    set_sprite_atlas(sprite, &src.texture, &src.layout, frame_idx);
+    set_sprite_color(sprite, tint);
+    set_sprite_flip(sprite, flip[0], flip[1]);
 
     let frame_sz = src.frame_sizes.get(&frame_idx).copied().unwrap_or(actor.idle_size);
     let mut world_cx = actor.slot.position[0] + (frame_sz[0] - actor.idle_size[0]) * 0.5 * scale[0] + actor.data.offsets[0];
@@ -205,11 +198,14 @@ fn sync_sheet_part(
 
     let bx = (screen_cx - SCREEN_WIDTH * 0.5) * zoom + foff_x * scale[0] * zoom;
     let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * zoom + foff_y * scale[1] * zoom;
-    tf.translation = Vec3::new(bx, by, stage_layer_z(actor.slot.layer, 0));
-    tf.scale = Vec3::new(scale[0] * zoom, scale[1] * zoom, 1.0);
     let rot = if actor.controller.current_frame_rotated() { -FRAC_PI_2 } else { 0.0 };
-    tf.rotation = Quat::from_rotation_z(rot);
-    *vis = if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden };
+    set_transform_full(
+        tf,
+        Vec3::new(bx, by, stage_layer_z(actor.slot.layer, 0)),
+        Vec3::new(scale[0] * zoom, scale[1] * zoom, 1.0),
+        Quat::from_rotation_z(rot),
+    );
+    set_visibility(vis, if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -245,7 +241,7 @@ fn sync_composite_parts(
             continue;
         };
         let Some(piece) = pieces.get(i) else {
-            *vis = Visibility::Hidden;
+            set_visibility(&mut vis, Visibility::Hidden);
             continue;
         };
         let (w, h) = upright_size(piece);
@@ -271,18 +267,16 @@ fn sync_composite_parts(
         let sy = m01.hypot(m11);
         let rot = c0y.atan2(c0x);
 
-        sprite.image = src.texture.clone();
-        sprite.texture_atlas = Some(TextureAtlas {
-            layout: src.layout.clone(),
-            index: piece.sprite_index,
-        });
-        sprite.color = tint;
-        sprite.flip_x = p_flip_x;
-        sprite.flip_y = false;
-        tf.translation = Vec3::new(bevy_fx + lx, bevy_fy + ly, stage_layer_z(actor.slot.layer, i));
-        tf.rotation = Quat::from_rotation_z(rot);
-        tf.scale = Vec3::new(sx * scale[0] * zoom, sy * scale[1] * zoom, 1.0);
-        *vis = if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden };
+        set_sprite_atlas(&mut sprite, &src.texture, &src.layout, piece.sprite_index);
+        set_sprite_color(&mut sprite, tint);
+        set_sprite_flip(&mut sprite, p_flip_x, false);
+        set_transform_full(
+            &mut tf,
+            Vec3::new(bevy_fx + lx, bevy_fy + ly, stage_layer_z(actor.slot.layer, i)),
+            Vec3::new(sx * scale[0] * zoom, sy * scale[1] * zoom, 1.0),
+            Quat::from_rotation_z(rot),
+        );
+        set_visibility(&mut vis, if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden });
     }
 }
 
@@ -292,7 +286,7 @@ fn hide_entities(
 ) {
     for &ent in entities {
         if let Ok((_, _, mut vis)) = parts.get_mut(ent) {
-            *vis = Visibility::Hidden;
+            set_visibility(&mut vis, Visibility::Hidden);
         }
     }
 }
