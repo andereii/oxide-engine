@@ -7,7 +7,7 @@ use oxin_app::resolve_assets_dir;
 use crate::utils::constants::{CONFIRM_HOLD_TIME_S, COUNTDOWN_VOLUME};
 
 use super::direction::NoteDirection;
-use super::skin_schema::NoteskinFileRaw;
+use super::skin_schema::{NoteskinFileRaw, PopupSkinConfig};
 
 #[derive(Debug, Clone)]
 pub struct StrumAnimNames {
@@ -61,8 +61,10 @@ pub struct NoteStyle {
     pub hold_cover_enabled: bool,
     pub hold_cover_scale: f32,
     pub hold_cover_alpha: f32,
+    pub hold_cover_fps: f32,
     pub hold_cover_offset: [f32; 2],
     pub hold_cover_dirs: [HoldCoverDirStyle; 4],
+    pub popup: PopupSkinConfig,
     pub miss_sounds: Vec<String>,
     pub miss_volume: f32,
     pub countdown_sounds: [Option<String>; 4],
@@ -135,8 +137,10 @@ impl NoteStyle {
             hold_cover_enabled: true,
             hold_cover_scale: 1.0,
             hold_cover_alpha: 1.0,
+            hold_cover_fps: 24.0,
             hold_cover_offset: [13.0, 75.0],
             hold_cover_dirs,
+            popup: PopupSkinConfig::fallback_funkin(),
             miss_sounds: vec![
                 "miss-note-1.ogg".to_string(),
                 "miss-note-2.ogg".to_string(),
@@ -233,6 +237,7 @@ impl NoteStyle {
             style.hold_cover_enabled = true;
             style.hold_cover_scale = hc.scale;
             style.hold_cover_alpha = hc.alpha;
+            style.hold_cover_fps = hc.frames.max(1.0);
             style.hold_cover_offset = hc.offset;
             for (i, dir) in dirs.iter().enumerate() {
                 if let Some(d) = hc.directions.get(*dir) {
@@ -254,11 +259,14 @@ impl NoteStyle {
             }
             style.miss_volume = misses.sounds.volume;
         }
-        if let Some(cd) = parsed.ui.and_then(|u| u.countdown) {
-            for (idx, step) in [cd.three, cd.two, cd.one, cd.go].into_iter().enumerate() {
-                if let Some(audio) = step.and_then(|s| s.audio) {
-                    style.countdown_sounds[idx] = audio.path.or(audio.asset_path);
-                    style.countdown_volume = audio.volume;
+        if let Some(ui) = parsed.ui {
+            style.popup.apply_ui(&ui);
+            if let Some(cd) = ui.countdown {
+                for (idx, step) in [cd.three, cd.two, cd.one, cd.go].into_iter().enumerate() {
+                    if let Some(audio) = step.and_then(|s| s.audio) {
+                        style.countdown_sounds[idx] = audio.path.or(audio.asset_path);
+                        style.countdown_volume = audio.volume;
+                    }
                 }
             }
         }

@@ -3,6 +3,7 @@ use bevy::prelude::KeyCode;
 use crate::utils::constants::HEALTH_MISS_BONUS;
 
 use super::super::judgement::{Judgement, judge_note, score_note};
+use super::super::popups::PopupEvent;
 use super::super::scene::PlayState;
 use super::super::types::PreciseInputEvent;
 use super::direction::NoteDirection;
@@ -263,6 +264,8 @@ impl PlayState {
         if scoreable {
             self.tallies.total_notes_hit += 1;
             self.apply_score(score, judgement, judgement.health_change(), is_combo_break);
+            let combo = (self.tallies.combo >= 10).then_some(self.tallies.combo);
+            self.pending_popups.push(PopupEvent { judgement: Some(judgement), combo });
         }
     }
 }

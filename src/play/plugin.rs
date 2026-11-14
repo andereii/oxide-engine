@@ -9,6 +9,7 @@ use super::notes::effects::{spawn_effect_pools, sync_note_effects};
 use super::notes::render_sync::sync_arrow_visuals;
 use super::notes::visuals::{load_noteskin_assets, spawn_strumline_and_pools};
 use super::playlist::PlayStatePlaylist;
+use super::popups::{load_popup_assets, sync_popups};
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart};
 use super::types::{PauseMode, PlayPhase, PlayStateParams, SongChart};
@@ -82,6 +83,7 @@ impl Plugin for PlayPlugin {
                     tick_play_state,
                     sync_arrow_visuals,
                     sync_note_effects,
+                    sync_popups,
                     sync_hud_text,
                 )
                     .chain(),
@@ -112,6 +114,7 @@ fn setup_play_scene(
     }
 
     if !state.critical_failure {
+        commands.insert_resource(load_popup_assets(&state.player_strumline.note_style, &asset_server));
         audio.load_for_chart(&mut commands, &asset_server, &state.chart, state.playback_rate);
         match load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts) {
             Ok(skin_assets) => {

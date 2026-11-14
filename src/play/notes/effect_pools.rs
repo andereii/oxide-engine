@@ -6,14 +6,20 @@ use crate::utils::constants::{KEY_COUNT, NOTE_SPLASH_CAP};
 use super::effects::{HoldCoverPhase, HoldCoverVisual, NoteSplashVisual};
 use super::visuals::{AnimClipFrames, NoteskinAssets};
 
-fn add_clip(anim: &mut AnimationController, name: &str, clip: &AnimClipFrames, looped: bool) {
+fn add_clip(
+    anim: &mut AnimationController,
+    name: &str,
+    clip: &AnimClipFrames,
+    fps: f32,
+    looped: bool,
+) {
     if !clip.indices.is_empty() {
         anim.add_anim_frames(
             name,
             clip.indices.clone(),
             clip.offsets.clone(),
             clip.rotated.clone(),
-            24.0,
+            fps,
             looped,
         );
     }
@@ -65,10 +71,11 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
                 .or_else(|| start_f.indices.first())
                 .copied()
                 .unwrap_or(0);
+            let fps = style.hold_cover_fps.max(1.0);
             let mut anim = AnimationController::default();
-            add_clip(&mut anim, "start", start_f, false);
-            add_clip(&mut anim, "hold", hold_f, true);
-            add_clip(&mut anim, "end", end_f, false);
+            add_clip(&mut anim, "start", start_f, fps, false);
+            add_clip(&mut anim, "hold", hold_f, fps, true);
+            add_clip(&mut anim, "end", end_f, fps, false);
             let mut sprite = Sprite::from_atlas_image(
                 tex.clone(),
                 TextureAtlas {
@@ -92,3 +99,4 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
         }
     }
 }
+

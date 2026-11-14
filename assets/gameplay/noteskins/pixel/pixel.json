@@ -86,6 +86,7 @@
     "holdCovers": {
       "scale": 6.0,
       "alpha": 1.0,
+      "frames": 24,
       "Offset": [29, -4],
       "directions": {
         "left": {

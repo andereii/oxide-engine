@@ -178,6 +178,12 @@ impl PlayState {
         self.song_score += score;
         self.health = (self.health + health_change).clamp(HEALTH_MIN, HEALTH_MAX);
         if is_combo_break {
+            if self.tallies.combo >= 10 && matches!(judgement, Judgement::Miss) {
+                self.pending_popups.push(crate::play::popups::PopupEvent {
+                    judgement: None,
+                    combo: Some(0),
+                });
+            }
             self.tallies.combo = 0;
         } else {
             self.tallies.combo += 1;

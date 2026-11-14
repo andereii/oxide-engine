@@ -11,6 +11,7 @@ use crate::utils::constants::{
 use super::judgement::Tallies;
 use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
+use super::popups::PopupEvent;
 use super::types::{
     CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent,
     SongChart, SongEventData,
@@ -57,6 +58,7 @@ pub struct PlayState {
     pub countdown_timer_s: f64,
     pub pending_countdown_step: Option<usize>,
     pub pending_miss_sfx: bool,
+    pub pending_popups: Vec<PopupEvent>,
     pub score_text: String,
     pub status_message: String,
 }
@@ -111,6 +113,7 @@ impl PlayState {
             countdown_timer_s: 0.0,
             pending_countdown_step: None,
             pending_miss_sfx: false,
+            pending_popups: Vec::new(),
             score_text: String::new(),
             status_message: String::new(),
         };
@@ -214,6 +217,7 @@ impl PlayState {
         self.tallies = Tallies::default();
         self.input_press_queue.clear();
         self.input_release_queue.clear();
+        self.pending_popups.clear();
         self.cancel_all_camera_tweens();
         self.cancel_scroll_speed_tweens();
         self.reset_camera(true, true, true);
