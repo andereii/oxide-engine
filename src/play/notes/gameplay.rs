@@ -116,7 +116,9 @@ impl PlayState {
         }
         for (i, triggered) in confirm_lanes.into_iter().enumerate() {
             if triggered {
-                self.opponent_strumline.play_confirm(super::direction::NoteDirection::from_index(i));
+                if let Some(dir) = super::direction::NoteDirection::from_index(i) {
+                    self.opponent_strumline.play_confirm(dir);
+                }
             }
         }
 
