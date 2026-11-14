@@ -11,6 +11,7 @@ pub struct SustainGeometry {
     pub body_height_px: f32,
     pub end_x_offset: f32,
     pub end_y: f32,
+    pub end_height_px: f32,
     pub alpha: f32,
     pub flip_y: bool,
 }
@@ -32,6 +33,7 @@ pub fn compute_sustain_geometry(
         body_height_px: 0.0,
         end_x_offset: style.sustains_end_offset[0],
         end_y: -900.0,
+        end_height_px: 0.0,
         alpha: style.sustains_alpha,
         flip_y: strum.is_downscroll,
     };
@@ -62,9 +64,9 @@ pub fn compute_sustain_geometry(
         return hidden;
     }
 
-    let end_clip_factor = if style.is_pixel { 1.0 } else { 0.9 };
-    let end_px = end_raw_h * style.sustains_scale * end_clip_factor;
-    let body_px = (total_px - end_px).max(1.0);
+    let rendered_end_px = end_raw_h * style.sustains_scale;
+    let body_px = (total_px - rendered_end_px).max(0.0);
+    let end_height_px = if body_px > 0.5 { rendered_end_px } else { total_px.min(rendered_end_px).max(1.0) };
     let sign = if strum.is_downscroll { 1.0 } else { -1.0 };
 
     let start_y = if note.hold_hit && !note.hold_dropped {
@@ -81,8 +83,8 @@ pub fn compute_sustain_geometry(
 
     let body_y = start_y + sign * (body_px * 0.5);
     let body_end_edge = start_y + sign * body_px;
-    let gap_pull = -sign * style.sustains_end_offset[1];
-    let end_y = body_end_edge + sign * (end_px * 0.5) + gap_pull;
+    let anti_seam = if !style.is_pixel && body_px > 0.5 { -sign * 0.5 } else { 0.0 };
+    let end_y = body_end_edge + sign * (end_height_px * 0.5) + anti_seam + sign * style.sustains_end_offset[1];
 
     let min_vis = body_y.min(end_y);
     let max_vis = body_y.max(end_y);
@@ -102,6 +104,7 @@ pub fn compute_sustain_geometry(
         body_height_px: body_px,
         end_x_offset: style.sustains_end_offset[0],
         end_y,
+        end_height_px,
         alpha,
         flip_y: strum.is_downscroll,
     }

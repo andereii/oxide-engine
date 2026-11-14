@@ -36,7 +36,7 @@
       "path": "notes.png",
       "scale": 0.7,
       "alpha": 1.0,
-      "Offset": [25, 25],
+      "Offset": [0, 0],
       "animations": {
         "left": "noteLeft",
         "down": "noteDown",
@@ -50,8 +50,7 @@
       "alpha": 0.9,
       "Offset": [-2, 0],
       "OffsetHit": [0, 0],
-      "endOffset": [0, -6],
-      "endOffset": [0, 6],
+      "endOffset": [0, 0],
       "animations": {
         "left": {
           "body": "purple hold piece",

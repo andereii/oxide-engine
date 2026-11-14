@@ -97,7 +97,8 @@ pub fn spawn_strumline_and_pools(
                     Transform::from_xyz(0.0, -900.0, 1.0).with_scale(Vec3::splat(style.sustains_scale)),
                     Visibility::Hidden,
                     SustainEndVisual {
-                        is_player, lane: 0, assigned_idx: None, assigned_id: 0, end_raw_h,
+                        is_player, lane: 0, assigned_idx: None, assigned_id: 0,
+                        end_raw_w: body_raw_w, end_raw_h,
                     },
                 ));
             }
@@ -137,3 +138,4 @@ fn spawn_receptors(
         ));
     }
 }
+

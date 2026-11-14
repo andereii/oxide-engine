@@ -78,7 +78,7 @@ fn apply_body_geom(
     visibility: &mut Visibility,
 ) {
     let geom = compute_sustain_geometry(note, strum, style, vis_pos, vis.end_raw_h);
-    if !geom.visible {
+    if !geom.visible || geom.body_height_px <= 0.5 {
         *visibility = Visibility::Hidden;
         return;
     }
@@ -141,10 +141,11 @@ pub(super) fn sync_sustain_end_pool(
         };
         if let Ok((_, mut vis, mut sprite, mut transform, mut visibility)) = ends.get_mut(entity) {
             let lane = note.lane.index();
-            let (_, end_idx, _, end_h) = sustain_indices[lane];
+            let (_, end_idx, raw_w, end_h) = sustain_indices[lane];
             vis.assigned_idx = Some(idx);
             vis.assigned_id = note.data.id;
             vis.lane = lane;
+            vis.end_raw_w = raw_w;
             vis.end_raw_h = end_h;
             if let Some(atlas) = sprite.texture_atlas.as_mut() {
                 atlas.index = end_idx;
@@ -165,7 +166,7 @@ fn apply_end_geom(
     visibility: &mut Visibility,
 ) {
     let geom = compute_sustain_geometry(note, strum, style, vis_pos, vis.end_raw_h);
-    if !geom.visible {
+    if !geom.visible || geom.body_height_px <= 0.5 {
         *visibility = Visibility::Hidden;
         return;
     }
@@ -175,4 +176,13 @@ fn apply_end_geom(
     transform.translation.y = geom.end_y;
     sprite.flip_y = geom.flip_y;
     sprite.color = Color::srgba(1.0, 1.0, 1.0, geom.alpha);
+    sprite.custom_size = if geom.end_height_px + 0.5 < vis.end_raw_h * style.sustains_scale {
+        Some(Vec2::new(
+            vis.end_raw_w,
+            (geom.end_height_px / style.sustains_scale.max(0.01)).max(1.0),
+        ))
+    } else {
+        None
+    };
 }
+

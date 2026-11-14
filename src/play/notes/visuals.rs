@@ -1,3 +1,4 @@
+use bevy::math::URect;
 use bevy::prelude::*;
 
 use crate::animations::SparrowAtlas;
@@ -36,6 +37,7 @@ pub struct SustainEndVisual {
     pub lane: usize,
     pub assigned_idx: Option<usize>,
     pub assigned_id: usize,
+    pub end_raw_w: f32,
     pub end_raw_h: f32,
 }
 
@@ -144,18 +146,39 @@ fn load_sustains(
     let Ok(xml) = SparrowAtlas::from_file(style.disk_xml(&style.sustains_path)) else {
         return (None, None, [(0, 0, 52.0, 44.0); 4]);
     };
-    let (layout_data, map) = xml.build_layout();
-    let layout = layouts.add(layout_data);
+    let (_, map) = xml.build_layout();
+    let mut max_x = xml.width.max(1);
+    let mut max_y = xml.height.max(1);
+    for f in &xml.frames {
+        max_x = max_x.max(f.x + f.width);
+        max_y = max_y.max(f.y + f.height);
+    }
+    let mut trimmed_layout = TextureAtlasLayout::new_empty(UVec2::new(max_x, max_y));
     let tex = asset_server.load(style.asset_path(&style.sustains_path));
     let mut s_idx = [(0usize, 0usize, 52.0f32, 44.0f32); 4];
     for i in 0..KEY_COUNT {
         let anim = &style.sustain_anims[i];
-        let body = xml.find_prefix_indices(&map, &anim.body).first().copied().unwrap_or(0);
-        let end = xml.find_prefix_indices(&map, &anim.end).first().copied().unwrap_or(body);
-        let body_w = xml.frames.get(body).map(|f| f.width as f32).unwrap_or(52.0);
-        let end_h = xml.frames.get(end).map(|f| f.height as f32).unwrap_or(44.0);
-        s_idx[i] = (body, end, body_w, end_h);
+        let b_raw = xml.find_prefix_indices(&map, &anim.body).first().copied().unwrap_or(0);
+        let e_raw = xml.find_prefix_indices(&map, &anim.end).first().copied().unwrap_or(b_raw);
+        let bf = &xml.frames[b_raw];
+        let ef = &xml.frames[e_raw];
+        let b_trim = if style.is_pixel { 0 } else { (bf.frame_y.max(0) as u32 + 2).min(bf.height / 3) };
+        let e_top_trim = if style.is_pixel { 0 } else { (ef.frame_y.max(0) as u32 + 1).min(ef.height / 3) };
+        let body_idx = trimmed_layout.add_texture(URect::new(
+            bf.x,
+            bf.y + b_trim,
+            bf.x + bf.width,
+            bf.y + bf.height - b_trim,
+        ));
+        let end_idx = trimmed_layout.add_texture(URect::new(
+            ef.x,
+            ef.y + e_top_trim,
+            ef.x + ef.width,
+            ef.y + ef.height,
+        ));
+        s_idx[i] = (body_idx, end_idx, bf.width as f32, (ef.height - e_top_trim) as f32);
     }
+    let layout = layouts.add(trimmed_layout);
     (Some(tex), Some(layout), s_idx)
 }
 
