@@ -48,10 +48,6 @@ struct StageCharacterSlotRaw {
     #[serde(rename = "camera_Offset", alias = "cameraOffsets", alias = "cameraOffset")]
     camera_offset: Option<[f32; 2]>,
     flip: [bool; 2],
-    #[serde(rename = "flipX", alias = "flip_x")]
-    flip_x: bool,
-    #[serde(rename = "flipY", alias = "flip_y")]
-    flip_y: bool,
     #[serde(rename = "scrollFactor", alias = "scroll", deserialize_with = "de_scalar_or_vec2")]
     scroll_factor: [f32; 2],
 }
@@ -66,8 +62,6 @@ impl Default for StageCharacterSlotRaw {
             position: [0.0, 0.0],
             camera_offset: None,
             flip: [false, false],
-            flip_x: false,
-            flip_y: false,
             scroll_factor: [1.0, 1.0],
         }
     }
@@ -82,7 +76,7 @@ impl StageCharacterSlotRaw {
             opacity: self.opacity.clamp(0.0, 1.0),
             position: self.position,
             camera_offset: self.camera_offset.unwrap_or(default_cam_offset),
-            flip: [self.flip[0] || self.flip_x, self.flip[1] || self.flip_y],
+            flip: self.flip,
             scroll_factor: self.scroll_factor,
         }
     }
@@ -107,10 +101,6 @@ struct StagePropRaw {
     opacity: f32,
     position: [f32; 2],
     flip: [bool; 2],
-    #[serde(rename = "flipX", alias = "flip_x")]
-    flip_x: bool,
-    #[serde(rename = "flipY", alias = "flip_y")]
-    flip_y: bool,
     #[serde(rename = "scrollFactor", alias = "scroll", deserialize_with = "de_scalar_or_vec2")]
     scroll_factor: [f32; 2],
     angle: f32,
@@ -137,8 +127,6 @@ impl Default for StagePropRaw {
             opacity: 1.0,
             position: [0.0, 0.0],
             flip: [false, false],
-            flip_x: false,
-            flip_y: false,
             scroll_factor: [1.0, 1.0],
             angle: 0.0,
             color: "#FFFFFF".to_string(),
@@ -167,7 +155,7 @@ impl StagePropRaw {
             visible: self.visible,
             opacity: self.opacity.clamp(0.0, 1.0),
             position: self.position,
-            flip: [self.flip[0] || self.flip_x, self.flip[1] || self.flip_y],
+            flip: self.flip,
             scroll_factor: self.scroll_factor,
             angle: self.angle,
             color: self.color,

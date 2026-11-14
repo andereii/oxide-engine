@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 
-pub use super::effect_pools::spawn_effect_pools;
 use crate::play::notes::render::{AnimClipFrames, NoteskinAssets};
 use crate::play::notes::strum::HoldCoverCmd;
 

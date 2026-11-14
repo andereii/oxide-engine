@@ -16,11 +16,7 @@ pub struct BaseAnimationData {
     pub asset_path: Option<String>,
     pub offsets: [f32; 2],
     pub looped: bool,
-    #[serde(rename = "flipX", alias = "flip_x")]
-    pub flip_x: bool,
-    #[serde(rename = "flipY", alias = "flip_y")]
-    pub flip_y: bool,
-    pub flip: Option<[bool; 2]>,
+    pub flip: [bool; 2],
     #[serde(rename = "frameRate", alias = "fps")]
     pub frame_rate: f32,
     #[serde(rename = "frameIndices", alias = "indices")]
@@ -39,21 +35,12 @@ impl Default for BaseAnimationData {
             asset_path: None,
             offsets: [0.0, 0.0],
             looped: false,
-            flip_x: false,
-            flip_y: false,
-            flip: None,
+            flip: [false, false],
             frame_rate: 24.0,
             frame_indices: Vec::new(),
             anim_type: "framelabel".to_string(),
             render_type: String::new(),
         }
-    }
-}
-
-impl BaseAnimationData {
-    pub fn resolved_flip(&self) -> [bool; 2] {
-        let f = self.flip.unwrap_or([false, false]);
-        [f[0] || self.flip_x, f[1] || self.flip_y]
     }
 }
 
@@ -86,7 +73,7 @@ pub fn add_sparrow_animation(
     let fps = if anim.frame_rate > 0.0 { anim.frame_rate } else { 24.0 };
     controller.add_anim_frames(&anim.name, frames, offsets, rotated, fps, anim.looped);
     controller.set_offset(&anim.name, anim.offsets);
-    controller.set_flip(&anim.name, anim.resolved_flip());
+    controller.set_flip(&anim.name, anim.flip);
     true
 }
 
@@ -160,7 +147,7 @@ pub fn add_animate_atlas_animations(
         };
         controller.add_anim_frames(&anim.name, frames, offsets, rotated, fps, anim.looped);
         controller.set_offset(&anim.name, anim.offsets);
-        controller.set_flip(&anim.name, anim.resolved_flip());
+        controller.set_flip(&anim.name, anim.flip);
     }
 }
 

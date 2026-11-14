@@ -7,7 +7,8 @@ use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
-use super::loader::{StagePropKind, StageResource, parse_hex_color};
+use super::loader::{StagePropKind, StageResource};
+use super::paths::parse_hex_color;
 use super::schema::StageCoordMode;
 
 #[derive(Component)]
