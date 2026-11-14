@@ -5,6 +5,6 @@ pub mod schema;
 pub mod spawn;
 pub mod sync;
 
-pub use loader::{CharactersResource, load_characters_resource};
+pub use loader::load_characters_resource;
 pub use spawn::spawn_characters;
 pub use sync::{CharacterSyncState, sync_characters};

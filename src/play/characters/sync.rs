@@ -74,7 +74,7 @@ pub fn sync_characters(
         if actor.data.is_pixel && !actor.sampler_applied {
             let mut all_ready = true;
             for src in &actor.sources {
-                if let Some(img) = images.get_mut(&src.texture) {
+                if let Some(mut img) = images.get_mut(&src.texture) {
                     img.sampler = ImageSampler::nearest();
                 } else {
                     all_ready = false;
