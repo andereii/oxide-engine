@@ -57,6 +57,7 @@ pub struct ReceptorState {
     pub anim_state: ReceptorAnimState,
     pub confirm_hold_timer_s: f64,
     pub confirm_finished: bool,
+    pub anim_gen: u64,
     pub y_offset: f32,
     pub alpha: f32,
     pub fade_tween: Option<ArrowFadeTween>,
@@ -69,6 +70,7 @@ impl ReceptorState {
             anim_state: ReceptorAnimState::Static,
             confirm_hold_timer_s: -1.0,
             confirm_finished: false,
+            anim_gen: 1,
             y_offset: 0.0,
             alpha: 1.0,
             fade_tween: None,
@@ -76,12 +78,18 @@ impl ReceptorState {
     }
 
     pub fn play_static(&mut self) {
+        if self.anim_state != ReceptorAnimState::Static {
+            self.anim_gen = self.anim_gen.wrapping_add(1);
+        }
         self.anim_state = ReceptorAnimState::Static;
         self.confirm_hold_timer_s = -1.0;
         self.confirm_finished = false;
     }
 
     pub fn play_press(&mut self) {
+        if self.anim_state != ReceptorAnimState::Press {
+            self.anim_gen = self.anim_gen.wrapping_add(1);
+        }
         self.anim_state = ReceptorAnimState::Press;
         self.confirm_hold_timer_s = -1.0;
         self.confirm_finished = false;
@@ -91,6 +99,7 @@ impl ReceptorState {
         self.anim_state = ReceptorAnimState::Confirm;
         self.confirm_finished = false;
         self.confirm_hold_timer_s = if self.is_player { -1.0 } else { 0.0 };
+        self.anim_gen = self.anim_gen.wrapping_add(1);
     }
 
     pub fn hold_confirm(&mut self) {
@@ -101,10 +110,12 @@ impl ReceptorState {
             if self.confirm_finished {
                 self.confirm_hold_timer_s = -1.0;
                 self.anim_state = ReceptorAnimState::ConfirmHold;
+                self.anim_gen = self.anim_gen.wrapping_add(1);
             }
         } else {
             self.anim_state = ReceptorAnimState::Confirm;
             self.confirm_finished = false;
+            self.anim_gen = self.anim_gen.wrapping_add(1);
         }
     }
 
@@ -180,3 +191,4 @@ impl ReceptorState {
         }
     }
 }
+

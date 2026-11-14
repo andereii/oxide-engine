@@ -30,7 +30,7 @@ pub fn sync_arrow_visuals(
     skin_assets: Option<Res<NoteskinAssets>>,
     mut scratch: Local<PoolSyncScratch>,
     mut receptors: Query<(
-        &ReceptorVisual,
+        &mut ReceptorVisual,
         &mut Sprite,
         &mut Transform,
         &mut AnimationController,
@@ -111,13 +111,13 @@ fn sync_receptors(
     state: &mut PlayState,
     style: &NoteStyle,
     receptors: &mut Query<(
-        &ReceptorVisual,
+        &mut ReceptorVisual,
         &mut Sprite,
         &mut Transform,
         &mut AnimationController,
     )>,
 ) {
-    for (rec, mut sprite, mut transform, mut anim) in receptors.iter_mut() {
+    for (mut rec, mut sprite, mut transform, mut anim) in receptors.iter_mut() {
         let strum = if rec.is_player {
             &mut state.player_strumline
         } else {
@@ -132,11 +132,18 @@ fn sync_receptors(
         transform.scale = Vec3::splat(style.strum_scale * strum.strumline_scale);
         sprite.color = Color::srgba(1.0, 1.0, 1.0, style.strum_alpha * rec_state.alpha);
 
-        match rec_state.anim_state {
-            ReceptorAnimState::Confirm => anim.play("confirm", false, false, 0),
-            ReceptorAnimState::ConfirmHold => anim.play("confirm-hold", false, false, 0),
-            ReceptorAnimState::Press => anim.play("press", false, false, 0),
-            ReceptorAnimState::Static => anim.play("static", false, false, 0),
+        if rec.last_anim_gen != rec_state.anim_gen {
+            rec.last_anim_gen = rec_state.anim_gen;
+            let anim_name = match rec_state.anim_state {
+                ReceptorAnimState::Confirm => "confirm",
+                ReceptorAnimState::ConfirmHold => "confirm-hold",
+                ReceptorAnimState::Press => "press",
+                ReceptorAnimState::Static => "static",
+            };
+            anim.play(anim_name, true, false, 0);
+            if let (Some(atlas), Some(idx)) = (sprite.texture_atlas.as_mut(), anim.current_atlas_index()) {
+                atlas.index = idx;
+            }
         }
     }
 }

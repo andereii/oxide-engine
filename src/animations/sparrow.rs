@@ -16,6 +16,24 @@ pub struct SparrowFrame {
     pub frame_y: i32,
     pub frame_width: u32,
     pub frame_height: u32,
+    pub rotated: bool,
+}
+
+impl SparrowFrame {
+    /// Returns the `[cx, cy]` offset (in Bevy Y-up unscaled pixels) from the
+    /// virtual `frame_width x frame_height` canvas center to the trimmed rect center.
+    pub fn trim_center_offset(&self) -> [f32; 2] {
+        let (unrot_w, unrot_h) = if self.rotated {
+            (self.height as f32, self.width as f32)
+        } else {
+            (self.width as f32, self.height as f32)
+        };
+        let fw = (self.frame_width as f32).max(unrot_w);
+        let fh = (self.frame_height as f32).max(unrot_h);
+        let cx = (-self.frame_x as f32 + unrot_w * 0.5) - fw * 0.5;
+        let cy = fh * 0.5 - (-self.frame_y as f32 + unrot_h * 0.5);
+        [cx, cy]
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -59,6 +77,7 @@ impl SparrowAtlas {
                 let frame_height = extract_attr(trimmed, "frameHeight")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(height);
+                let rotated = extract_attr(trimmed, "rotated").is_some_and(|v| v == "true");
 
                 if width > 0 && height > 0 {
                     atlas.frames.push(SparrowFrame {
@@ -71,6 +90,7 @@ impl SparrowAtlas {
                         frame_y,
                         frame_width,
                         frame_height,
+                        rotated,
                     });
                 }
             }
@@ -94,16 +114,16 @@ impl SparrowAtlas {
         (layout, indices)
     }
 
-    pub fn find_prefix_indices(
-        &self,
+    fn find_prefix_matched<'a>(
+        &'a self,
         indices: &HashMap<String, usize>,
         prefix: &str,
-    ) -> Vec<usize> {
-        let mut matched: Vec<(&str, usize)> = self
+    ) -> Vec<(&'a SparrowFrame, usize)> {
+        let mut matched: Vec<(&SparrowFrame, usize)> = self
             .frames
             .iter()
             .filter(|f| f.name.starts_with(prefix))
-            .filter_map(|f| indices.get(&f.name).copied().map(|idx| (f.name.as_str(), idx)))
+            .filter_map(|f| indices.get(&f.name).copied().map(|idx| (f, idx)))
             .collect();
         if matched.is_empty() {
             let norm_prefix = collapse_spaces(prefix);
@@ -111,11 +131,39 @@ impl SparrowAtlas {
                 .frames
                 .iter()
                 .filter(|f| collapse_spaces(&f.name).starts_with(&norm_prefix))
-                .filter_map(|f| indices.get(&f.name).copied().map(|idx| (f.name.as_str(), idx)))
+                .filter_map(|f| indices.get(&f.name).copied().map(|idx| (f, idx)))
                 .collect();
         }
-        matched.sort_by(|a, b| a.0.cmp(b.0));
-        matched.into_iter().map(|(_, idx)| idx).collect()
+        matched.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+        matched
+    }
+
+    pub fn find_prefix_indices(
+        &self,
+        indices: &HashMap<String, usize>,
+        prefix: &str,
+    ) -> Vec<usize> {
+        self.find_prefix_matched(indices, prefix)
+            .into_iter()
+            .map(|(_, idx)| idx)
+            .collect()
+    }
+
+    pub fn find_prefix_frames(
+        &self,
+        indices: &HashMap<String, usize>,
+        prefix: &str,
+    ) -> (Vec<usize>, Vec<[f32; 2]>, Vec<bool>) {
+        let matched = self.find_prefix_matched(indices, prefix);
+        let mut frame_indices = Vec::with_capacity(matched.len());
+        let mut offsets = Vec::with_capacity(matched.len());
+        let mut rotated = Vec::with_capacity(matched.len());
+        for (frame, idx) in matched {
+            frame_indices.push(idx);
+            offsets.push(frame.trim_center_offset());
+            rotated.push(frame.rotated);
+        }
+        (frame_indices, offsets, rotated)
     }
 }
 

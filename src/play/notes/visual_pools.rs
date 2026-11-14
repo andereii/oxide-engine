@@ -134,7 +134,11 @@ fn spawn_receptors(
             Transform::from_xyz(strum.lane_x(lane), rec_y, 0.0)
                 .with_scale(Vec3::splat(style.strum_scale * strum.strumline_scale)),
             anim,
-            ReceptorVisual { lane, is_player },
+            ReceptorVisual {
+                lane,
+                is_player,
+                last_anim_gen: 0,
+            },
         ));
     }
 }

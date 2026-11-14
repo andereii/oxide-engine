@@ -6,6 +6,8 @@ use bevy::prelude::Component;
 pub struct AnimationDef {
     pub name: String,
     pub frames: Vec<usize>,
+    pub frame_offsets: Vec<[f32; 2]>,
+    pub frame_rotated: Vec<bool>,
     pub fps: f32,
     pub looped: bool,
     pub offset: [f32; 2],
@@ -48,12 +50,26 @@ impl AnimationController {
         fps: f32,
         looped: bool,
     ) {
+        self.add_anim_frames(name, frames, Vec::new(), Vec::new(), fps, looped);
+    }
+
+    pub fn add_anim_frames(
+        &mut self,
+        name: impl Into<String>,
+        frames: Vec<usize>,
+        frame_offsets: Vec<[f32; 2]>,
+        frame_rotated: Vec<bool>,
+        fps: f32,
+        looped: bool,
+    ) {
         let name = name.into();
         self.animations.insert(
             name.clone(),
             AnimationDef {
                 name,
                 frames,
+                frame_offsets,
+                frame_rotated,
                 fps: fps.max(1.0),
                 looped,
                 offset: [0.0, 0.0],
@@ -75,7 +91,7 @@ impl AnimationController {
         let Some(anim) = self.animations.get(name) else {
             return;
         };
-        if !force && self.current.as_deref() == Some(name) && !self.finished {
+        if !force && self.current.as_deref() == Some(name) {
             return;
         }
         let len = anim.frames.len();
@@ -122,7 +138,7 @@ impl AnimationController {
         let Some(anim) = self.animations.get(name) else {
             return;
         };
-        if self.finished || anim.frames.len() <= 1 || dt <= 0.0 {
+        if self.finished || dt <= 0.0 || anim.frames.is_empty() || (anim.frames.len() == 1 && anim.looped) {
             return;
         }
 
@@ -169,6 +185,26 @@ impl AnimationController {
             .get(name)
             .map(|a| a.offset)
             .unwrap_or([0.0, 0.0])
+    }
+
+    pub fn current_frame_offset(&self) -> [f32; 2] {
+        let Some(name) = self.current.as_deref() else {
+            return [0.0, 0.0];
+        };
+        self.animations
+            .get(name)
+            .and_then(|a| a.frame_offsets.get(self.frame_cursor).copied())
+            .unwrap_or([0.0, 0.0])
+    }
+
+    pub fn current_frame_rotated(&self) -> bool {
+        let Some(name) = self.current.as_deref() else {
+            return false;
+        };
+        self.animations
+            .get(name)
+            .and_then(|a| a.frame_rotated.get(self.frame_cursor).copied())
+            .unwrap_or(false)
     }
 }
 

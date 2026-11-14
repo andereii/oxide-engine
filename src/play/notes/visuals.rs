@@ -11,6 +11,28 @@ pub use super::visual_pools::spawn_strumline_and_pools;
 pub struct ReceptorVisual {
     pub lane: usize,
     pub is_player: bool,
+    pub last_anim_gen: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AnimClipFrames {
+    pub indices: Vec<usize>,
+    pub offsets: Vec<[f32; 2]>,
+    pub rotated: Vec<bool>,
+}
+
+impl AnimClipFrames {
+    fn from_sparrow((indices, offsets, rotated): (Vec<usize>, Vec<[f32; 2]>, Vec<bool>)) -> Self {
+        Self { indices, offsets, rotated }
+    }
+
+    fn first_only(&self) -> Self {
+        Self {
+            indices: self.indices.first().copied().into_iter().collect(),
+            offsets: self.offsets.first().copied().into_iter().collect(),
+            rotated: self.rotated.first().copied().into_iter().collect(),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -55,10 +77,10 @@ pub struct NoteskinAssets {
     pub sustain_indices: [(usize, usize, f32, f32); 4],
     pub splash_texture: Option<Handle<Image>>,
     pub splash_layout: Option<Handle<TextureAtlasLayout>>,
-    pub splash_variants: [Vec<Vec<usize>>; 4],
+    pub splash_variants: [Vec<AnimClipFrames>; 4],
     pub hold_cover_textures: [Option<Handle<Image>>; 4],
     pub hold_cover_layouts: [Option<Handle<TextureAtlasLayout>>; 4],
-    pub hold_cover_frames: [(Vec<usize>, Vec<usize>, Vec<usize>); 4],
+    pub hold_cover_frames: [(AnimClipFrames, AnimClipFrames, AnimClipFrames); 4],
 }
 
 pub fn load_noteskin_assets(
@@ -189,7 +211,7 @@ fn load_splashes(
 ) -> (
     Option<Handle<Image>>,
     Option<Handle<TextureAtlasLayout>>,
-    [Vec<Vec<usize>>; 4],
+    [Vec<AnimClipFrames>; 4],
 ) {
     if !style.splash_enabled {
         return (None, None, Default::default());
@@ -200,12 +222,12 @@ fn load_splashes(
     let (layout_data, map) = xml.build_layout();
     let layout = layouts.add(layout_data);
     let tex = asset_server.load(style.asset_path(&style.splash_path));
-    let mut variants: [Vec<Vec<usize>>; 4] = Default::default();
+    let mut variants: [Vec<AnimClipFrames>; 4] = Default::default();
     for i in 0..KEY_COUNT {
         for prefix in &style.splash_anims[i] {
-            let frames = xml.find_prefix_indices(&map, prefix);
-            if !frames.is_empty() {
-                variants[i].push(frames);
+            let clip = AnimClipFrames::from_sparrow(xml.find_prefix_frames(&map, prefix));
+            if !clip.indices.is_empty() {
+                variants[i].push(clip);
             }
         }
     }
@@ -219,11 +241,11 @@ fn load_hold_covers(
 ) -> (
     [Option<Handle<Image>>; 4],
     [Option<Handle<TextureAtlasLayout>>; 4],
-    [(Vec<usize>, Vec<usize>, Vec<usize>); 4],
+    [(AnimClipFrames, AnimClipFrames, AnimClipFrames); 4],
 ) {
     let mut textures: [Option<Handle<Image>>; 4] = Default::default();
     let mut layout_handles: [Option<Handle<TextureAtlasLayout>>; 4] = Default::default();
-    let mut frames: [(Vec<usize>, Vec<usize>, Vec<usize>); 4] = Default::default();
+    let mut frames: [(AnimClipFrames, AnimClipFrames, AnimClipFrames); 4] = Default::default();
     if !style.hold_cover_enabled {
         return (textures, layout_handles, frames);
     }
@@ -235,12 +257,10 @@ fn load_hold_covers(
         let (layout_data, map) = xml.build_layout();
         layout_handles[i] = Some(layouts.add(layout_data));
         textures[i] = Some(asset_server.load(style.asset_path(&dir_cfg.path)));
-        let hold = xml.find_prefix_indices(&map, &dir_cfg.hold_anim);
-        let mut start = xml.find_prefix_indices(&map, &dir_cfg.start_anim);
-        if start.is_empty() {
-            start = hold.first().copied().into_iter().collect();
-        }
-        let end = xml.find_prefix_indices(&map, &dir_cfg.end_anim);
+        let hold = AnimClipFrames::from_sparrow(xml.find_prefix_frames(&map, &dir_cfg.hold_anim));
+        let raw_start = AnimClipFrames::from_sparrow(xml.find_prefix_frames(&map, &dir_cfg.start_anim));
+        let start = if raw_start.indices.is_empty() { hold.first_only() } else { raw_start };
+        let end = AnimClipFrames::from_sparrow(xml.find_prefix_frames(&map, &dir_cfg.end_anim));
         frames[i] = (start, hold, end);
     }
     (textures, layout_handles, frames)

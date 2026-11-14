@@ -74,7 +74,7 @@
       "path": "note-splashes.png",
       "scale": 0.9,
       "alpha": 1,
-      "Offset": [50, 50],
+      "Offset": [0, 0],
       "animations": {
         "left": ["note impact 1 purple", "note impact 2 purple"],
         "down": ["note impact 1 blue", "note impact 2 blue"],
@@ -85,7 +85,7 @@
     "holdCovers": {
       "scale": 1,
       "alpha": 1.0,
-      "Offset": [13, 75],
+      "Offset": [-11, 56],
       "directions": {
         "left": {
           "path": "hold-cover-left.png",

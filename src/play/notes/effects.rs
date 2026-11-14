@@ -1,15 +1,18 @@
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
-use crate::utils::constants::{KEY_COUNT, NOTE_SPLASH_CAP};
 
+pub use super::effect_pools::spawn_effect_pools;
 use super::strumline::HoldCoverCmd;
-use super::visuals::NoteskinAssets;
+use super::visuals::{AnimClipFrames, NoteskinAssets};
 
 #[derive(Component)]
 pub struct NoteSplashVisual {
     pub is_player: bool,
+    pub lane: usize,
     pub active: bool,
     pub rng_state: u32,
 }
@@ -29,85 +32,12 @@ pub struct HoldCoverVisual {
     pub phase: HoldCoverPhase,
 }
 
-pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
-    let style = &assets.style;
-    if let (Some(tex), Some(layout)) = (&assets.splash_texture, &assets.splash_layout) {
-        let default_idx = assets.splash_variants[0]
-            .first()
-            .and_then(|v| v.first().copied())
-            .unwrap_or(0);
-        for slot in 0..NOTE_SPLASH_CAP {
-            let mut sprite = Sprite::from_atlas_image(
-                tex.clone(),
-                TextureAtlas {
-                    layout: layout.clone(),
-                    index: default_idx,
-                },
-            );
-            sprite.color = Color::srgba(1.0, 1.0, 1.0, style.splash_alpha);
-            commands.spawn((
-                sprite,
-                Transform::from_xyz(0.0, -900.0, 3.0).with_scale(Vec3::splat(style.splash_scale)),
-                Visibility::Hidden,
-                AnimationController::default(),
-                NoteSplashVisual {
-                    is_player: true,
-                    active: false,
-                    rng_state: 0x9E37_79B9_u32.wrapping_add(slot as u32 * 7919),
-                },
-            ));
-        }
-    }
-
-    for is_player in [false, true] {
-        for lane in 0..KEY_COUNT {
-            let (Some(tex), Some(layout)) = (
-                &assets.hold_cover_textures[lane],
-                &assets.hold_cover_layouts[lane],
-            ) else {
-                continue;
-            };
-            let (start_f, hold_f, end_f) = &assets.hold_cover_frames[lane];
-            let init_idx = hold_f.first().or_else(|| start_f.first()).copied().unwrap_or(0);
-            let mut anim = AnimationController::default();
-            if !start_f.is_empty() {
-                anim.add_anim("start", start_f.clone(), 24.0, false);
-            }
-            if !hold_f.is_empty() {
-                anim.add_anim("hold", hold_f.clone(), 24.0, true);
-            }
-            if !end_f.is_empty() {
-                anim.add_anim("end", end_f.clone(), 24.0, false);
-            }
-            let mut sprite = Sprite::from_atlas_image(
-                tex.clone(),
-                TextureAtlas {
-                    layout: layout.clone(),
-                    index: init_idx,
-                },
-            );
-            sprite.color = Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha);
-            commands.spawn((
-                sprite,
-                Transform::from_xyz(0.0, -900.0, 3.0)
-                    .with_scale(Vec3::splat(style.hold_cover_scale)),
-                Visibility::Hidden,
-                anim,
-                HoldCoverVisual {
-                    is_player,
-                    lane,
-                    phase: HoldCoverPhase::Hidden,
-                },
-            ));
-        }
-    }
-}
-
 pub fn sync_note_effects(
     mut state: ResMut<PlayState>,
     skin_assets: Option<Res<NoteskinAssets>>,
     mut splashes: Query<(
         &mut NoteSplashVisual,
+        &mut Sprite,
         &mut AnimationController,
         &mut Transform,
         &mut Visibility,
@@ -115,6 +45,7 @@ pub fn sync_note_effects(
     mut covers: Query<
         (
             &mut HoldCoverVisual,
+            &mut Sprite,
             &mut AnimationController,
             &mut Transform,
             &mut Visibility,
@@ -127,7 +58,7 @@ pub fn sync_note_effects(
     };
     let style = &assets.style;
 
-    for (mut vis, anim, _, mut visibility) in &mut splashes {
+    for (mut vis, _, anim, _, mut visibility) in &mut splashes {
         if vis.active && anim.finished {
             vis.active = false;
             *visibility = Visibility::Hidden;
@@ -135,88 +66,120 @@ pub fn sync_note_effects(
     }
 
     let pending_splashes: Vec<_> = state.player_strumline.pending_splashes.drain(..).collect();
-    for dir in pending_splashes {
-        let variants = &assets.splash_variants[dir.index()];
-        if variants.is_empty() {
-            continue;
-        }
-        let target_x = state.player_strumline.lane_x(dir.index()) + style.splash_offset[0] * 0.2;
-        let target_y = state.player_strumline.receptor_y();
-
-        let mut picked = false;
-        for (mut vis, mut anim, mut transform, mut visibility) in &mut splashes {
-            if vis.active {
+    if style.splash_enabled && state.player_strumline.show_notesplash {
+        for dir in pending_splashes {
+            let variants = &assets.splash_variants[dir.index()];
+            if variants.is_empty() {
                 continue;
             }
-            activate_splash(&mut vis, &mut anim, &mut transform, &mut visibility, variants, target_x, target_y);
-            picked = true;
-            break;
-        }
-        if !picked && let Some((mut vis, mut anim, mut transform, mut visibility)) = splashes.iter_mut().next() {
-            activate_splash(&mut vis, &mut anim, &mut transform, &mut visibility, variants, target_x, target_y);
+            let mut picked = false;
+            for (mut vis, mut sprite, mut anim, _, mut visibility) in &mut splashes {
+                if !vis.active {
+                    activate_splash(&mut vis, &mut sprite, &mut anim, &mut visibility, dir.index(), variants);
+                    picked = true;
+                    break;
+                }
+            }
+            if !picked && let Some((mut vis, mut sprite, mut anim, _, mut visibility)) = splashes.iter_mut().next() {
+                activate_splash(&mut vis, &mut sprite, &mut anim, &mut visibility, dir.index(), variants);
+            }
         }
     }
 
-    for (mut cov, mut anim, mut transform, mut visibility) in &mut covers {
-        let strum = if cov.is_player {
-            &state.player_strumline
-        } else {
-            &state.opponent_strumline
-        };
-        transform.translation.x = strum.lane_x(cov.lane) + style.hold_cover_offset[0] - 12.0;
-        transform.translation.y = strum.receptor_y() + strum.receptors[cov.lane].y_offset;
+    let p_strum = &state.player_strumline;
+    for (vis, mut sprite, anim, mut transform, mut visibility) in &mut splashes {
+        if !vis.active {
+            continue;
+        }
+        if !style.splash_enabled || !p_strum.show_notesplash {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, style.splash_alpha);
+        apply_frame_transform(
+            &mut transform,
+            &anim,
+            p_strum.lane_x(vis.lane),
+            p_strum.receptor_y(),
+            style.splash_offset,
+            style.splash_scale,
+            p_strum.strumline_scale,
+        );
+    }
+
+    for is_player in [false, true] {
+        let strum = if is_player { &mut state.player_strumline } else { &mut state.opponent_strumline };
+        let allow = style.hold_cover_enabled && strum.show_notesplash;
+        let cmds: Vec<HoldCoverCmd> = strum.pending_hold_covers.drain(..).collect();
+        for cmd in cmds {
+            apply_cover_cmd(is_player, allow, cmd, &mut covers);
+        }
+    }
+
+    for (mut cov, mut sprite, mut anim, mut transform, mut visibility) in &mut covers {
+        let strum = if cov.is_player { &state.player_strumline } else { &state.opponent_strumline };
+        if !style.hold_cover_enabled || !strum.show_notesplash {
+            cov.phase = HoldCoverPhase::Hidden;
+            *visibility = Visibility::Hidden;
+            continue;
+        }
         if cov.phase == HoldCoverPhase::Start && anim.finished {
             cov.phase = HoldCoverPhase::Hold;
             anim.play("hold", true, false, 0);
+            sync_atlas_frame(&mut sprite, &anim);
         } else if cov.phase == HoldCoverPhase::End && anim.finished {
             cov.phase = HoldCoverPhase::Hidden;
             *visibility = Visibility::Hidden;
         }
-    }
-
-    for is_player in [false, true] {
-        let cmds: Vec<HoldCoverCmd> = if is_player {
-            state.player_strumline.pending_hold_covers.drain(..).collect()
-        } else {
-            state.opponent_strumline.pending_hold_covers.drain(..).collect()
-        };
-        for cmd in cmds {
-            apply_cover_cmd(is_player, cmd, &mut covers);
+        if cov.phase == HoldCoverPhase::Hidden {
+            continue;
         }
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha);
+        apply_frame_transform(
+            &mut transform,
+            &anim,
+            strum.lane_x(cov.lane),
+            strum.receptor_y() + strum.receptors[cov.lane].y_offset,
+            style.hold_cover_offset,
+            style.hold_cover_scale,
+            strum.strumline_scale,
+        );
     }
 }
 
 fn activate_splash(
     vis: &mut NoteSplashVisual,
+    sprite: &mut Sprite,
     anim: &mut AnimationController,
-    transform: &mut Transform,
     visibility: &mut Visibility,
-    variants: &[Vec<usize>],
-    x: f32,
-    y: f32,
+    lane: usize,
+    variants: &[AnimClipFrames],
 ) {
     let r1 = xorshift32(&mut vis.rng_state);
     let r2 = xorshift32(&mut vis.rng_state);
     let variant = &variants[(r1 as usize) % variants.len()];
     let fps_delta = (r2 % 5) as f32 - 2.0;
-    anim.add_anim("splash", variant.clone(), (24.0 + fps_delta).max(12.0), false);
+    anim.add_anim_frames(
+        "splash",
+        variant.indices.clone(),
+        variant.offsets.clone(),
+        variant.rotated.clone(),
+        (24.0 + fps_delta).max(12.0),
+        false,
+    );
     anim.play("splash", true, false, 0);
-    transform.translation.x = x;
-    transform.translation.y = y;
+    sync_atlas_frame(sprite, anim);
+    vis.lane = lane;
     vis.active = true;
     *visibility = Visibility::Visible;
 }
 
 fn apply_cover_cmd(
     is_player: bool,
+    allow: bool,
     cmd: HoldCoverCmd,
     covers: &mut Query<
-        (
-            &mut HoldCoverVisual,
-            &mut AnimationController,
-            &mut Transform,
-            &mut Visibility,
-        ),
+        (&mut HoldCoverVisual, &mut Sprite, &mut AnimationController, &mut Transform, &mut Visibility),
         Without<NoteSplashVisual>,
     >,
 ) {
@@ -225,30 +188,56 @@ fn apply_cover_cmd(
         HoldCoverCmd::End(d) => (d, HoldCoverPhase::End),
         HoldCoverCmd::Kill(d) => (d, HoldCoverPhase::Hidden),
     };
-    for (mut cov, mut anim, _, mut visibility) in covers.iter_mut() {
+    for (mut cov, mut sprite, mut anim, _, mut visibility) in covers.iter_mut() {
         if cov.is_player != is_player || cov.lane != dir.index() {
             continue;
         }
         match target_phase {
-            HoldCoverPhase::Start => {
+            HoldCoverPhase::Start if allow => {
                 cov.phase = HoldCoverPhase::Start;
                 anim.play("start", true, false, 0);
+                sync_atlas_frame(&mut sprite, &anim);
                 *visibility = Visibility::Visible;
             }
-            HoldCoverPhase::End => {
-                if cov.phase != HoldCoverPhase::Hidden {
-                    cov.phase = HoldCoverPhase::End;
-                    anim.play("end", true, false, 0);
-                }
+            HoldCoverPhase::End if allow && cov.phase != HoldCoverPhase::Hidden => {
+                cov.phase = HoldCoverPhase::End;
+                anim.play("end", true, false, 0);
+                sync_atlas_frame(&mut sprite, &anim);
             }
-            HoldCoverPhase::Hidden => {
+            _ => {
                 cov.phase = HoldCoverPhase::Hidden;
                 *visibility = Visibility::Hidden;
             }
-            HoldCoverPhase::Hold => {}
         }
         break;
     }
+}
+
+fn sync_atlas_frame(sprite: &mut Sprite, anim: &AnimationController) {
+    if let (Some(atlas), Some(idx)) = (sprite.texture_atlas.as_mut(), anim.current_atlas_index()) {
+        atlas.index = idx;
+    }
+}
+
+fn apply_frame_transform(
+    transform: &mut Transform,
+    anim: &AnimationController,
+    base_x: f32,
+    base_y: f32,
+    offset: [f32; 2],
+    effect_scale: f32,
+    strum_scale: f32,
+) {
+    let scale = effect_scale * strum_scale;
+    let f_off = anim.current_frame_offset();
+    transform.translation.x = base_x + (offset[0] + f_off[0]) * scale;
+    transform.translation.y = base_y + (-offset[1] + f_off[1]) * scale;
+    transform.rotation = if anim.current_frame_rotated() {
+        Quat::from_rotation_z(-FRAC_PI_2)
+    } else {
+        Quat::IDENTITY
+    };
+    transform.scale = Vec3::splat(scale);
 }
 
 fn xorshift32(state: &mut u32) -> u32 {
@@ -259,3 +248,4 @@ fn xorshift32(state: &mut u32) -> u32 {
     *state = x;
     x
 }
+

@@ -1,4 +1,5 @@
 pub mod direction;
+pub mod effect_pools;
 pub mod effects;
 pub mod gameplay;
 pub mod hold_logic;
