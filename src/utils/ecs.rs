@@ -63,14 +63,17 @@ pub fn set_sprite_color(sprite: &mut Mut<'_, Sprite>, color: Color) {
 
 #[inline]
 pub fn set_sprite_flip(sprite: &mut Mut<'_, Sprite>, flip_x: bool, flip_y: bool) {
-    let cur: &Mut<'_, Sprite> = &*sprite;
-    if cur.flip_x == flip_x && cur.flip_y == flip_y {
+    let (cur_x, cur_y) = {
+        let cur: &Mut<'_, Sprite> = &*sprite;
+        (cur.flip_x, cur.flip_y)
+    };
+    if cur_x == flip_x && cur_y == flip_y {
         return;
     }
-    if cur.flip_x != flip_x {
+    if cur_x != flip_x {
         sprite.flip_x = flip_x;
     }
-    if cur.flip_y != flip_y {
+    if cur_y != flip_y {
         sprite.flip_y = flip_y;
     }
 }
@@ -85,14 +88,17 @@ pub fn set_sprite_custom_size(sprite: &mut Mut<'_, Sprite>, size: Option<Vec2>) 
 
 #[inline]
 pub fn set_transform_pos_scale(tf: &mut Mut<'_, Transform>, translation: Vec3, scale: Vec3) {
-    let cur: &Mut<'_, Transform> = &*tf;
-    if cur.translation == translation && cur.scale == scale {
+    let (cur_t, cur_s) = {
+        let cur: &Mut<'_, Transform> = &*tf;
+        (cur.translation, cur.scale)
+    };
+    if cur_t == translation && cur_s == scale {
         return;
     }
-    if cur.translation != translation {
+    if cur_t != translation {
         tf.translation = translation;
     }
-    if cur.scale != scale {
+    if cur_s != scale {
         tf.scale = scale;
     }
 }
@@ -104,17 +110,20 @@ pub fn set_transform_full(
     scale: Vec3,
     rotation: Quat,
 ) {
-    let cur: &Mut<'_, Transform> = &*tf;
-    if cur.translation == translation && cur.scale == scale && cur.rotation == rotation {
+    let (cur_t, cur_s, cur_r) = {
+        let cur: &Mut<'_, Transform> = &*tf;
+        (cur.translation, cur.scale, cur.rotation)
+    };
+    if cur_t == translation && cur_s == scale && cur_r == rotation {
         return;
     }
-    if cur.translation != translation {
+    if cur_t != translation {
         tf.translation = translation;
     }
-    if cur.scale != scale {
+    if cur_s != scale {
         tf.scale = scale;
     }
-    if cur.rotation != rotation {
+    if cur_r != rotation {
         tf.rotation = rotation;
     }
 }
