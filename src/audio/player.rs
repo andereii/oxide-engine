@@ -155,18 +155,26 @@ impl SongAudioPlayer {
         self.is_paused = false;
         for track in &mut self.tracks {
             let Some(entity) = track.entity else { continue };
-            let Ok(sink) = sinks.get_mut(entity) else {
+            let Ok(mut sink) = sinks.get_mut(entity) else {
                 track.pending = true;
+                track.started = false;
                 continue;
             };
             let target_ms = start_ms - track.offset_ms;
             sink.set_speed(self.playback_rate);
+            let vol = match track.role {
+                TrackRole::Instrumental => (track.base_volume * self.instrumental_volume).clamp(0.0, 1.0),
+                _ => self.voices.role_volume(track.role, track.base_volume),
+            };
+            sink.set_volume(Volume::Linear(vol));
             if target_ms < 0.0 {
                 sink.pause();
                 track.pending = true;
                 track.started = false;
             } else {
-                let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
+                if target_ms > 20.0 {
+                    let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
+                }
                 sink.play();
                 track.pending = false;
                 track.started = true;
@@ -245,9 +253,15 @@ impl SongAudioPlayer {
         for track in &mut self.tracks {
             if track.role == TrackRole::Instrumental && !track.started {
                 if let Some(entity) = track.entity {
-                    if let Ok(sink) = sinks.get(entity) {
-                        let _ = sink.try_seek(Duration::from_secs_f64((master_time_ms - track.offset_ms).max(0.0) / 1000.0));
+                    if let Ok(mut sink) = sinks.get_mut(entity) {
+                        let target_ms = (master_time_ms - track.offset_ms).max(0.0);
+                        if target_ms > 20.0 {
+                            let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
+                        }
                         sink.set_speed(self.playback_rate);
+                        sink.set_volume(Volume::Linear(
+                            (track.base_volume * self.instrumental_volume).clamp(0.0, 1.0),
+                        ));
                         sink.play();
                         track.started = true;
                         track.pending = false;
@@ -255,8 +269,13 @@ impl SongAudioPlayer {
                 }
             }
         }
-        self.voices
-            .update_pending(&mut self.tracks, master_time_ms, true, sinks);
+        self.voices.update_pending(
+            &mut self.tracks,
+            master_time_ms,
+            true,
+            self.playback_rate,
+            sinks,
+        );
     }
 }
 

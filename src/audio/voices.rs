@@ -41,6 +41,7 @@ impl VoicesGroup {
         tracks: &mut [TrackHandle],
         master_time_ms: f64,
         master_playing: bool,
+        playback_rate: f32,
         sinks: &mut Query<&mut AudioSink>,
     ) {
         if !master_playing || !self.needs_voices {
@@ -54,7 +55,10 @@ impl VoicesGroup {
             if target_ms >= 0.0 {
                 if let Some(entity) = track.entity {
                     if let Ok(mut sink) = sinks.get_mut(entity) {
-                        let _ = sink.try_seek(std::time::Duration::from_secs_f64(target_ms / 1000.0));
+                        if target_ms > 20.0 {
+                            let _ = sink.try_seek(std::time::Duration::from_secs_f64(target_ms / 1000.0));
+                        }
+                        sink.set_speed(playback_rate);
                         sink.set_volume(Volume::Linear(self.role_volume(track.role, track.base_volume)));
                         sink.play();
                         track.pending = false;

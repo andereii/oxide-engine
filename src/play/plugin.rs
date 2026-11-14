@@ -84,16 +84,19 @@ fn setup_play_scene(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    state: Res<PlayState>,
+    mut state: ResMut<PlayState>,
     mut audio: ResMut<SongAudioPlayer>,
 ) {
     if !state.critical_failure {
         audio.load_for_chart(&mut commands, &asset_server, &state.chart, state.playback_rate);
-        if let Ok(skin_assets) =
-            load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts)
-        {
-            spawn_strumline_and_notes(&mut commands, &state, &skin_assets);
-            commands.insert_resource(skin_assets);
+        match load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts) {
+            Ok(skin_assets) => {
+                spawn_strumline_and_notes(&mut commands, &state, &skin_assets);
+                commands.insert_resource(skin_assets);
+            }
+            Err(err) => {
+                state.status_message = format!("Noteskin error: {err}");
+            }
         }
     }
 

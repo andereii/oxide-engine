@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bevy::prelude::Resource;
+use oxin_app::resolve_assets_dir;
 use serde::Deserialize;
 
 use crate::utils::constants::{DEFAULT_DIFFICULTY, DEFAULT_VARIATION};
@@ -113,7 +114,10 @@ struct RawChartNote {
 }
 
 pub fn song_root_dir(song_id: &str) -> PathBuf {
-    Path::new("assets").join("gameplay").join("songs").join(song_id)
+    resolve_assets_dir()
+        .join("gameplay")
+        .join("songs")
+        .join(song_id)
 }
 
 pub fn song_asset_path(song_id: &str, file: &str) -> String {

@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::Color;
+use oxin_app::resolve_assets_dir;
 use serde::Deserialize;
 
 use super::direction::NoteDirection;
@@ -127,7 +128,7 @@ impl NoteStyle {
         } else {
             skin_id.trim()
         };
-        let json_path = Path::new("assets")
+        let json_path = resolve_assets_dir()
             .join("gameplay")
             .join("noteskins")
             .join(id)
@@ -191,7 +192,7 @@ impl NoteStyle {
 
     pub fn disk_xml(&self, rel: &str) -> PathBuf {
         let xml_rel = Path::new(rel).with_extension("xml");
-        Path::new("assets")
+        resolve_assets_dir()
             .join("gameplay")
             .join("noteskins")
             .join(&self.id)

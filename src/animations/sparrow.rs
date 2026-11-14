@@ -21,6 +21,8 @@ pub struct SparrowFrame {
 #[derive(Debug, Clone, Default)]
 pub struct SparrowAtlas {
     pub image_path: String,
+    pub width: u32,
+    pub height: u32,
     pub frames: Vec<SparrowFrame>,
 }
 
@@ -39,6 +41,8 @@ impl SparrowAtlas {
                 if let Some(p) = extract_attr(trimmed, "imagePath") {
                     atlas.image_path = p;
                 }
+                atlas.width = extract_attr(trimmed, "width").and_then(|v| v.parse().ok()).unwrap_or(0);
+                atlas.height = extract_attr(trimmed, "height").and_then(|v| v.parse().ok()).unwrap_or(0);
             } else if trimmed.starts_with("SubTexture") {
                 let Some(name) = extract_attr(trimmed, "name") else {
                     continue;
@@ -75,8 +79,8 @@ impl SparrowAtlas {
     }
 
     pub fn build_layout(&self) -> (TextureAtlasLayout, HashMap<String, usize>) {
-        let mut max_x = 1u32;
-        let mut max_y = 1u32;
+        let mut max_x = self.width.max(1);
+        let mut max_y = self.height.max(1);
         for f in &self.frames {
             max_x = max_x.max(f.x + f.width);
             max_y = max_y.max(f.y + f.height);
