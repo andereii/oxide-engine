@@ -23,12 +23,21 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            src
+            crates
+            .github
 
       - name: Install Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@v1
@@ -37,6 +46,8 @@ jobs:
 
       - name: Cache Cargo dependencies and target
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
 
       - name: Build oxide (debug)
         if: ${{ inputs.profile != 'release' }}
