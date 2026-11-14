@@ -5,7 +5,7 @@ use crate::animations::SparrowAtlas;
 use crate::utils::constants::KEY_COUNT;
 
 use super::noteskin::NoteStyle;
-pub use super::visual_pools::{spawn_strumline_and_pools, warm_pool_counts};
+pub use super::visual_pools::spawn_strumline_and_pools;
 
 #[derive(Component)]
 pub struct ReceptorVisual {
