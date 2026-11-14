@@ -4,7 +4,7 @@ use crate::animations::AnimationController;
 use crate::utils::constants::{KEY_COUNT, NOTE_SPLASH_CAP};
 
 use super::effects::{HoldCoverPhase, HoldCoverVisual, NoteSplashVisual};
-use super::visuals::{AnimClipFrames, NoteskinAssets};
+use crate::play::notes::render::{AnimClipFrames, NoteskinAssets};
 
 fn add_clip(
     anim: &mut AnimationController,

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::animations::SparrowAtlas;
 use crate::utils::constants::KEY_COUNT;
 
-use super::noteskin::NoteStyle;
+use crate::play::notes::skin::NoteStyle;
 pub use super::visual_pools::spawn_strumline_and_pools;
 
 #[derive(Component)]

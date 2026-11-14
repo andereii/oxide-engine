@@ -5,11 +5,9 @@ use crate::utils::constants::{
     STRUMLINE_X_OFFSET, STRUMLINE_Y_OFFSET,
 };
 
-use super::direction::NoteDirection;
-use super::note::{ActiveHold, NoteSprite};
-use super::noteskin::NoteStyle;
+use crate::play::notes::data::{ActiveHold, NoteDirection, NoteSprite, ScrollLagState, ScrollVelocityTimeline};
+use crate::play::notes::skin::NoteStyle;
 use super::receptor::{NoteVibrationStatus, NoteVibrationsState, ReceptorAnimState, ReceptorState};
-use super::scroll_velocity::{ScrollLagState, ScrollVelocityTimeline};
 pub use super::strumline_window::VwooshTween;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

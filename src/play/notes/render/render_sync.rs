@@ -3,10 +3,10 @@ use bevy::prelude::*;
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 
-use super::noteskin::NoteStyle;
-use super::receptor::ReceptorAnimState;
+use crate::play::notes::data::NoteSprite;
+use crate::play::notes::skin::NoteStyle;
+use crate::play::notes::strum::{ReceptorAnimState, Strumline};
 use super::render_sync_sustains::{sync_sustain_body_pool, sync_sustain_end_pool};
-use super::strumline::Strumline;
 use super::visuals::{
     NoteVisual, NoteskinAssets, ReceptorVisual, SustainBodyVisual, SustainEndVisual,
 };
@@ -209,7 +209,7 @@ fn apply_note_transform(
     strum: &Strumline,
     style: &NoteStyle,
     vis_pos: f64,
-    note: &super::note::NoteSprite,
+    note: &NoteSprite,
     sprite: &mut Sprite,
     transform: &mut Transform,
     visibility: &mut Visibility,

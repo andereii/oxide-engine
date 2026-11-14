@@ -6,7 +6,7 @@ use oxin_app::resolve_assets_dir;
 
 use crate::utils::constants::{CONFIRM_HOLD_TIME_S, COUNTDOWN_VOLUME};
 
-use super::direction::NoteDirection;
+use crate::play::notes::data::NoteDirection;
 use super::skin_schema::{NoteskinFileRaw, PopupSkinConfig};
 
 #[derive(Debug, Clone)]

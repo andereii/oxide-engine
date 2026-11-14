@@ -6,8 +6,8 @@ use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 
 pub use super::effect_pools::spawn_effect_pools;
-use super::strumline::HoldCoverCmd;
-use super::visuals::{AnimClipFrames, NoteskinAssets};
+use crate::play::notes::render::{AnimClipFrames, NoteskinAssets};
+use crate::play::notes::strum::HoldCoverCmd;
 
 #[derive(Component)]
 pub struct NoteSplashVisual {

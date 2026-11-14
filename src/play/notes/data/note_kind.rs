@@ -95,3 +95,4 @@ impl NoteKindManager {
         self.get(kind_id).and_then(|k| k.note_style_id.as_deref())
     }
 }
+

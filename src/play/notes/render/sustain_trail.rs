@@ -1,8 +1,8 @@
 use crate::utils::constants::{PIXELS_PER_MS, SUSTAIN_MIN_REMAINING_MS, SUSTAIN_MISSED_ALPHA};
 
-use super::note::NoteSprite;
-use super::noteskin::NoteStyle;
-use super::strumline::Strumline;
+use crate::play::notes::data::NoteSprite;
+use crate::play::notes::skin::NoteStyle;
+use crate::play::notes::strum::Strumline;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SustainGeometry {

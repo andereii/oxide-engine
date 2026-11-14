@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
-use super::noteskin::NoteStyle;
+use crate::play::notes::data::NoteSprite;
+use crate::play::notes::skin::NoteStyle;
+use crate::play::notes::strum::Strumline;
 use super::render_sync::PoolSyncScratch;
-use super::strumline::Strumline;
 use super::sustain_trail::compute_sustain_geometry;
 use super::visuals::{NoteVisual, ReceptorVisual, SustainBodyVisual, SustainEndVisual};
 
@@ -71,7 +72,7 @@ fn apply_body_geom(
     strum: &Strumline,
     style: &NoteStyle,
     vis_pos: f64,
-    note: &super::note::NoteSprite,
+    note: &NoteSprite,
     vis: &SustainBodyVisual,
     sprite: &mut Sprite,
     transform: &mut Transform,
@@ -159,7 +160,7 @@ fn apply_end_geom(
     strum: &Strumline,
     style: &NoteStyle,
     vis_pos: f64,
-    note: &super::note::NoteSprite,
+    note: &NoteSprite,
     vis: &SustainEndVisual,
     sprite: &mut Sprite,
     transform: &mut Transform,

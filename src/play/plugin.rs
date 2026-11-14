@@ -6,8 +6,7 @@ use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 
 use super::notes::NoteStyle;
 use super::notes::effects::{spawn_effect_pools, sync_note_effects};
-use super::notes::render_sync::sync_arrow_visuals;
-use super::notes::visuals::{load_noteskin_assets, spawn_strumline_and_pools};
+use super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools, sync_arrow_visuals};
 use super::playlist::PlayStatePlaylist;
 use super::popups::{load_popup_assets, sync_popups};
 use super::scene::PlayState;

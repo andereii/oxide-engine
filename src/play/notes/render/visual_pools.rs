@@ -4,7 +4,7 @@ use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 use crate::utils::constants::{HIT_WINDOW_MS, KEY_COUNT};
 
-use super::strumline::Strumline;
+use crate::play::notes::strum::Strumline;
 use super::visuals::{NoteVisual, NoteskinAssets, ReceptorVisual, SustainBodyVisual, SustainEndVisual};
 
 pub fn warm_pool_counts(strum: &Strumline) -> (usize, usize) {

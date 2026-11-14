@@ -5,11 +5,10 @@ use crate::utils::constants::{
     SCORE_HOLD_BONUS_PER_SECOND, SCORE_HOLD_DROP_PENALTY_PER_SECOND, SUSTAIN_MIN_REMAINING_MS,
 };
 
-use super::super::judgement::{Judgement, miss_score};
-use super::super::scene::PlayState;
-use super::direction::NoteDirection;
-use super::note::{ActiveHold, process_note_window};
-use super::strumline::HoldCoverCmd;
+use crate::play::judgement::{Judgement, miss_score};
+use crate::play::notes::data::{ActiveHold, NoteDirection, process_note_window};
+use crate::play::notes::strum::HoldCoverCmd;
+use crate::play::scene::PlayState;
 
 impl PlayState {
     pub(super) fn process_opponent_notes(&mut self, pos_ms: f64) {

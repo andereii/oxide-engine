@@ -28,6 +28,7 @@ pub struct PopupAssets {
     pub combo_offset: [f32; 2],
     pub is_pixel: bool,
     pub rng_state: u32,
+    pub next_z_step: u32,
 }
 
 #[derive(Component)]
@@ -49,6 +50,7 @@ struct PopupSpawnParams {
     texture: Handle<Image>,
     x: f32,
     y: f32,
+    z: f32,
     scale: f32,
     alpha: f32,
     vx: f32,
@@ -84,6 +86,7 @@ pub fn load_popup_assets(style: &NoteStyle, asset_server: &AssetServer) -> Popup
         combo_offset: style.popup.combo_offset,
         is_pixel: style.is_pixel,
         rng_state: 0xA5A5_5A5A,
+        next_z_step: 0,
     }
 }
 
@@ -112,6 +115,7 @@ pub fn sync_popups(
     }
 
     let dt = time.delta_secs();
+    let mut active_any = false;
     for (mut vis, mut sprite, mut transform, mut visibility) in &mut pool {
         if !vis.active {
             continue;
@@ -127,46 +131,50 @@ pub fn sync_popups(
             if raw_t >= 1.0 {
                 vis.active = false;
                 *visibility = Visibility::Hidden;
+                continue;
             }
         }
+        active_any = true;
     }
 
     let Some(mut assets) = assets_opt else {
         state.pending_popups.clear();
         return;
     };
+    if !active_any {
+        assets.next_z_step = 0;
+    }
     let beat_s = (state.conductor.beat_length_ms() / 1000.0).max(0.1) as f32;
     let events: Vec<PopupEvent> = state.pending_popups.drain(..).collect();
 
     for ev in events {
-        if let Some(j) = ev.judgement {
-            if let Some(idx) = judgement_index(j) {
-                if let Some((tex, scale, alpha, offset)) = assets.ratings[idx].clone() {
-                    let vx = -(rng_u32(&mut assets.rng_state, 0, 10) as f32);
-                    let vy = rng_u32(&mut assets.rng_state, 140, 175) as f32;
-                    spawn_or_reuse(
-                        &mut commands,
-                        &mut pool,
-                        PopupSpawnParams {
-                            kind: PopupKind::Rating(idx),
-                            texture: tex,
-                            x: -33.28 + offset[0],
-                            y: 96.0 - offset[1],
-                            scale,
-                            alpha,
-                            vx,
-                            vy,
-                            accel_y: -550.0,
-                            delay_s: beat_s,
-                            is_pixel: assets.is_pixel,
-                        },
-                    );
-                }
-            }
+        if let Some(idx) = ev.judgement.and_then(judgement_index)
+            && let Some((tex, scale, alpha, offset)) = assets.ratings[idx].clone()
+        {
+            let vx = -(rng_u32(&mut assets.rng_state, 0, 10) as f32);
+            let vy = rng_u32(&mut assets.rng_state, 140, 175) as f32;
+            let z = next_popup_z(&mut assets.next_z_step);
+            spawn_or_reuse(
+                &mut commands,
+                &mut pool,
+                PopupSpawnParams {
+                    kind: PopupKind::Rating(idx),
+                    texture: tex,
+                    x: -33.28 + offset[0],
+                    y: 96.0 - offset[1],
+                    z,
+                    scale,
+                    alpha,
+                    vx,
+                    vy,
+                    accel_y: -550.0,
+                    delay_s: beat_s,
+                    is_pixel: assets.is_pixel,
+                },
+            );
         }
         if let Some(combo) = ev.combo {
-            let digits = split_combo_digits(combo);
-            for (i, digit) in digits.into_iter().enumerate() {
+            for (i, digit) in split_combo_digits(combo).into_iter().enumerate() {
                 let Some(tex) = assets.digits[digit].clone() else {
                     continue;
                 };
@@ -174,6 +182,7 @@ pub fn sync_popups(
                 let vx = rng_f32(&mut assets.rng_state, -5.0, 5.0);
                 let vy = rng_u32(&mut assets.rng_state, 130, 150) as f32;
                 let accel_y = -(rng_u32(&mut assets.rng_state, 250, 300) as f32);
+                let z = next_popup_z(&mut assets.next_z_step);
                 spawn_or_reuse(
                     &mut commands,
                     &mut pool,
@@ -182,6 +191,7 @@ pub fn sync_popups(
                         texture: tex,
                         x: -31.0 - 36.0 * da_loop + assets.combo_offset[0],
                         y: 18.0 - assets.combo_offset[1],
+                        z,
                         scale: assets.combo_scale,
                         alpha: assets.combo_alpha,
                         vx,
@@ -196,24 +206,34 @@ pub fn sync_popups(
     }
 }
 
+fn next_popup_z(step: &mut u32) -> f32 {
+    let z = 4.0 + (*step as f32) * 0.001;
+    *step = step.saturating_add(1);
+    z
+}
+
 fn spawn_or_reuse(
     commands: &mut Commands,
     pool: &mut Query<(&mut PopupVisual, &mut Sprite, &mut Transform, &mut Visibility)>,
     p: PopupSpawnParams,
 ) {
     let color = Color::srgba(1.0, 1.0, 1.0, p.alpha);
-    let tf = Transform::from_xyz(p.x, p.y, 4.0).with_scale(Vec3::splat(p.scale));
+    let tf = Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::splat(p.scale));
+    let next_vis = PopupVisual {
+        kind: p.kind,
+        active: true,
+        vx: p.vx,
+        vy: p.vy,
+        accel_y: p.accel_y,
+        age_s: 0.0,
+        delay_s: p.delay_s,
+        fade_s: 0.2,
+        base_alpha: p.alpha,
+        is_pixel: p.is_pixel,
+    };
     for (mut vis, mut sprite, mut transform, mut visibility) in pool.iter_mut() {
         if !vis.active && vis.kind == p.kind {
-            vis.active = true;
-            vis.vx = p.vx;
-            vis.vy = p.vy;
-            vis.accel_y = p.accel_y;
-            vis.age_s = 0.0;
-            vis.delay_s = p.delay_s;
-            vis.fade_s = 0.2;
-            vis.base_alpha = p.alpha;
-            vis.is_pixel = p.is_pixel;
+            *vis = next_vis;
             sprite.color = color;
             *transform = tf;
             *visibility = Visibility::Visible;
@@ -222,23 +242,7 @@ fn spawn_or_reuse(
     }
     let mut sprite = Sprite::from_image(p.texture);
     sprite.color = color;
-    commands.spawn((
-        sprite,
-        tf,
-        Visibility::Visible,
-        PopupVisual {
-            kind: p.kind,
-            active: true,
-            vx: p.vx,
-            vy: p.vy,
-            accel_y: p.accel_y,
-            age_s: 0.0,
-            delay_s: p.delay_s,
-            fade_s: 0.2,
-            base_alpha: p.alpha,
-            is_pixel: p.is_pixel,
-        },
-    ));
+    commands.spawn((sprite, tf, Visibility::Visible, next_vis));
 }
 
 fn judgement_index(j: Judgement) -> Option<usize> {
@@ -281,3 +285,4 @@ fn rng_f32(state: &mut u32, min: f32, max: f32) -> f32 {
     let t = (xorshift32(state) & 0xFFFF) as f32 / 65535.0;
     min + (max - min) * t
 }
+

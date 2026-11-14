@@ -2,13 +2,13 @@ use bevy::prelude::KeyCode;
 
 use crate::utils::constants::HEALTH_MISS_BONUS;
 
-use super::super::judgement::{Judgement, judge_note, score_note};
-use super::super::popups::PopupEvent;
-use super::super::scene::PlayState;
-use super::super::types::PreciseInputEvent;
-use super::direction::NoteDirection;
-use super::note::{ActiveHold, NoteSprite, process_note_window};
-use super::scroll_velocity::ScrollVelocityTimeline;
+use crate::play::judgement::{Judgement, judge_note, score_note};
+use crate::play::notes::data::{
+    ActiveHold, NoteDirection, NoteSprite, ScrollVelocityTimeline, process_note_window,
+};
+use crate::play::popups::PopupEvent;
+use crate::play::scene::PlayState;
+use crate::play::types::PreciseInputEvent;
 
 impl PlayState {
     pub fn generate_song(&mut self) {
