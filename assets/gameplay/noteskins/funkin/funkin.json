@@ -83,10 +83,10 @@
       }
     },
     "holdCovers": {
-      "scale": 0.9,
+      "scale": 1,
       "alpha": 1.0,
       "frames": 24,
-      "Offset": [-11, 56],
+      "Offset": [-11, 48],
       "directions": {
         "left": {
           "path": "hold-cover-left.png",
@@ -127,9 +127,9 @@
     "sounds": {
       "volume": 0.8,
       "path": [
-        "miss-note-1.ogg",
-        "miss-note-2.ogg",
-        "miss-note-3.ogg"
+        "misses/miss-note-1.ogg",
+        "misses/miss-note-2.ogg",
+        "misses/miss-note-3.ogg"
       ]
     }
   },

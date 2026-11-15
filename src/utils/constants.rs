@@ -1,4 +1,4 @@
-pub const DEFAULT_DIFFICULTY: &str = "normal";
+pub const DEFAULT_DIFFICULTY: &str = "hard";
 pub const DEFAULT_VARIATION: &str = "default";
 pub const DEFAULT_BPM: f64 = 100.0;
 pub const STEPS_PER_BEAT: i32 = 4;

@@ -13,6 +13,8 @@ struct StageFileRaw {
     name: Option<String>,
     #[serde(rename = "cameraZoom", alias = "camera_zoom")]
     camera_zoom: Option<f32>,
+    #[serde(rename = "coordMode", alias = "coord_mode")]
+    coord_mode: Option<String>,
     stage: Vec<serde_json::Value>,
     props: Vec<StagePropRaw>,
     characters: Option<StageCharactersRaw>,
@@ -181,10 +183,13 @@ pub(crate) fn parse_stage_raw(stage_id: &str, raw_json: &str) -> Result<StageDat
         .map_err(|e| format!("failed to parse stage '{stage_id}': {e}"))?;
 
     let mut characters = raw.characters.map(convert_characters).unwrap_or_default();
-    let coord_mode = if !raw.stage.is_empty() {
-        StageCoordMode::Center
-    } else {
-        StageCoordMode::TopLeft
+    let coord_mode = match raw.coord_mode.as_deref().map(str::trim) {
+        Some(m) if m.eq_ignore_ascii_case("topLeft") || m.eq_ignore_ascii_case("top_left") => {
+            StageCoordMode::TopLeft
+        }
+        Some(m) if m.eq_ignore_ascii_case("center") => StageCoordMode::Center,
+        _ if !raw.stage.is_empty() => StageCoordMode::Center,
+        _ => StageCoordMode::TopLeft,
     };
 
     let mut props = Vec::new();

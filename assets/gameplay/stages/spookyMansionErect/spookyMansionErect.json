@@ -1,21 +1,114 @@
 {
-  "props": [
+  "stage": [
+    {
+      "characters": {
+        "spectator": {
+          "layer": 100,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            821.5,
+            800
+          ],
+          "camera_Offset": [
+            0,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            382,
+            865
+          ],
+          "camera_Offset": [
+            150,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            1250,
+            885
+          ],
+          "camera_Offset": [
+            -100,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
+    },
     {
       "name": "solid",
-      "assetPath": "#242336",
-      "position": [-300, -500],
-      "scroll": [1, 1],
-      "scale": [2400, 2000],
-      "zIndex": -500
+      "layer": -500,
+      "scale": [
+        2400,
+        2000
+      ],
+      "file": "#242336",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -300,
+        -500
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
       "name": "bgTrees",
-      "assetPath": "gameplay/stages/spookyMansionErect/bg-trees",
-      "zIndex": -101,
-      "position": [200, 50],
-      "scale": [1, 1],
-      "scroll": [0.8, 0.8],
-      "danceEvery": 0,
+      "layer": -101,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/spookyMansionErect/bg-trees",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        200,
+        50
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.8,
+        0.8
+      ],
+      "startingAnimation": "bgtrees",
       "animations": [
         {
           "name": "bgtrees",
@@ -23,56 +116,106 @@
           "looped": true,
           "frameRate": 5
         }
-      ],
-      "startingAnimation": "bgtrees"
+      ]
     },
     {
       "name": "bgDark",
-      "assetPath": "gameplay/stages/spookyMansionErect/bg-dark",
-      "zIndex": -100,
-      "position": [-560, -220],
-      "scale": [1, 1],
-      "scroll": [1, 1]
+      "layer": -100,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/spookyMansionErect/bg-dark",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -560,
+        -220
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
       "name": "bgLight",
-      "assetPath": "gameplay/stages/spookyMansionErect/bg-light",
-      "zIndex": -99,
-      "position": [-560, -220],
-      "scale": [1, 1],
-      "scroll": [1, 1]
+      "layer": -99,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/spookyMansionErect/bg-light",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -560,
+        -220
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
       "name": "stairsDark",
-      "assetPath": "gameplay/stages/spookyMansionErect/stairs-dark",
-      "zIndex": 400,
-      "position": [966, -225],
-      "scale": [1, 1],
-      "scroll": [1, 1]
+      "layer": 400,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/spookyMansionErect/stairs-dark",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        966,
+        -225
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
       "name": "stairsLight",
-      "assetPath": "gameplay/stages/spookyMansionErect/stairs-light",
-      "zIndex": 401,
-      "position": [966, -225],
-      "scale": [1, 1],
-      "scroll": [1, 1]
+      "layer": 401,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/spookyMansionErect/stairs-light",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        966,
+        -225
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     }
   ],
+  "name": "Spooky Mansion [Erect]",
   "cameraZoom": 1.0,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 200,
-      "position": [1250, 885],
-      "cameraOffsets": [-100, -100]
-    },
-    "gf": { "zIndex": 100, "position": [821.5, 800], "cameraOffsets": [0, 0] },
-    "dad": {
-      "zIndex": 200,
-      "position": [382, 865],
-      "cameraOffsets": [150, -100]
-    }
-  },
-  "name": "Spooky Mansion [Erect]"
+  "coordMode": "topLeft"
 }

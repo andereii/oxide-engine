@@ -170,8 +170,8 @@ pub struct SongChart {
 impl Default for SongChart {
     fn default() -> Self {
         Self {
-            song_id: "bopeebo".to_string(),
-            song_name: "Bopeebo".to_string(),
+            song_id: "blammed".to_string(),
+            song_name: "Blammed".to_string(),
             difficulty: DEFAULT_DIFFICULTY.to_string(),
             variation: DEFAULT_VARIATION.to_string(),
             bpm: 100.0,

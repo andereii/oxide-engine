@@ -4,32 +4,12 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Color;
 use oxin_app::resolve_assets_dir;
 
-use crate::utils::constants::{CONFIRM_HOLD_TIME_S, COUNTDOWN_VOLUME};
-
 use crate::play::notes::data::NoteDirection;
-use super::skin_schema::{NoteskinFileRaw, PopupSkinConfig};
-
-#[derive(Debug, Clone)]
-pub struct StrumAnimNames {
-    pub static_anim: String,
-    pub press_anim: String,
-    pub confirm_anim: String,
-    pub confirm_hold_anim: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SustainAnimNames {
-    pub body: String,
-    pub end: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct HoldCoverDirStyle {
-    pub path: String,
-    pub start_anim: String,
-    pub hold_anim: String,
-    pub end_anim: String,
-}
+use super::defaults::fallback_funkin_style;
+pub use super::skin_schema::{
+    HoldCoverDirStyle, NoteskinFileRaw, PopupSkinConfig, StrumAnimNames, SustainAnimNames,
+    UiSpriteStyle,
+};
 
 #[derive(Debug, Clone)]
 pub struct NoteStyle {
@@ -65,9 +45,13 @@ pub struct NoteStyle {
     pub hold_cover_offset: [f32; 2],
     pub hold_cover_dirs: [HoldCoverDirStyle; 4],
     pub popup: PopupSkinConfig,
+    pub health_bar: UiSpriteStyle,
     pub miss_sounds: Vec<String>,
+    pub has_custom_miss_sounds: bool,
     pub miss_volume: f32,
     pub countdown_sounds: [Option<String>; 4],
+    pub countdown_volumes: [f32; 4],
+    pub countdown_images: [UiSpriteStyle; 4],
     pub countdown_volume: f32,
     pub confirm_duration_s: f64,
     pub press_duration_s: f64,
@@ -81,82 +65,7 @@ impl Default for NoteStyle {
 
 impl NoteStyle {
     pub fn fallback_funkin() -> Self {
-        let strum_anims = ["Left", "Down", "Up", "Right"].map(|d| StrumAnimNames {
-            static_anim: format!("static{d}"),
-            press_anim: format!("press{d}"),
-            confirm_anim: format!("confirm{d}"),
-            confirm_hold_anim: format!("confirmHold{d}"),
-        });
-        let note_anims = ["noteLeft", "noteDown", "noteUp", "noteRight"].map(str::to_string);
-        let sustain_anims = ["purple", "blue", "green", "red"].map(|c| SustainAnimNames {
-            body: format!("{c} hold piece"),
-            end: format!("{c} hold end"),
-        });
-        let splash_anims = ["purple", "blue", "green", "red"].map(|c| {
-            vec![format!("note impact 1 {c}"), format!("note impact 2 {c}")]
-        });
-        let hold_cover_dirs = [
-            ("left", "Purple"),
-            ("down", "Blue"),
-            ("up", "Green"),
-            ("right", "Red"),
-        ]
-        .map(|(dir, color)| HoldCoverDirStyle {
-            path: format!("hold-cover-{dir}.png"),
-            start_anim: format!("holdCoverStart{color}"),
-            hold_anim: format!("holdCover{color}"),
-            end_anim: format!("holdCoverEnd{color}"),
-        });
-
-        Self {
-            id: "funkin".to_string(),
-            is_pixel: false,
-            strum_path: "note-strumline.png".to_string(),
-            strum_scale: 0.7,
-            strum_alpha: 1.0,
-            strum_offsets: [[0.0, 0.0], [30.0, 30.0], [0.0, 0.0]],
-            strum_anims,
-            notes_path: "notes.png".to_string(),
-            notes_scale: 0.7,
-            notes_alpha: 1.0,
-            notes_offset: [25.0, 25.0],
-            note_anims,
-            sustains_path: "NOTE_hold_assets.png".to_string(),
-            sustains_scale: 0.7,
-            sustains_alpha: 0.9,
-            sustains_offset: [-2.0, 0.0],
-            sustains_offset_hit: [0.0, 0.0],
-            sustains_end_offset: [0.0, 6.0],
-            sustain_anims,
-            splash_enabled: true,
-            splash_path: "note-splashes.png".to_string(),
-            splash_scale: 0.9,
-            splash_alpha: 1.0,
-            splash_offset: [50.0, 50.0],
-            splash_anims,
-            hold_cover_enabled: true,
-            hold_cover_scale: 1.0,
-            hold_cover_alpha: 1.0,
-            hold_cover_fps: 24.0,
-            hold_cover_offset: [13.0, 75.0],
-            hold_cover_dirs,
-            popup: PopupSkinConfig::fallback_funkin(),
-            miss_sounds: vec![
-                "miss-note-1.ogg".to_string(),
-                "miss-note-2.ogg".to_string(),
-                "miss-note-3.ogg".to_string(),
-            ],
-            miss_volume: 0.8,
-            countdown_sounds: [
-                Some("countdown/sound/intro-three.ogg".to_string()),
-                Some("countdown/sound/intro-two.ogg".to_string()),
-                Some("countdown/sound/intro-one.ogg".to_string()),
-                Some("countdown/sound/intro-go.ogg".to_string()),
-            ],
-            countdown_volume: COUNTDOWN_VOLUME,
-            confirm_duration_s: CONFIRM_HOLD_TIME_S,
-            press_duration_s: 0.10,
-        }
+        fallback_funkin_style()
     }
 
     pub fn load(skin_id: &str) -> Result<Self, String> {
@@ -256,6 +165,7 @@ impl NoteStyle {
         if let Some(misses) = parsed.misses {
             if !misses.sounds.path.is_empty() {
                 style.miss_sounds = misses.sounds.path;
+                style.has_custom_miss_sounds = true;
             }
             style.miss_volume = misses.sounds.volume;
         }
@@ -263,12 +173,33 @@ impl NoteStyle {
             style.popup.apply_ui(&ui);
             if let Some(cd) = ui.countdown {
                 for (idx, step) in [cd.three, cd.two, cd.one, cd.go].into_iter().enumerate() {
-                    if let Some(audio) = step.and_then(|s| s.audio) {
+                    let Some(step) = step else { continue };
+                    if let Some(audio) = step.audio {
                         style.countdown_sounds[idx] = audio.path.or(audio.asset_path);
+                        style.countdown_volumes[idx] = audio.volume;
                         style.countdown_volume = audio.volume;
+                    }
+                    if let Some(img) = step.image {
+                        style.countdown_images[idx] = UiSpriteStyle {
+                            path: img.path,
+                            scale: img.scale,
+                            alpha: img.alpha,
+                            offset: img.offset,
+                        };
                     }
                 }
             }
+            style.health_bar = ui.bars.and_then(|b| b.health).map_or_else(
+                UiSpriteStyle::default,
+                |h| UiSpriteStyle {
+                    path: h.path.filter(|p| !p.trim().is_empty()),
+                    scale: h.scale,
+                    alpha: h.alpha,
+                    offset: h.offset,
+                },
+            );
+        } else {
+            style.health_bar.path = None;
         }
         Ok(style)
     }
@@ -286,8 +217,25 @@ impl NoteStyle {
             .join(xml_rel)
     }
 
-    pub fn miss_sound_asset(rel: &str) -> String {
-        format!("gameplay/general/sounds/{rel}")
+    pub fn miss_sound_assets(&self) -> Vec<String> {
+        if self.has_custom_miss_sounds {
+            self.miss_sounds.iter().map(|rel| self.asset_path(rel)).collect()
+        } else {
+            self.miss_sounds
+                .iter()
+                .map(|rel| format!("gameplay/noteskins/funkin/{rel}"))
+                .collect()
+        }
+    }
+
+    pub fn health_bar_asset(&self) -> String {
+        if let Some(rel) = &self.health_bar.path {
+            let candidate = self.asset_path(rel);
+            if resolve_assets_dir().join(&candidate).exists() {
+                return candidate;
+            }
+        }
+        "gameplay/noteskins/funkin/health-bar.png".to_string()
     }
 
     pub fn lane_color(&self, dir: NoteDirection) -> Color {

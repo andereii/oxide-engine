@@ -1,0 +1,62 @@
+{
+  "songName": "Lit Up",
+  "base": {
+    "stage": "phillyStreets",
+    "scrollSpeed": 1,
+    "lanes": 4,
+    "characters": {
+      "players": [
+        "pico-playable"
+      ],
+      "opponents": [
+        "darnell"
+      ],
+      "spectator": [
+        "nene"
+      ]
+    },
+    "credits": [
+      "Artist: Kawai Sprite",
+      "Charter: Jenny Crowe + Spazkid"
+    ],
+    "skins": {
+      "hud": "funkin",
+      "ui": "funkin"
+    },
+    "audio": {
+      "bpm": 176,
+      "needsVoices": true,
+      "multiVocal": true,
+      "instrumental": {
+        "inst": {
+          "file": "Inst.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      },
+      "vocals": {
+        "player": {
+          "file": "Voices-pico.ogg",
+          "offset": 0,
+          "vol": 1
+        },
+        "opponent": {
+          "file": "Voices-darnell.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      }
+    }
+  },
+  "difficulties": {
+    "easy": {
+      "scrollSpeed": 2.4
+    },
+    "normal": {
+      "scrollSpeed": 2.4
+    },
+    "hard": {
+      "scrollSpeed": 2.4
+    }
+  }
+}

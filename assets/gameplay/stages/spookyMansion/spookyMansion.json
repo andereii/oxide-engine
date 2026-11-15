@@ -1,16 +1,90 @@
 {
-  "props": [
+  "stage": [
     {
-      "danceEvery": 0,
-      "zIndex": -100,
-      "position": [-395, -505],
-      "scale": [1, 1],
-      "animType": "animateatlas",
+      "characters": {
+        "spectator": {
+          "layer": 100,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            751.5,
+            787
+          ],
+          "camera_Offset": [
+            0,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            382,
+            865
+          ],
+          "camera_Offset": [
+            150,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            989.5,
+            885
+          ],
+          "camera_Offset": [
+            -100,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
+    },
+    {
       "name": "halloweenBG",
-      "isPixel": false,
+      "layer": -100,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/spookyMansion/halloween-bg",
+      "animation": "animateatlas",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -395,
+        -505
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ],
       "startingAnimation": "idle",
-      "assetPath": "gameplay/stages/spookyMansion/halloween-bg",
-      "scroll": [1, 1],
       "animations": [
         {
           "name": "idle",
@@ -25,20 +99,7 @@
       ]
     }
   ],
+  "name": "Spooky Mansion",
   "cameraZoom": 1.0,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 200,
-      "position": [989.5, 885],
-      "cameraOffsets": [-100, -100]
-    },
-    "gf": { "zIndex": 100, "position": [751.5, 787], "cameraOffsets": [0, 0] },
-    "dad": {
-      "zIndex": 200,
-      "position": [382, 865],
-      "cameraOffsets": [150, -100]
-    }
-  },
-  "name": "Spooky Mansion"
+  "coordMode": "topLeft"
 }

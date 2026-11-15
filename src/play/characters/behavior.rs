@@ -54,6 +54,7 @@ pub struct CharacterActor {
 impl CharacterActor {
     pub fn reset_character(&mut self) {
         self.bopper.dance_every = self.data.dance_every;
+        self.bopper.can_play_other_anims = true;
         self.hold_timer = 0.0;
         self.cur_no_anim = false;
         self.cur_suffix.clear();
@@ -97,24 +98,30 @@ impl CharacterActor {
             .is_some_and(|n| n.starts_with("sing") && !n.ends_with("-end"))
     }
 
-    pub fn dance(&mut self, force: bool) {
-        if !force {
-            if self.is_singing() {
-                return;
-            }
-            if let Some(cur) = self.controller.current_name()
-                && !cur.starts_with("dance")
+    pub fn is_playing_special_anim(&self) -> bool {
+        if !self.bopper.can_play_other_anims {
+            return !self.controller.is_finished();
+        }
+        self.controller.current_name().is_some_and(|cur| {
+            !cur.starts_with("dance")
                 && !cur.starts_with("idle")
+                && !self.is_singing()
                 && !self.controller.is_finished()
-            {
-                return;
-            }
+        })
+    }
+
+    pub fn dance(&mut self, force: bool) {
+        if self.is_playing_special_anim() {
+            return;
+        }
+        if !force && self.is_singing() {
+            return;
         }
         self.bopper.dance(&mut self.controller, force);
     }
 
     pub fn on_step_hit(&mut self, step: i32) {
-        if self.bopper.dance_every <= 0.0 {
+        if self.bopper.dance_every <= 0.0 || self.is_playing_special_anim() {
             return;
         }
         let period = (self.bopper.dance_every * 4.0).round() as i32;

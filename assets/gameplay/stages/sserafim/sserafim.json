@@ -1,204 +1,437 @@
 {
-  "props": [
+  "stage": [
+    {
+      "characters": {
+        "spectator": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            938.5,
+            392
+          ],
+          "camera_Offset": [
+            0,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": [
+            0.95,
+            0.95
+          ]
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            70,
+            470
+          ],
+          "camera_Offset": [
+            150,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": [
+            0.97,
+            0.97
+          ]
+        },
+        "player": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            1530,
+            970
+          ],
+          "camera_Offset": [
+            -100,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": [
+            0.99,
+            0.99
+          ]
+        }
+      }
+    },
     {
       "name": "solid",
-      "assetPath": "#FFFFFF",
-      "position": [-5000, -3000],
-      "scale": [10000, 10000],
-      "scroll": [0, 0]
+      "layer": 0,
+      "scale": [
+        10000,
+        10000
+      ],
+      "file": "#FFFFFF",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -5000,
+        -3000
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0,
+        0
+      ]
     },
     {
       "name": "solidCover",
-      "zIndex": 9999,
-      "alpha": 0.0,
-      "assetPath": "#000000",
-      "position": [-5000, -3000],
-      "scale": [10000, 10000],
-      "scroll": [0, 0]
+      "layer": 9999,
+      "scale": [
+        10000,
+        10000
+      ],
+      "file": "#000000",
+      "animation": null,
+      "visible": true,
+      "opacity": 0.0,
+      "position": [
+        -5000,
+        -3000
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0,
+        0
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 10,
-      "position": [-1853, -815],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "bg",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/bg",
-      "scroll": [0.75, 0.75],
-      "animations": []
+      "layer": 10,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/bg",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -1853,
+        -815
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.75,
+        0.75
+      ]
     },
     {
-      "danceEvery": 0,
-      "alpha": 0.0,
-      "zIndex": 10,
-      "position": [790, 625],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "fucker",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/floor",
-      "scroll": [0.85, 0.85],
-      "animations": []
+      "layer": 10,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/floor",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 0.0,
+      "position": [
+        790,
+        625
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.85,
+        0.85
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 12,
-      "position": [-1857, 267],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "backTables",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/back-tables",
-      "scroll": [0.93, 0.93],
-      "animations": []
+      "layer": 12,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/back-tables",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -1857,
+        267
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.93,
+        0.93
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 12,
-      "position": [-1858, 377],
-      "scale": [400, 1],
-      "animType": "sparrow",
       "name": "backTablesCutscene",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/cutscene/counter-stretch",
-      "scroll": [0.93, 0.93],
-      "animations": []
+      "layer": 12,
+      "scale": [
+        400,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/cutscene/counter-stretch",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -1858,
+        377
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.93,
+        0.93
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 13,
-      "position": [-97, 237],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "burgerCutscene",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/cutscene/burger-cutscene",
-      "scroll": [0.93, 0.93],
-      "animations": []
+      "layer": 13,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/cutscene/burger-cutscene",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -97,
+        237
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.93,
+        0.93
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 14,
-      "position": [-1357, 426],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "backStools",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/back-stools",
-      "scroll": [0.94, 0.94],
-      "animations": []
+      "layer": 14,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/back-stools",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -1357,
+        426
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.94,
+        0.94
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 17,
-      "alpha": 0.0,
-      "position": [-1241, -949],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "backLightColor",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/lights/back-light-color",
-      "scroll": [0.93, 0.93],
-      "animations": []
+      "layer": 17,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/lights/back-light-color",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 0.0,
+      "position": [
+        -1241,
+        -949
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.93,
+        0.93
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 18,
-      "alpha": 0.0,
-      "position": [-771, -599],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "backLightWhite",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/lights/back-light-white",
-      "scroll": [0.93, 0.93],
-      "animations": []
+      "layer": 18,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/lights/back-light-white",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 0.0,
+      "position": [
+        -771,
+        -599
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.93,
+        0.93
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 20,
-      "position": [-983, -707],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "truck",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/truck-stuff",
-      "scroll": [0.95, 0.95],
-      "animations": []
+      "layer": 20,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/truck-stuff",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -983,
+        -707
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.95,
+        0.95
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 21,
-      "position": [-980, -173],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "truckDoor",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/truck-door",
-      "scroll": [0.95, 0.95],
-      "animations": []
+      "layer": 21,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/truck-door",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -980,
+        -173
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.95,
+        0.95
+      ]
     },
     {
-      "danceEvery": 0,
-      "alpha": 0.0,
-      "zIndex": 23,
-      "position": [-962, -607],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "truckLight1",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/lights/truck-light-1",
-      "scroll": [0.95, 0.95],
-      "animations": []
+      "layer": 23,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/lights/truck-light-1",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 0.0,
+      "position": [
+        -962,
+        -607
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.95,
+        0.95
+      ]
     },
     {
-      "danceEvery": 0,
-      "alpha": 0.0,
-      "zIndex": 22,
-      "position": [-781, -464],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "truckLight2",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/lights/truck-light-2",
-      "scroll": [0.95, 0.95],
-      "animations": []
+      "layer": 22,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/lights/truck-light-2",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 0.0,
+      "position": [
+        -781,
+        -464
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.95,
+        0.95
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 1500,
-      "position": [-280, 818],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "frontStool",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/sserafim/front-stool",
-      "scroll": [1.0, 1.0],
-      "animations": []
+      "layer": 1500,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/sserafim/front-stool",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -280,
+        818
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1.0,
+        1.0
+      ]
     }
   ],
+  "name": "Diner",
   "cameraZoom": 0.5,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 300,
-      "position": [1530, 970],
-      "scroll": [0.99, 0.99],
-      "cameraOffsets": [-100, -100]
-    },
-    "dad": {
-      "zIndex": 200,
-      "position": [70, 470],
-      "scroll": [0.97, 0.97],
-      "cameraOffsets": [150, -100]
-    },
-    "gf": {
-      "zIndex": 300,
-      "cameraOffsets": [0, 0],
-      "scroll": [0.95, 0.95],
-      "position": [938.5, 392]
-    }
-  },
-  "name": "Diner"
+  "coordMode": "topLeft"
 }

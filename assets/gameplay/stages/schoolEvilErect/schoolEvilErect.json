@@ -1,76 +1,192 @@
 {
-  "props": [
+  "stage": [
+    {
+      "characters": {
+        "spectator": {
+          "layer": 100,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            724,
+            823
+          ],
+          "camera_Offset": [
+            40,
+            40
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            0,
+            648
+          ],
+          "camera_Offset": [
+            440,
+            270
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            1168,
+            900
+          ],
+          "camera_Offset": [
+            -200,
+            -94
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
+    },
     {
       "name": "solid",
-      "assetPath": "#000000",
-      "position": [-500, -1000],
-      "scale": [2400, 2000],
-      "scroll": [0, 0]
+      "layer": 0,
+      "scale": [
+        2400,
+        2000
+      ],
+      "file": "#000000",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -500,
+        -1000
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0,
+        0
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 20,
-      "position": [-816, -38],
-      "scale": [6, 6],
-      "animType": "sparrow",
       "name": "school",
-      "isPixel": true,
-      "assetPath": "gameplay/stages/schoolEvilErect/evil-school-erect",
-      "scroll": [0.75, 0.75],
-      "animations": []
+      "layer": 20,
+      "scale": [
+        6,
+        6
+      ],
+      "file": "gameplay/stages/schoolEvilErect/evil-school-erect",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -816,
+        -38
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.75,
+        0.75
+      ],
+      "isPixel": true
     },
-
     {
-      "danceEvery": 0,
-      "zIndex": 25,
-      "position": [1416, 464],
-      "scale": [6, 6],
       "name": "backspike",
-      "animType": "sparrow",
-      "isPixel": true,
-      "assetPath": "gameplay/stages/schoolEvilErect/evil-school-erect-back-spike",
-      "scroll": [0.85, 0.85],
-      "animations": []
+      "layer": 25,
+      "scale": [
+        6,
+        6
+      ],
+      "file": "gameplay/stages/schoolEvilErect/evil-school-erect-back-spike",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1416,
+        464
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.85,
+        0.85
+      ],
+      "isPixel": true
     },
     {
-      "danceEvery": 0,
-      "zIndex": 15,
-      "position": [-842, -180],
-      "scale": [6, 6],
       "name": "backspikes",
-      "animType": "sparrow",
-      "isPixel": true,
-      "assetPath": "gameplay/stages/schoolEvilErect/evil-school-erect-back-spikes",
-      "scroll": [0.5, 0.5],
-      "animations": []
+      "layer": 15,
+      "scale": [
+        6,
+        6
+      ],
+      "file": "gameplay/stages/schoolEvilErect/evil-school-erect-back-spikes",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -842,
+        -180
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.5,
+        0.5
+      ],
+      "isPixel": true
     },
     {
-      "danceEvery": 0,
-      "zIndex": 30,
-      "position": [-662, 6],
-      "scale": [6, 6],
-      "animType": "sparrow",
       "name": "evilstreet",
-      "isPixel": true,
-      "assetPath": "gameplay/stages/schoolEvilErect/evil-school-erect-street",
-      "scroll": [1, 1],
-      "animations": []
+      "layer": 30,
+      "scale": [
+        6,
+        6
+      ],
+      "file": "gameplay/stages/schoolEvilErect/evil-school-erect-street",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -662,
+        6
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ],
+      "isPixel": true
     }
   ],
+  "name": "School (Hate) [Erect]",
   "cameraZoom": 1,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 300,
-      "cameraOffsets": [-200, -94],
-      "position": [1168, 900]
-    },
-    "dad": {
-      "zIndex": 200,
-      "position": [0, 648],
-      "cameraOffsets": [440, 270]
-    },
-    "gf": { "zIndex": 100, "cameraOffsets": [40, 40], "position": [724, 823] }
-  },
-  "name": "School (Hate) [Erect]"
+  "coordMode": "topLeft"
 }

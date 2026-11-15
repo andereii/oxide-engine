@@ -1,33 +1,120 @@
 {
-  "version": "1.0.0",
-  "cameraZoom": 0.9,
-  "props": [
+  "stage": [
     {
-      "zIndex": 10,
-      "danceEvery": 0,
-      "position": [-120, -50],
-      "scale": [1, 1],
-      "name": "limoSunset",
-      "animType": "sparrow",
-      "isPixel": false,
-      "scroll": [0.1, 0.1],
-      "assetPath": "gameplay/stages/limoRide/limo-sunset",
-      "animations": []
+      "characters": {
+        "spectator": {
+          "layer": 100,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            787,
+            779
+          ],
+          "camera_Offset": [
+            0,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            329.5,
+            913
+          ],
+          "camera_Offset": [
+            150,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            1217.5,
+            592
+          ],
+          "camera_Offset": [
+            -300,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
     },
     {
-      "zIndex": 20,
-      "danceEvery": 0,
-      "position": [-200, 480],
-      "scale": [1, 1],
+      "name": "limoSunset",
+      "layer": 10,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/limo-sunset",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -120,
+        -50
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.1,
+        0.1
+      ]
+    },
+    {
       "name": "bgLimo",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 20,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/bg-limo",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -200,
+        480
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.4,
+        0.4
+      ],
       "startingAnimation": "drive",
-      "scroll": [0.4, 0.4],
-      "assetPath": "gameplay/stages/limoRide/bg-limo",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "prefix": "background limo pink",
@@ -38,19 +125,35 @@
       ]
     },
     {
-      "zIndex": 150,
-      "danceEvery": 0,
-      "position": [-120, 528],
-      "scale": [1, 1],
       "name": "limo",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 150,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/limo-drive",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -120,
+        528
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ],
       "startingAnimation": "drive",
-      "scroll": [1, 1],
-      "assetPath": "gameplay/stages/limoRide/limo-drive",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "prefix": "Limo stage",
@@ -61,44 +164,106 @@
       ]
     },
     {
-      "zIndex": 500,
-      "danceEvery": 0,
-      "position": [-12600, 160],
-      "scale": [1, 1],
       "name": "fastCar",
-      "animType": "sparrow",
-      "isPixel": false,
-      "scroll": [1, 1],
-      "assetPath": "gameplay/stages/limoRide/fast-car",
-      "animations": []
+      "layer": 500,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/fast-car",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -12600,
+        160
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "zIndex": 30,
-      "danceEvery": 1.0,
-      "position": [100, 100],
-      "scale": [1, 1],
       "name": "limoDancer1",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/henchmen",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        100,
+        100
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.4,
+        0.4
+      ],
+      "danceEvery": 1.0,
       "startingAnimation": "danceRight",
-      "scroll": [0.4, 0.4],
-      "assetPath": "gameplay/stages/limoRide/henchmen",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
-          "frameIndices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "frameIndices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
           "prefix": "hench dancing",
           "name": "danceLeft",
           "flipX": false
         },
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "frameIndices": [
-            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
           ],
           "prefix": "hench dancing",
           "name": "danceRight",
@@ -107,32 +272,82 @@
       ]
     },
     {
-      "zIndex": 30,
-      "danceEvery": 1.0,
-      "position": [400, 100],
-      "scale": [1, 1],
       "name": "limoDancer2",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/henchmen",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        400,
+        100
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.4,
+        0.4
+      ],
+      "danceEvery": 1.0,
       "startingAnimation": "danceRight",
-      "scroll": [0.4, 0.4],
-      "assetPath": "gameplay/stages/limoRide/henchmen",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
-          "frameIndices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "frameIndices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
           "prefix": "hench dancing",
           "name": "danceLeft",
           "flipX": false
         },
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "frameIndices": [
-            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
           ],
           "prefix": "hench dancing",
           "name": "danceRight",
@@ -141,32 +356,82 @@
       ]
     },
     {
-      "zIndex": 30,
-      "danceEvery": 1.0,
-      "position": [700, 100],
-      "scale": [1, 1],
       "name": "limoDancer3",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/henchmen",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        700,
+        100
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.4,
+        0.4
+      ],
+      "danceEvery": 1.0,
       "startingAnimation": "danceLeft",
-      "scroll": [0.4, 0.4],
-      "assetPath": "gameplay/stages/limoRide/henchmen",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
-          "frameIndices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "frameIndices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
           "prefix": "hench dancing",
           "name": "danceLeft",
           "flipX": false
         },
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "frameIndices": [
-            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
           ],
           "prefix": "hench dancing",
           "name": "danceRight",
@@ -175,32 +440,82 @@
       ]
     },
     {
-      "zIndex": 30,
-      "danceEvery": 1.0,
-      "position": [1000, 100],
-      "scale": [1, 1],
       "name": "limoDancer4",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/henchmen",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1000,
+        100
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.4,
+        0.4
+      ],
+      "danceEvery": 1.0,
       "startingAnimation": "danceLeft",
-      "scroll": [0.4, 0.4],
-      "assetPath": "gameplay/stages/limoRide/henchmen",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
-          "frameIndices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "frameIndices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
           "prefix": "hench dancing",
           "name": "danceLeft",
           "flipX": false
         },
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "frameIndices": [
-            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
           ],
           "prefix": "hench dancing",
           "name": "danceRight",
@@ -209,32 +524,82 @@
       ]
     },
     {
-      "zIndex": 30,
-      "danceEvery": 1.0,
-      "position": [1300, 100],
-      "scale": [1, 1],
       "name": "limoDancer5",
-      "animType": "sparrow",
-      "isPixel": false,
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/limoRide/henchmen",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1300,
+        100
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.4,
+        0.4
+      ],
+      "danceEvery": 1.0,
       "startingAnimation": "danceLeft",
-      "scroll": [0.4, 0.4],
-      "assetPath": "gameplay/stages/limoRide/henchmen",
       "animations": [
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
-          "frameIndices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "frameIndices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
           "prefix": "hench dancing",
           "name": "danceLeft",
           "flipX": false
         },
         {
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "flipY": false,
           "frameRate": 24,
           "frameIndices": [
-            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
           ],
           "prefix": "hench dancing",
           "name": "danceRight",
@@ -243,22 +608,7 @@
       ]
     }
   ],
-  "characters": {
-    "bf": {
-      "zIndex": 300,
-      "position": [1217.5, 592],
-      "cameraOffsets": [-300, -100]
-    },
-    "gf": {
-      "zIndex": 100,
-      "position": [787, 779],
-      "cameraOffsets": [0, 0]
-    },
-    "dad": {
-      "zIndex": 200,
-      "position": [329.5, 913],
-      "cameraOffsets": [150, 0]
-    }
-  },
-  "name": "Limo Ride"
+  "name": "Limo Ride",
+  "cameraZoom": 0.9,
+  "coordMode": "topLeft"
 }

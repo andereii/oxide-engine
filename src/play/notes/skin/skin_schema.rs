@@ -145,6 +145,12 @@ pub struct UiSectionRaw {
     pub countdown: Option<CountdownUiRaw>,
     pub judgments: Option<HashMap<String, UiSpriteAssetRaw>>,
     pub combo_numbers: Option<ComboNumbersRaw>,
+    pub bars: Option<BarsUiRaw>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct BarsUiRaw {
+    pub health: Option<UiSpriteAssetRaw>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -244,6 +250,7 @@ pub struct CountdownUiRaw {
 #[derive(Debug, Default, Deserialize)]
 pub struct CountdownStepRaw {
     pub audio: Option<CountdownAudioRaw>,
+    pub image: Option<UiSpriteAssetRaw>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -255,18 +262,29 @@ pub struct CountdownAudioRaw {
     pub volume: f32,
 }
 
-fn default_one() -> f32 {
-    1.0
+#[derive(Debug, Clone)]
+pub struct StrumAnimNames {
+    pub static_anim: String,
+    pub press_anim: String,
+    pub confirm_anim: String,
+    pub confirm_hold_anim: String,
 }
 
-fn default_half() -> f32 {
-    0.5
+#[derive(Debug, Clone)]
+pub struct SustainAnimNames {
+    pub body: String,
+    pub end: String,
 }
 
-fn default_hold_cover_fps() -> f32 {
-    24.0
+#[derive(Debug, Clone, Default)]
+pub struct HoldCoverDirStyle {
+    pub path: String,
+    pub start_anim: String,
+    pub hold_anim: String,
+    pub end_anim: String,
 }
 
-fn default_miss_volume() -> f32 {
-    0.8
-}
+fn default_one() -> f32 { 1.0 }
+fn default_half() -> f32 { 0.5 }
+fn default_hold_cover_fps() -> f32 { 24.0 }
+fn default_miss_volume() -> f32 { 0.8 }

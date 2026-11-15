@@ -1,3 +1,4 @@
+mod defaults;
 pub mod noteskin;
 pub mod skin_schema;
 

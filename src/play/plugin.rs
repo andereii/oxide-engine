@@ -7,6 +7,7 @@ use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::characters::{CharacterSyncState, apply_composite_affine_transforms, load_characters_resource, spawn_characters, sync_characters};
 use super::hud::camera::{spawn_hud_camera, sync_hud_camera};
+use super::hud::countdown::{load_countdown_assets, sync_countdown};
 use super::hud::healthbar::{spawn_health_bar, sync_health_bar};
 use super::hud::popups::{load_popup_assets, sync_popups};
 use super::notes::NoteStyle;
@@ -33,8 +34,6 @@ struct AudioSyncState {
 struct PlaySfxAssets {
     miss_sounds: Vec<Handle<AudioSource>>,
     miss_volume: f32,
-    countdown_sounds: [Option<Handle<AudioSource>>; 4],
-    countdown_volume: f32,
     miss_cursor: usize,
 }
 
@@ -83,7 +82,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(state)
             .add_systems(Startup, setup_play_scene)
             .add_systems(Update, (handle_play_input, tick_play_state).chain().before(crate::animations::sprite::step_animations))
-            .add_systems(Update, (sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
+            .add_systems(Update, (sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
     }
 }
@@ -98,17 +97,11 @@ fn setup_play_scene(
 ) {
     let style = &state.player_strumline.note_style;
     sfx.miss_sounds = style
-        .miss_sounds
-        .iter()
-        .map(|rel| asset_server.load(NoteStyle::miss_sound_asset(rel)))
+        .miss_sound_assets()
+        .into_iter()
+        .map(|rel| asset_server.load(rel))
         .collect();
     sfx.miss_volume = style.miss_volume;
-    sfx.countdown_volume = style.countdown_volume;
-    for (idx, path_opt) in style.countdown_sounds.iter().enumerate() {
-        sfx.countdown_sounds[idx] = path_opt
-            .as_ref()
-            .map(|p| asset_server.load(style.asset_path(p)));
-    }
 
     spawn_hud_camera(&mut commands);
 
@@ -140,12 +133,19 @@ fn setup_play_scene(
                 &mut layouts,
             );
             spawn_characters(&mut commands, &chars);
-            spawn_health_bar(&mut commands, Some(&chars), &asset_server, &mut layouts);
+            spawn_health_bar(
+                &mut commands,
+                Some(&chars),
+                &state.player_strumline.note_style,
+                &asset_server,
+                &mut layouts,
+            );
             commands.insert_resource(chars);
             if let Some(stage) = loaded_stage {
                 commands.insert_resource(stage);
             }
         }
+        commands.insert_resource(load_countdown_assets(&state.player_strumline.note_style, &asset_server));
         commands.insert_resource(load_popup_assets(&state.player_strumline.note_style, &asset_server));
         audio.load_for_chart(&mut commands, &asset_server, &state.chart, state.playback_rate);
         match load_noteskin_assets(&state.player_strumline.note_style, &asset_server, &mut layouts) {
@@ -231,12 +231,6 @@ fn tick_play_state(
     let dt = f64::from(time.delta_secs()).min(0.1);
     let master_ms = audio.master_time_ms(&sinks);
     state.update(dt, master_ms, &mut playlist);
-
-    if let Some(step) = state.pending_countdown_step.take() {
-        if let Some(handle) = sfx.countdown_sounds.get(step).and_then(|h| h.clone()) {
-            spawn_one_shot(&mut commands, handle, sfx.countdown_volume);
-        }
-    }
 
     if state.pending_miss_sfx {
         state.pending_miss_sfx = false;

@@ -53,6 +53,9 @@ impl Bopper {
     }
 
     pub fn dance(&mut self, controller: &mut AnimationController, force_restart: bool) {
+        if !self.can_play_other_anims {
+            return;
+        }
         if self.should_alternate.is_none() {
             self.should_alternate = Some(controller.has_animation("danceLeft"));
         }

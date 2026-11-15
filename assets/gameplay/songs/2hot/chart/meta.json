@@ -1,0 +1,62 @@
+{
+  "songName": "2hot",
+  "base": {
+    "stage": "phillyStreets",
+    "scrollSpeed": 1,
+    "lanes": 4,
+    "characters": {
+      "players": [
+        "pico-playable"
+      ],
+      "opponents": [
+        "darnell"
+      ],
+      "spectator": [
+        "nene"
+      ]
+    },
+    "credits": [
+      "Artist: Kawai Sprite",
+      "Charter: Jenny Crowe + Spazkid + ninjamuffin99"
+    ],
+    "skins": {
+      "hud": "funkin",
+      "ui": "funkin"
+    },
+    "audio": {
+      "bpm": 182,
+      "needsVoices": true,
+      "multiVocal": true,
+      "instrumental": {
+        "inst": {
+          "file": "Inst.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      },
+      "vocals": {
+        "player": {
+          "file": "Voices-pico.ogg",
+          "offset": 0,
+          "vol": 1
+        },
+        "opponent": {
+          "file": "Voices-darnell.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      }
+    }
+  },
+  "difficulties": {
+    "easy": {
+      "scrollSpeed": 2.7
+    },
+    "normal": {
+      "scrollSpeed": 2.7
+    },
+    "hard": {
+      "scrollSpeed": 2.8
+    }
+  }
+}

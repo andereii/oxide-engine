@@ -1,0 +1,62 @@
+{
+  "songName": "Winter Horrorland",
+  "base": {
+    "stage": "mallEvil",
+    "scrollSpeed": 1,
+    "lanes": 4,
+    "characters": {
+      "players": [
+        "bf-christmas"
+      ],
+      "opponents": [
+        "monster-christmas"
+      ],
+      "spectator": [
+        "gf-christmas"
+      ]
+    },
+    "credits": [
+      "Artist: Bassetfilms",
+      "Charter: ninjamuffin99 + MtH"
+    ],
+    "skins": {
+      "hud": "funkin",
+      "ui": "funkin"
+    },
+    "audio": {
+      "bpm": 159,
+      "needsVoices": true,
+      "multiVocal": true,
+      "instrumental": {
+        "inst": {
+          "file": "Inst.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      },
+      "vocals": {
+        "player": {
+          "file": "Voices-bf.ogg",
+          "offset": 0,
+          "vol": 1
+        },
+        "opponent": {
+          "file": "Voices-monster.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      }
+    }
+  },
+  "difficulties": {
+    "easy": {
+      "scrollSpeed": 1.4
+    },
+    "normal": {
+      "scrollSpeed": 1.6
+    },
+    "hard": {
+      "scrollSpeed": 1.7
+    }
+  }
+}

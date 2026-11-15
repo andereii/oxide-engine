@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::play::characters::loader::CharactersResource;
+use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::utils::constants::{
     COLOR_HEALTH_BAR_GREEN, COLOR_HEALTH_BAR_RED, HEALTH_BAR_BORDER_PX,
@@ -17,6 +18,7 @@ use super::health_icon::{HealthIcon, spawn_health_icons, update_icon_state_and_t
 pub struct HealthBarBgVisual {
     pub bg_image: Handle<Image>,
     pub size: [f32; 2],
+    pub scale: f32,
 }
 
 #[derive(Component)]
@@ -32,20 +34,25 @@ pub struct HealthBarStepTracker {
 pub fn spawn_health_bar(
     commands: &mut Commands,
     chars: Option<&CharactersResource>,
+    style: &NoteStyle,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
-    let bg_image: Handle<Image> = asset_server.load("gameplay/general/health-bar.png");
-    let default_w = 601.0_f32;
-    let default_h = 19.0_f32;
+    let bg_image: Handle<Image> = asset_server.load(style.health_bar_asset());
+    let bg_scale = style.health_bar.scale.max(0.01);
+    let default_w = 601.0_f32 * bg_scale;
+    let default_h = 19.0_f32 * bg_scale;
 
+    let mut bg_sprite = Sprite::from_image(bg_image.clone());
+    bg_sprite.color = Color::srgba(1.0, 1.0, 1.0, style.health_bar.alpha.clamp(0.0, 1.0));
     commands.spawn((
-        Sprite::from_image(bg_image.clone()),
-        Transform::from_xyz(0.0, 0.0, 10.0),
+        bg_sprite,
+        Transform::from_xyz(0.0, 0.0, 10.0).with_scale(Vec3::splat(bg_scale)),
         hud_render_layer(),
         HealthBarBgVisual {
             bg_image,
             size: [default_w, default_h],
+            scale: bg_scale,
         },
     ));
 
@@ -120,11 +127,11 @@ pub fn sync_health_bar(
     let mut bg_size = [601.0_f32, 19.0_f32];
     for (mut bg, mut tf) in &mut bg_query {
         if let Some(img) = images.get(&bg.bg_image) {
-            bg.size = [img.width() as f32, img.height() as f32];
+            bg.size = [img.width() as f32 * bg.scale, img.height() as f32 * bg.scale];
         }
         bg_size = bg.size;
         let bg_by = SCREEN_HEIGHT * 0.5 - (bg_y_flx + bg_size[1] * 0.5);
-        set_transform_pos_scale(&mut tf, Vec3::new(0.0, bg_by, 10.0), Vec3::ONE);
+        set_transform_pos_scale(&mut tf, Vec3::new(0.0, bg_by, 10.0), Vec3::splat(bg.scale));
     }
 
     let inner_w = (bg_size[0] - HEALTH_BAR_BORDER_PX * 2.0).max(1.0);

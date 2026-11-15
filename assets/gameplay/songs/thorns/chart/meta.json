@@ -1,0 +1,118 @@
+{
+  "songName": "Thorns",
+  "base": {
+    "stage": "schoolEvil",
+    "scrollSpeed": 1,
+    "lanes": 4,
+    "characters": {
+      "players": [
+        "bf-pixel"
+      ],
+      "opponents": [
+        "spirit"
+      ],
+      "spectator": [
+        "gf-pixel"
+      ]
+    },
+    "credits": [
+      "Artist: Kawai Sprite",
+      "Charter: ninjamuffin99 + MtH"
+    ],
+    "skins": {
+      "hud": "pixel",
+      "ui": "pixel"
+    },
+    "audio": {
+      "bpm": 190,
+      "needsVoices": true,
+      "multiVocal": true,
+      "instrumental": {
+        "inst": {
+          "file": "Inst.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      },
+      "vocals": {
+        "player": {
+          "file": "Voices-bf.ogg",
+          "offset": 0,
+          "vol": 1
+        },
+        "opponent": {
+          "file": "Voices-spirit.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      }
+    }
+  },
+  "difficulties": {
+    "easy": {
+      "scrollSpeed": 1.7
+    },
+    "normal": {
+      "scrollSpeed": 1.8
+    },
+    "hard": {
+      "scrollSpeed": 2
+    },
+    "erect": {
+      "scrollSpeed": 2.5,
+      "stage": "schoolEvilErect",
+      "audio": {
+        "bpm": 190,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-erect.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-erect.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-spirit-erect.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "nightmare": {
+      "scrollSpeed": 2.7,
+      "stage": "schoolEvilErect",
+      "audio": {
+        "bpm": 190,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-erect.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-erect.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-spirit-erect.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    }
+  }
+}

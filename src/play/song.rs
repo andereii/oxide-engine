@@ -21,7 +21,7 @@ pub struct SongSelection {
 impl Default for SongSelection {
     fn default() -> Self {
         Self {
-            song_id: "bopeebo".to_string(),
+            song_id: "blammed".to_string(),
             difficulty: DEFAULT_DIFFICULTY.to_string(),
             variation: DEFAULT_VARIATION.to_string(),
         }

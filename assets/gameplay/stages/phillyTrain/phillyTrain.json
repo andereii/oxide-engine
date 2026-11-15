@@ -1,96 +1,212 @@
 {
-  "props": [
+  "stage": [
     {
-      "danceEvery": 0,
-      "zIndex": 10,
-      "position": [-100, 0],
-      "scale": [1, 1],
-      "animType": "sparrow",
+      "characters": {
+        "spectator": {
+          "layer": 100,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            751.5,
+            787
+          ],
+          "camera_Offset": [
+            0,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            468,
+            885
+          ],
+          "camera_Offset": [
+            200,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            1020.5,
+            885
+          ],
+          "camera_Offset": [
+            -200,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
+    },
+    {
       "name": "sky",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyTrain/sky",
-      "scroll": [0.1, 0.1],
-      "animations": []
+      "layer": 10,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyTrain/sky",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -100,
+        0
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.1,
+        0.1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 20,
-      "position": [-255, 45],
-      "scale": [0.9, 0.9],
-      "animType": "sparrow",
       "name": "city",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyTrain/city",
-      "scroll": [0.3, 0.3],
-      "animations": []
+      "layer": 20,
+      "scale": [
+        0.9,
+        0.9
+      ],
+      "file": "gameplay/stages/phillyTrain/city",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -255,
+        45
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.3,
+        0.3
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 30,
-      "position": [-184, 155],
-      "scale": [0.9, 0.9],
-      "animType": "sparrow",
       "name": "lights",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyTrain/win",
-      "scroll": [0.3, 0.3],
-      "animations": []
+      "layer": 30,
+      "scale": [
+        0.9,
+        0.9
+      ],
+      "file": "gameplay/stages/phillyTrain/win",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -184,
+        155
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.3,
+        0.3
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 50,
-      "position": [-299, 144],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "behindTrain",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyTrain/behind-train",
-      "scroll": [1, 1],
-      "animations": []
+      "layer": 50,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyTrain/behind-train",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -299,
+        144
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 60,
-      "position": [2000, 360],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "train",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyTrain/train",
-      "scroll": [1, 1],
-      "animations": []
+      "layer": 60,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyTrain/train",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        2000,
+        360
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 72,
-      "position": [-299, 144],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "street",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyTrain/street",
-      "scroll": [1, 1],
-      "animations": []
+      "layer": 72,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyTrain/street",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -299,
+        144
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     }
   ],
+  "name": "Philly (Train)",
   "cameraZoom": 1.1,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 300,
-      "position": [1020.5, 885],
-      "cameraOffsets": [-200, -100]
-    },
-    "dad": {
-      "zIndex": 200,
-      "position": [468, 885],
-      "cameraOffsets": [200, -100]
-    },
-    "gf": {
-      "zIndex": 100,
-      "cameraOffsets": [0, 0],
-      "position": [751.5, 787]
-    }
-  },
-  "name": "Philly (Train)"
+  "coordMode": "topLeft"
 }

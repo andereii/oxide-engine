@@ -1,121 +1,289 @@
 {
-  "props": [
+  "stage": [
+    {
+      "characters": {
+        "spectator": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            1453,
+            1100
+          ],
+          "camera_Offset": [
+            0,
+            0
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 350,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            920,
+            1310
+          ],
+          "camera_Offset": [
+            500,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 400,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            2151,
+            1228
+          ],
+          "camera_Offset": [
+            -350,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
+    },
     {
       "name": "solid",
-      "zIndex": 0,
-      "assetPath": "#8E9191",
-      "position": [-500, -1000],
-      "scale": [4000, 3000],
-      "scroll": [0, 0]
+      "layer": 0,
+      "scale": [
+        4000,
+        3000
+      ],
+      "file": "#8E9191",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -500,
+        -1000
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0,
+        0
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 20,
-      "position": [-545, -273],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillySkyline",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-skyline",
-      "scroll": [0.2, 0.2],
-      "alpha": 1,
-      "animations": []
+      "layer": 20,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-skyline",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -545,
+        -273
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.2,
+        0.2
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 30,
-      "position": [1865, 220],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyForegroundCity2",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-foreground-city",
-      "scroll": [0.3, 0.3],
-      "alpha": 1,
-      "angle": 5,
-      "flipX": true,
-      "animations": []
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-foreground-city",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1865,
+        220
+      ],
+      "flip": [
+        true,
+        false
+      ],
+      "scrollFactor": [
+        0.3,
+        0.3
+      ],
+      "angle": 5
     },
     {
-      "danceEvery": 0,
-      "zIndex": 40,
-      "position": [1800, 364],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyConstruction",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-construction",
-      "scroll": [0.7, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 40,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-construction",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1800,
+        364
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.7,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 50,
-      "position": [122, 201],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyHighwayLights",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-highway-lights",
-      "scroll": [0.8, 0.8],
-      "alpha": 1,
-      "animations": []
+      "layer": 50,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-highway-lights",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        122,
+        201
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.8,
+        0.8
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 50,
-      "position": [122, 201],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyHighwayLights_lightmap",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-highway-lightmap",
-      "scroll": [0.8, 0.8],
-      "alpha": 1,
-      "animations": []
+      "layer": 50,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-highway-lightmap",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        122,
+        201
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.8,
+        0.8
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 60,
-      "position": [-23, 105],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyHighway",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-highway",
-      "scroll": [0.8, 0.8],
-      "alpha": 1,
-      "animations": []
+      "layer": 60,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-highway",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -23,
+        105
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.8,
+        0.8
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 70,
-      "position": [-6, 305],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillySmog",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-smog",
-      "scroll": [0.8, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 70,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-smog",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -6,
+        305
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.8,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 80,
-      "position": [1200, 818],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyCars",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-cars",
-      "scroll": [0.9, 1],
-      "alpha": 1,
+      "layer": 80,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-cars",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1200,
+        818
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.9,
+        1
+      ],
       "animations": [
         {
           "name": "car1",
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "prefix": "car1",
           "frameRate": 24,
           "flipX": false,
@@ -127,11 +295,17 @@
           "frameRate": 24,
           "flipX": false,
           "flipY": false,
-          "offsets": [0, 0]
+          "offsets": [
+            0,
+            0
+          ]
         },
         {
           "name": "car3",
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "prefix": "car3",
           "frameRate": 24,
           "flipX": false,
@@ -139,7 +313,10 @@
         },
         {
           "name": "car4",
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "prefix": "car4",
           "frameRate": 24,
           "flipX": false,
@@ -148,20 +325,35 @@
       ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 78,
-      "position": [1200, 818],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyCars2",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-cars",
-      "scroll": [0.9, 1],
-      "alpha": 1,
+      "layer": 78,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-cars",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1200,
+        818
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.9,
+        1
+      ],
       "animations": [
         {
           "name": "car1",
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "prefix": "car1",
           "frameRate": 24,
           "flipX": true,
@@ -173,11 +365,17 @@
           "frameRate": 24,
           "flipX": true,
           "flipY": false,
-          "offsets": [0, 0]
+          "offsets": [
+            0,
+            0
+          ]
         },
         {
           "name": "car3",
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "prefix": "car3",
           "frameRate": 24,
           "flipX": true,
@@ -185,7 +383,10 @@
         },
         {
           "name": "car4",
-          "offsets": [0, 0],
+          "offsets": [
+            0,
+            0
+          ],
           "prefix": "car4",
           "frameRate": 24,
           "flipX": true,
@@ -194,16 +395,28 @@
       ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 90,
-      "position": [1840, 608],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyTraffic",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-traffic",
-      "scroll": [0.9, 1],
-      "alpha": 1,
+      "layer": 90,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-traffic",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1840,
+        608
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.9,
+        1
+      ],
       "animations": [
         {
           "name": "togreen",
@@ -222,63 +435,79 @@
       ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 90,
-      "position": [1840, 608],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyTraffic_lightmap",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-traffic-lightmap",
-      "scroll": [0.9, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 90,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-traffic-lightmap",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        1840,
+        608
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.9,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 100,
-      "position": [88, 317],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "phillyForeground",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/philly-foreground",
-      "scroll": [1, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 100,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/philly-foreground",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        88,
+        317
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 690,
-      "position": [920, 1045],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "spraycanPile",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/phillyStreets/spraycans",
-      "scroll": [1, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 690,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/phillyStreets/spraycans",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        920,
+        1045
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     }
   ],
+  "name": "Philly (Streets)",
   "cameraZoom": 0.77,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 400,
-      "position": [2151, 1228],
-      "cameraOffsets": [-350, -100]
-    },
-    "gf": {
-      "zIndex": 300,
-      "position": [1453, 1100],
-      "cameraOffsets": [0, 0]
-    },
-    "dad": {
-      "zIndex": 350,
-      "position": [920, 1310],
-      "cameraOffsets": [500, -100]
-    }
-  },
-  "name": "Philly (Streets)"
+  "coordMode": "topLeft"
 }

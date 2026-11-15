@@ -1,34 +1,137 @@
 {
-  "props": [
+  "stage": [
     {
-      "name": "solid",
-      "zIndex": 0,
-      "assetPath": "#222026",
-      "position": [-500, -1000],
-      "scale": [2400, 2000],
-      "scroll": [0, 0]
+      "characters": {
+        "spectator": {
+          "layer": 100,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            501.5,
+            840
+          ],
+          "camera_Offset": [
+            0,
+            -25
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "opponent": {
+          "layer": 200,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            40,
+            885
+          ],
+          "camera_Offset": [
+            270,
+            -100
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        },
+        "player": {
+          "layer": 300,
+          "scale": 1,
+          "visible": true,
+          "opacity": 1,
+          "position": [
+            977.5,
+            905
+          ],
+          "camera_Offset": [
+            -170,
+            -140
+          ],
+          "flip": [
+            false,
+            false
+          ],
+          "scrollFactor": 1
+        }
+      }
     },
     {
-      "danceEvery": 0,
-      "zIndex": 10,
-      "position": [967, -103],
-      "scale": [1, 1],
-      "animType": "sparrow",
+      "name": "solid",
+      "layer": 0,
+      "scale": [
+        2400,
+        2000
+      ],
+      "file": "#222026",
+      "animation": null,
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -500,
+        -1000
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0,
+        0
+      ]
+    },
+    {
       "name": "brightLightSmall",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/bright-light",
-      "scroll": [1.2, 1.2],
-      "alpha": 1,
-      "animations": []
+      "layer": 10,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/bright-light",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        967,
+        -103
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1.2,
+        1.2
+      ]
     },
     {
       "name": "crowd",
-      "assetPath": "gameplay/stages/mainStageErect/crowd",
-      "position": [682, 290],
-      "scale": [1, 1],
-      "scroll": [0.8, 0.8],
-      "danceEvery": 0,
-      "zIndex": 5,
+      "layer": 5,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/crowd",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        682,
+        290
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        0.8,
+        0.8
+      ],
       "startingAnimation": "idle",
       "animations": [
         {
@@ -42,108 +145,175 @@
       ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 20,
-      "position": [-765, -247],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "bg",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/bg",
-      "scroll": [1, 1],
-      "animations": []
+      "layer": 20,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/bg",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -765,
+        -247
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 30,
-      "position": [-991, 205],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "server",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/server",
-      "scroll": [1, 1],
-      "animations": []
+      "layer": 30,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/server",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -991,
+        205
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 4000,
-      "position": [-847, -245],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "lights",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/lights",
-      "scroll": [1.2, 1.2],
-      "animations": []
+      "layer": 4000,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/lights",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -847,
+        -245
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1.2,
+        1.2
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 80,
-      "position": [189, -500],
-      "scale": [1, 1700],
-      "animType": "sparrow",
       "name": "orangeLight",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/light-orange",
-      "scroll": [1, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 80,
+      "scale": [
+        1,
+        1700
+      ],
+      "file": "gameplay/stages/mainStageErect/light-orange",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        189,
+        -500
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 40,
-      "position": [-171, 242],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "lightgreen",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/light-green",
-      "scroll": [1, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 40,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/light-green",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -171,
+        242
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 40,
-      "position": [-101, 560],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "lightred",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/light-red",
-      "scroll": [1, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 40,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/light-red",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        -101,
+        560
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     },
     {
-      "danceEvery": 0,
-      "zIndex": 4500,
-      "position": [804, -117],
-      "scale": [1, 1],
-      "animType": "sparrow",
       "name": "lightAbove",
-      "isPixel": false,
-      "assetPath": "gameplay/stages/mainStageErect/light-above",
-      "scroll": [1, 1],
-      "alpha": 1,
-      "animations": []
+      "layer": 4500,
+      "scale": [
+        1,
+        1
+      ],
+      "file": "gameplay/stages/mainStageErect/light-above",
+      "animation": "sparrow",
+      "visible": true,
+      "opacity": 1,
+      "position": [
+        804,
+        -117
+      ],
+      "flip": [
+        false,
+        false
+      ],
+      "scrollFactor": [
+        1,
+        1
+      ]
     }
   ],
+  "name": "Main Stage [Erect]",
   "cameraZoom": 0.85,
-  "version": "1.0.0",
-  "characters": {
-    "bf": {
-      "zIndex": 300,
-      "position": [977.5, 905],
-      "cameraOffsets": [-170, -140]
-    },
-    "dad": {
-      "zIndex": 200,
-      "position": [40, 885],
-      "cameraOffsets": [270, -100]
-    },
-    "gf": { "zIndex": 100, "cameraOffsets": [0, -25], "position": [501.5, 840] }
-  },
-  "name": "Main Stage [Erect]"
+  "coordMode": "topLeft"
 }

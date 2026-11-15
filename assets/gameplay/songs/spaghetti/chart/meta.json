@@ -1,0 +1,57 @@
+{
+  "songName": "SPAGHETTI (feat. j-hope of BTS) (Clean ver.)",
+  "base": {
+    "stage": "sserafim",
+    "scrollSpeed": 1,
+    "lanes": 4,
+    "characters": {
+      "players": [
+        "sserafim-sakura"
+      ],
+      "opponents": [
+        "sserafim-kazuha"
+      ],
+      "spectator": [
+        "sserafim-gf"
+      ]
+    },
+    "credits": [
+      "Artist: LE SSERAFIM (feat. j-hope)",
+      "Charter: fabs + Spazkid"
+    ],
+    "skins": {
+      "hud": "funkin",
+      "ui": "funkin"
+    },
+    "audio": {
+      "bpm": 111.5,
+      "needsVoices": true,
+      "multiVocal": false,
+      "instrumental": {
+        "inst": {
+          "file": "Inst.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      },
+      "vocals": {
+        "player": {
+          "file": "Voices-sserafim-sakura.ogg",
+          "offset": 0,
+          "vol": 1
+        }
+      }
+    }
+  },
+  "difficulties": {
+    "easy": {
+      "scrollSpeed": 2.2
+    },
+    "normal": {
+      "scrollSpeed": 2.5
+    },
+    "hard": {
+      "scrollSpeed": 2.7
+    }
+  }
+}
