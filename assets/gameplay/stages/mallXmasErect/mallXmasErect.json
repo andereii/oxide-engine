@@ -314,5 +314,6 @@
   ],
   "name": "Christmas Mall (Nice) [Erect]",
   "cameraZoom": 0.8,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

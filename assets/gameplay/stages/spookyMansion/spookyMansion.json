@@ -101,5 +101,6 @@
   ],
   "name": "Spooky Mansion",
   "cameraZoom": 1.0,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

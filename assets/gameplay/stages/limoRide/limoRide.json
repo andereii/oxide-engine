@@ -610,5 +610,6 @@
   ],
   "name": "Limo Ride",
   "cameraZoom": 0.9,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

@@ -543,5 +543,6 @@
   ],
   "name": "Philly (Streets) [Erect]",
   "cameraZoom": 0.77,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

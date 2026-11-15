@@ -369,5 +369,25 @@ impl SongAudioPlayer {
             }
         }
     }
+
+    /// Returns true when playback has started, is not paused, and every
+    /// spawned track (instrumental and any vocal tracks) has finished playing.
+    pub fn all_tracks_finished(&self, sinks: &Query<&mut AudioSink>) -> bool {
+        if self.tracks.is_empty() {
+            return true;
+        }
+        if !self.is_playing || self.is_paused {
+            return false;
+        }
+        self.tracks.iter().all(|track| {
+            let Some(entity) = track.entity else {
+                return true;
+            };
+            match sinks.get(entity) {
+                Ok(sink) => track.started && sink.empty(),
+                Err(_) => true,
+            }
+        })
+    }
 }
 

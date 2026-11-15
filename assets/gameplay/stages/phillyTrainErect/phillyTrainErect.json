@@ -208,5 +208,6 @@
   ],
   "name": "Philly (Train) [Erect]",
   "cameraZoom": 1.1,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

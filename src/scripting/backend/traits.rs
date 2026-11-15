@@ -5,9 +5,9 @@ use thiserror::Error;
 
 use crate::mods::{DiscoveredScript, ScriptScope};
 
-use super::api::ScriptContext;
-use super::events::{HookKind, ScriptEvent};
-use super::value::{ScriptLanguage, ScriptValue};
+use crate::scripting::api::ScriptContext;
+use crate::scripting::events::{HookKind, ScriptEvent};
+use crate::scripting::value::{ScriptLanguage, ScriptValue};
 
 #[derive(Debug, Error)]
 pub enum ScriptError {

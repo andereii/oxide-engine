@@ -194,5 +194,6 @@
   ],
   "name": "Philly (Blazin')",
   "cameraZoom": 0.75,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod characters;
+pub mod helpers;
 pub mod hud;
 pub mod notes;
 pub mod playlist;

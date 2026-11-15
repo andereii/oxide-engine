@@ -433,5 +433,6 @@
   ],
   "name": "Diner",
   "cameraZoom": 0.5,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

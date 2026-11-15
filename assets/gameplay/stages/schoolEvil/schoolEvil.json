@@ -188,5 +188,6 @@
   ],
   "name": "School (Hate)",
   "cameraZoom": 1,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

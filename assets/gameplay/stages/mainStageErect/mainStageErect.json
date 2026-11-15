@@ -315,5 +315,6 @@
   ],
   "name": "Main Stage [Erect]",
   "cameraZoom": 0.85,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

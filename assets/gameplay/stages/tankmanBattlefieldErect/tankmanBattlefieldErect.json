@@ -191,5 +191,6 @@
   ],
   "name": "Tankman Battlefield [Erect]",
   "cameraZoom": 0.7,
-  "coordMode": "topLeft"
+  "coordMode": "topLeft",
+  "scripts": true
 }

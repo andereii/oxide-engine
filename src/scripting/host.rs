@@ -8,9 +8,8 @@ use super::api::{
     LogLevel, MAX_CUSTOM_HOOK_DEPTH, PropertyTween, ScriptCommand, ScriptContext,
     ScriptStateSnapshot, ScriptTimer, TweenProp, TweenTarget,
 };
-use super::backend::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
+use super::backend::{RhaiBackend, ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
 use super::events::{HookKind, ScriptEvent};
-use super::rhai_backend::RhaiBackend;
 use super::value::{ScriptLanguage, ScriptValue};
 
 #[derive(Resource)]
