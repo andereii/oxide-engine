@@ -1,3 +1,6 @@
+// Public input API surface exposed for UI/menu and future gameplay features.
+#![allow(dead_code)]
+
 pub mod controls;
 pub mod cursor;
 pub mod precise;

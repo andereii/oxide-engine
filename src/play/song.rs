@@ -138,10 +138,6 @@ pub fn song_asset_path_in(mods: &ModRegistry, song_id: &str, file: &str) -> Stri
     song_asset_path(song_id, file)
 }
 
-pub fn load_song_chart(song_id: &str, difficulty: &str, variation: &str) -> Result<SongChart, String> {
-    load_song_chart_in(&ModRegistry::from_default_dirs(), song_id, difficulty, variation)
-}
-
 pub fn load_song_chart_in(
     mods: &ModRegistry,
     song_id: &str,

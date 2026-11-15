@@ -20,6 +20,7 @@ pub struct PlayState {
     pub chart: SongChart,
     pub current_difficulty: String,
     pub current_variation: String,
+    #[allow(dead_code)]
     pub current_instrumental: String,
     pub phase: PlayPhase,
     pub needs_reset: bool,

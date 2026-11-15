@@ -199,6 +199,7 @@ impl AnimateAtlas {
         found
     }
 
+    #[allow(dead_code)]
     pub fn frame_labels(&self) -> HashMap<String, (usize, usize)> {
         let mut labels = HashMap::new();
         for layer in &self.main_layers {

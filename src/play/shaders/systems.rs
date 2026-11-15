@@ -452,7 +452,7 @@ pub fn update_stage_shaders(
     mut runtime: ResMut<StageShaderRuntime>,
     mut pending_cmds: ResMut<PendingShaderCommands>,
     mut managed: Query<(Entity, &mut ManagedSpriteShader)>,
-    mut stage_props: Query<(Entity, &StagePropVisual, &mut Sprite), Without<DynamicScriptProp>>,
+    mut stage_props: Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
     dynamic_props: Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
     actors: Query<&CharacterActor>,
     mut cameras: Query<(Entity, Option<&mut RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
@@ -505,7 +505,7 @@ pub fn update_stage_shaders(
         if has_stage_sidecar && runtime.stage_id == "phillyTrain" {
             // Sidecar `phillyTrain.rhai` owns light color & fade progress via `prop_tint`/`prop_alpha`;
             // transfer its alpha decay into `Building`'s `alpha_shit` without double-fading.
-            for (_, prop, mut sprite) in &mut stage_props {
+            for (_, prop, mut sprite, _) in &mut stage_props {
                 if prop.name == "lights" {
                     runtime.philly_alpha_shit = (1.0 - sprite.color.alpha()).clamp(0.0, 1.0);
                     sprite.color.set_alpha(1.0);
@@ -525,7 +525,7 @@ pub fn update_stage_shaders(
                     };
                     runtime.philly_light_index = (runtime.philly_light_index + 1) % palette.len();
                     let [r, g, b, a] = argb_to_rgba_f32(palette[runtime.philly_light_index]);
-                    for (_, prop, mut sprite) in &mut stage_props {
+                    for (_, prop, mut sprite, _) in &mut stage_props {
                         if prop.name == "lights" {
                             sprite.color = Color::srgba(r, g, b, a);
                         }
@@ -556,7 +556,7 @@ pub fn update_stage_shaders(
             }
         }
         runtime.sserafim.advance(f64::from(dt));
-        for (_, prop, mut sprite) in &mut stage_props {
+        for (_, prop, mut sprite, _) in &mut stage_props {
             match prop.name.as_str() {
                 "truckLight1" => {
                     sprite.color = Color::srgba(1.0, 1.0, 1.0, runtime.sserafim.truck_strength);
@@ -862,7 +862,7 @@ fn read_param_f32_array(
 fn collect_target_entities(
     target: &str,
     managed: &Query<(Entity, &mut ManagedSpriteShader)>,
-    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite), Without<DynamicScriptProp>>,
+    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
     dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
     actors: &Query<&CharacterActor>,
 ) -> Vec<(Entity, ShaderTargetKind, String, String)> {
@@ -890,9 +890,21 @@ fn collect_target_entities(
             }
         }
     }
-    for (entity, prop, _) in stage_props.iter() {
+    for (entity, prop, _, composite) in stage_props.iter() {
         if prop.name == target || prop.name.eq_ignore_ascii_case(target) {
             out.push((entity, ShaderTargetKind::StageProp, String::new(), prop.name.clone()));
+            if let Some(composite) = composite {
+                for &piece in &composite.piece_entities {
+                    if piece != Entity::PLACEHOLDER {
+                        out.push((
+                            piece,
+                            ShaderTargetKind::StageProp,
+                            String::new(),
+                            prop.name.clone(),
+                        ));
+                    }
+                }
+            }
         }
     }
     for (entity, dprop) in dynamic_props {
@@ -926,7 +938,7 @@ fn apply_shader_script_command(
     materials: &mut Assets<FunkinSpriteMaterial>,
     runtime: &mut StageShaderRuntime,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
-    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite), Without<DynamicScriptProp>>,
+    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
     dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
     actors: &Query<&CharacterActor>,
     cameras: &mut Query<(Entity, Option<&mut RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
@@ -1075,7 +1087,7 @@ fn apply_config_to_target(
     materials: &mut Assets<FunkinSpriteMaterial>,
     time_s: f32,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
-    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite), Without<DynamicScriptProp>>,
+    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
     dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
     actors: &Query<&CharacterActor>,
 ) {

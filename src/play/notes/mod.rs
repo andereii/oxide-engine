@@ -1,3 +1,6 @@
+// Public notes/strumline API surface exposed for note mechanics and scripts.
+#![allow(dead_code)]
+
 pub mod data;
 pub mod effects;
 pub mod gameplay;

@@ -7,8 +7,11 @@ pub struct PlayStatePlaylist {
     pub is_story_mode: bool,
     pub playlist_song_ids: Vec<String>,
     pub campaign_score: i32,
+    #[allow(dead_code)]
     pub campaign_title: String,
+    #[allow(dead_code)]
     pub campaign_id: Option<String>,
+    #[allow(dead_code)]
     pub campaign_difficulty: String,
 }
 

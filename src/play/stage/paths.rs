@@ -119,20 +119,6 @@ fn stage_path_candidates(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Vec<
     out
 }
 
-pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
-    let candidates = stage_path_candidates(assets_dir, stage_dir, raw);
-    for c in candidates {
-        if c.join("Animation.json").is_file() {
-            return Some(c);
-        }
-        let stem = c.with_extension("");
-        if stem.join("Animation.json").is_file() {
-            return Some(stem);
-        }
-    }
-    None
-}
-
 pub fn resolve_stage_image(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
     let roots = stage_path_candidates(assets_dir, stage_dir, raw);
 
@@ -184,11 +170,6 @@ fn normalize_stem(s: &str) -> String {
         .filter(|c| *c != '-' && *c != '_')
         .flat_map(|c| c.to_lowercase())
         .collect()
-}
-
-pub fn to_asset_rel(assets_dir: &Path, full_path: &Path) -> String {
-    let rel = full_path.strip_prefix(assets_dir).unwrap_or(full_path);
-    rel.to_string_lossy().replace('\\', "/")
 }
 
 pub fn parse_hex_color(raw: &str) -> Color {

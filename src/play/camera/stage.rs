@@ -37,6 +37,7 @@ impl PlayState {
         self.camera.follow_y_tween = None;
     }
 
+    #[allow(dead_code)]
     pub fn tween_camera_zoom(&mut self, zoom: f64, duration_s: f64, direct: bool) {
         self.tween_camera_zoom_eased(zoom, duration_s, direct, Some(EaseKind::Linear));
     }
@@ -74,6 +75,7 @@ impl PlayState {
         self.cancel_camera_zoom_tween();
     }
 
+    #[allow(dead_code)]
     pub fn tween_scroll_speed(&mut self, speed: f64, duration_s: f64, apply_player: bool, apply_opponent: bool) {
         self.tween_scroll_speed_eased(speed, duration_s, Some(EaseKind::Linear), None, apply_player, apply_opponent);
     }

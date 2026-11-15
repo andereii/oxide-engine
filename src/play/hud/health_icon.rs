@@ -19,6 +19,7 @@ use crate::play::camera::hud::hud_render_layer;
 #[derive(Component)]
 pub struct HealthIcon {
     pub player_id: u8,
+    #[allow(dead_code)]
     pub character_id: String,
     pub auto_update: bool,
     pub is_pixel: bool,

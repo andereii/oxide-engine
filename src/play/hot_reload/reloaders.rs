@@ -35,7 +35,7 @@ use crate::utils::conductor::SongTimeChange;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 #[derive(SystemParam)]
-pub(super) struct HotReloadRes<'w> {
+pub(crate) struct HotReloadRes<'w> {
     pub(super) asset_server: Res<'w, AssetServer>,
     pub(super) mut_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     pub(super) mods: ResMut<'w, ModRegistry>,
@@ -56,7 +56,7 @@ pub(super) struct HotReloadRes<'w> {
 }
 
 #[derive(SystemParam)]
-pub(super) struct HotReloadQueries<'w, 's> {
+pub(crate) struct HotReloadQueries<'w, 's> {
     pub(super) stage_props: Query<'w, 's, Entity, (With<StagePropVisual>, Without<DynamicScriptProp>)>,
     pub(super) stage_pieces: Query<'w, 's, Entity, With<StageCompositePiece>>,
     pub(super) dyn_props: Query<'w, 's, Entity, With<DynamicScriptProp>>,
