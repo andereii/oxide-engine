@@ -27,6 +27,7 @@ fn transition_nene_state(nene_state, target) {
     } else if next == "PRE_RAISE" {
         if h > v_thresh {
             next = "DEFAULT";
+            set_dance_every(target, 1.0);
         } else if train {
             next = "HAIR_BLOWING";
             play_anim(target, "hairBlowNormal");
@@ -146,7 +147,10 @@ fn onBeatHit() {
     if target == "" { return; }
 
     if this.nene_state == "PRE_RAISE" {
-        play_anim(target, "danceLeft");
+        set_dance_every(target, 0.0);
+        if char_anim(target) != "danceLeft" {
+            play_anim(target, "danceLeft");
+        }
         this.has_danced = false;
     } else if this.nene_state == "READY" {
         if this.blink_countdown <= 0 {

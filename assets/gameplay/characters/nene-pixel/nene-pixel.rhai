@@ -106,8 +106,12 @@ fn onBeatHit() {
     if this.nene_state == "PRE_RAISE" {
         if h > v_thresh {
             this.nene_state = "DEFAULT";
+            set_dance_every(target, 1.0);
         } else {
-            play_anim(target, "danceLeft");
+            set_dance_every(target, 0.0);
+            if char_anim(target) != "danceLeft" {
+                play_anim(target, "danceLeft");
+            }
         }
     } else if this.nene_state == "READY" {
         if h > v_thresh {

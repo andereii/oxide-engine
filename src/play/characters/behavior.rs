@@ -151,7 +151,7 @@ impl CharacterActor {
                 Some(cur) if cur.starts_with("idle") => {
                     cur.ends_with("-hold") || self.controller.is_finished()
                 }
-                Some(_) => false,
+                Some(_) => self.controller.is_finished(),
             };
             if can_bop {
                 self.bopper.dance(&mut self.controller, true);
