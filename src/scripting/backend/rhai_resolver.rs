@@ -1,12 +1,26 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, EvalAltResult, Module, ModuleResolver, Position, Scope, Shared};
 
 use crate::mods::ModRegistry;
 use crate::utils::constants::SCRIPT_EXT_RHAI;
+
+pub(super) struct SharedVfsModuleResolver(pub(super) Arc<VfsModuleResolver>);
+
+impl ModuleResolver for SharedVfsModuleResolver {
+    fn resolve(
+        &self,
+        engine: &Engine,
+        source_path: Option<&str>,
+        path: &str,
+        pos: Position,
+    ) -> Result<Shared<Module>, Box<EvalAltResult>> {
+        self.0.resolve(engine, source_path, path, pos)
+    }
+}
 
 pub(super) struct VfsModuleResolver {
     registry: ModRegistry,
@@ -34,6 +48,13 @@ impl VfsModuleResolver {
             cache: Mutex::new(HashMap::new()),
             loading: Mutex::new(HashSet::new()),
         }
+    }
+
+    pub(super) fn cached_paths(&self) -> Vec<PathBuf> {
+        self.cache
+            .lock()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn candidate_paths(source_path: Option<&str>, raw_path: &str) -> Vec<String> {

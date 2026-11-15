@@ -5,7 +5,7 @@ use crate::mods::ModRegistry;
 use crate::scripting::{LogLevel, ScriptCommand, TweenProp};
 
 use super::super::camera::hud::hud_render_layer;
-use super::super::characters::{CharacterActor, CharacterRole, apply_composite_affine_transforms};
+use super::super::characters::CharacterActor;
 use super::super::shaders::systems::{ShaderScriptCommand, parse_wiggle_effect_type};
 use super::super::stage::schema::StageCoordMode;
 use super::super::stage::{DynamicScriptProp, StagePropVisual};

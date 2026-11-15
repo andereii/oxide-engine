@@ -10,8 +10,8 @@ pub mod tweens;
 
 pub use commands::{LogLevel, ScriptCommand};
 pub use context::{
-    CustomHookRequest, MAX_CUSTOM_HOOK_DEPTH, NewTimerRequest, ScriptContext, parse_hex_rgba,
-    script_clamp, script_lerp, script_remap,
+    MAX_CUSTOM_HOOK_DEPTH, NewTimerRequest, ScriptContext, parse_hex_rgba, script_clamp,
+    script_lerp, script_remap,
 };
 pub use docs::{SCRIPT_API_CATALOG, ScriptApiDoc};
 pub use state::{ScriptMutableState, ScriptStateSnapshot};

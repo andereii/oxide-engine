@@ -6,7 +6,7 @@ pub mod spawn;
 pub mod sync;
 
 pub use behavior::CharacterActor;
-pub use loader::load_characters_resource;
+pub use loader::{CharactersResource, load_characters_resource, load_single_character};
 pub use schema::CharacterRole;
-pub use spawn::{apply_composite_affine_transforms, spawn_characters};
+pub use spawn::{apply_composite_affine_transforms, spawn_characters, spawn_single_character};
 pub use sync::{CharacterSyncState, sync_characters};

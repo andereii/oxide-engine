@@ -112,4 +112,8 @@ pub trait ScriptBackend: Send + Sync {
     }
 
     fn compile(&self, source: ScriptSource) -> Result<Box<dyn ScriptInstance>, ScriptError>;
+
+    fn watched_module_paths(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }

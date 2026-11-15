@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use bevy::prelude::Resource;
 
@@ -119,6 +120,18 @@ impl ScriptHost {
 
     pub fn script_ids(&self) -> Vec<&str> {
         self.instances.iter().map(|s| s.id()).collect()
+    }
+
+    pub fn watched_script_paths(&self) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = self
+            .instances
+            .iter()
+            .filter_map(|inst| inst.path().map(PathBuf::from))
+            .collect();
+        for backend in self.backends.values() {
+            out.extend(backend.watched_module_paths());
+        }
+        out
     }
 
     fn sort_instances(&mut self) {

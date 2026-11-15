@@ -1,7 +1,7 @@
 mod hud_audio;
 mod input;
 mod script_commands;
-mod setup;
+pub(crate) mod setup;
 mod tick;
 
 use hud_audio::sync_hud_text;
@@ -24,6 +24,7 @@ use super::characters::{
     CharacterActor, CharacterRole, CharacterSyncState, apply_composite_affine_transforms,
     sync_characters,
 };
+use super::hot_reload::{HotReloadState, hot_reload_assets_system};
 use super::hud::countdown::sync_countdown;
 use super::hud::healthbar::sync_health_bar;
 use super::hud::popups::sync_popups;
@@ -57,14 +58,14 @@ pub(super) struct AudioSyncState {
 }
 
 #[derive(Resource, Default)]
-pub(super) struct PlaySfxAssets {
-    pub(super) miss_sounds: Vec<Handle<AudioSource>>,
-    miss_volume: f32,
-    pub(super) miss_cursor: usize,
+pub(crate) struct PlaySfxAssets {
+    pub(crate) miss_sounds: Vec<Handle<AudioSource>>,
+    pub(crate) miss_volume: f32,
+    pub(crate) miss_cursor: usize,
 }
 
 #[derive(Resource, Default)]
-pub(super) struct PendingEcsScriptCommands(pub(super) Vec<ScriptCommand>);
+pub(crate) struct PendingEcsScriptCommands(pub(crate) Vec<ScriptCommand>);
 
 #[derive(SystemParam)]
 pub(super) struct ScriptTickParams<'w, 's> {
@@ -149,6 +150,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(PlaySfxAssets::default())
             .insert_resource(StageSyncState::default())
             .insert_resource(CharacterSyncState::default())
+            .insert_resource(HotReloadState::default())
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,
@@ -156,7 +158,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(state)
             .add_plugins(super::shaders::FunkinShadersPlugin)
             .add_systems(Startup, setup_play_scene)
-            .add_systems(Update, (handle_play_input, tick_play_state).chain().before(crate::animations::sprite::step_animations))
+            .add_systems(Update, (handle_play_input, hot_reload_assets_system, tick_play_state).chain().before(crate::animations::sprite::step_animations))
             .add_systems(Update, (sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
     }

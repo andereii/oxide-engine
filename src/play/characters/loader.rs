@@ -63,7 +63,7 @@ pub fn load_characters_resource(
     CharactersResource { characters }
 }
 
-fn load_single_character(
+pub fn load_single_character(
     mods: &ModRegistry,
     char_id: &str,
     role: CharacterRole,

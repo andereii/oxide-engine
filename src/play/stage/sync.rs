@@ -244,10 +244,7 @@ pub fn sync_stage_props(
         Option<&DynamicScriptProp>,
         Option<&StageCompositeProp>,
     )>,
-    mut pieces: Query<
-        (&mut Sprite, &mut Transform, &mut Visibility, &mut CompositeAffine2d),
-        (With<StageCompositePiece>, Without<StagePropVisual>),
-    >,
+    mut pieces: StagePiecesQuery,
 ) {
     let paused = matches!(
         state.phase,

@@ -16,9 +16,8 @@ use super::super::notes::effects::spawn_effect_pools;
 use super::super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools};
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
-use super::super::song::load_song_chart_in;
 use super::super::stage::{append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props};
-use super::{AudioSyncState, HudTextVisual, PendingEcsScriptCommands, PlaySfxAssets};
+use super::{HudTextVisual, PendingEcsScriptCommands, PlaySfxAssets};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_play_scene(
@@ -172,7 +171,7 @@ pub(super) fn setup_play_scene(
     ));
 }
 
-pub(super) fn load_and_init_scripts(
+pub(crate) fn load_and_init_scripts(
     mods: &ModRegistry,
     mod_store: &mut ModStore,
     script_host: &mut ScriptHost,

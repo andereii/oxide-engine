@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{
     HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptMutableState, ScriptStateSnapshot,
-    TweenProp,
 };
 use crate::utils::constants::{HEALTH_MAX, HEALTH_MIN, KEY_COUNT, STEPS_PER_BEAT};
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rhai::{AST, CallFnOptions, Dynamic, Engine, Scope};
 
 use crate::mods::{ModRegistry, ScriptScope};
-use crate::scripting::api::{ScriptContext, script_clamp, script_lerp, script_remap};
+use crate::scripting::api::ScriptContext;
 use crate::scripting::events::{HookKind, ScriptEvent};
 use crate::scripting::value::{ScriptLanguage, ScriptValue};
 use crate::utils::constants::{
@@ -20,10 +20,10 @@ use super::api::stage::{
     register_character_and_modchart_api, register_props_tweens_timers_and_store_api,
 };
 use super::context::{RhaiEvent, register_event_type, with_tls_context};
-use super::rhai_resolver::{VfsModuleResolver, vfs_rel_for_script};
+use super::rhai_resolver::{SharedVfsModuleResolver, VfsModuleResolver, vfs_rel_for_script};
 use super::traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
 
-fn build_configured_engine(registry: Option<ModRegistry>) -> Arc<Engine> {
+fn build_configured_engine(resolver: Option<Arc<VfsModuleResolver>>) -> Arc<Engine> {
     let mut engine = Engine::new();
     engine.set_max_operations(RHAI_MAX_OPERATIONS);
     engine.set_max_call_levels(RHAI_MAX_CALL_LEVELS);
@@ -32,8 +32,8 @@ fn build_configured_engine(registry: Option<ModRegistry>) -> Arc<Engine> {
     engine.set_max_map_size(RHAI_MAX_MAP_SIZE);
     engine.set_max_string_size(RHAI_MAX_STRING_SIZE);
 
-    if let Some(mods) = registry {
-        engine.set_module_resolver(VfsModuleResolver::new(mods));
+    if let Some(res) = resolver {
+        engine.set_module_resolver(SharedVfsModuleResolver(res));
     }
 
     register_event_type(&mut engine);
@@ -51,6 +51,7 @@ fn build_configured_engine(registry: Option<ModRegistry>) -> Arc<Engine> {
 pub struct RhaiBackend {
     engine: Arc<Engine>,
     registry: Option<ModRegistry>,
+    resolver: Option<Arc<VfsModuleResolver>>,
 }
 
 impl Default for RhaiBackend {
@@ -64,13 +65,16 @@ impl RhaiBackend {
         Self {
             engine: build_configured_engine(None),
             registry: None,
+            resolver: None,
         }
     }
 
     pub fn with_registry(registry: ModRegistry) -> Self {
+        let resolver = Arc::new(VfsModuleResolver::new(registry.clone()));
         Self {
-            engine: build_configured_engine(Some(registry.clone())),
+            engine: build_configured_engine(Some(Arc::clone(&resolver))),
             registry: Some(registry),
+            resolver: Some(resolver),
         }
     }
 }
@@ -82,6 +86,13 @@ impl ScriptBackend for RhaiBackend {
 
     fn extensions(&self) -> &[&str] {
         &[SCRIPT_EXT_RHAI]
+    }
+
+    fn watched_module_paths(&self) -> Vec<PathBuf> {
+        self.resolver
+            .as_ref()
+            .map(|r| r.cached_paths())
+            .unwrap_or_default()
     }
 
     fn compile(&self, source: ScriptSource) -> Result<Box<dyn ScriptInstance>, ScriptError> {

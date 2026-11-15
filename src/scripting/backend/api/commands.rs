@@ -1,7 +1,4 @@
-use crate::scripting::value::ScriptValue;
-use crate::utils::easing::EaseKind;
-
-use super::tweens::{TweenProp, TweenTarget};
+use super::tweens::TweenProp;
 
 #[derive(Debug, Clone)]
 pub enum LogLevel {
