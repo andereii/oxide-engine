@@ -75,7 +75,7 @@ pub fn sync_countdown(
         for idx in 0..4 {
             if !assets.sampler_applied[idx]
                 && let Some(spec) = &assets.graphics[idx]
-                && let Some(img) = images.get_mut(&spec.texture)
+                && let Some(mut img) = images.get_mut(&spec.texture)
             {
                 img.sampler = ImageSampler::nearest();
                 assets.sampler_applied[idx] = true;
