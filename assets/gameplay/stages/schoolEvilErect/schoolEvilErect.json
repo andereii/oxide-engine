@@ -92,7 +92,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvilErect/evil-school-erect",
+      "file": "schoolEvilErect/evil-school-erect",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -117,7 +117,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvilErect/evil-school-erect-back-spike",
+      "file": "schoolEvilErect/evil-school-erect-back-spike",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -142,7 +142,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvilErect/evil-school-erect-back-spikes",
+      "file": "schoolEvilErect/evil-school-erect-back-spikes",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -167,7 +167,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvilErect/evil-school-erect-street",
+      "file": "schoolEvilErect/evil-school-erect-street",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

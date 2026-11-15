@@ -68,7 +68,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/spookyMansion/halloween-bg",
+      "file": "spookyMansion/halloween-bg",
       "animation": "animateatlas",
       "visible": true,
       "opacity": 1,

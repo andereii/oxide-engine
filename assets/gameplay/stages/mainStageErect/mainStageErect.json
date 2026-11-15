@@ -92,7 +92,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/bright-light",
+      "file": "mainStageErect/bright-light",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -116,7 +116,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/crowd",
+      "file": "mainStageErect/crowd",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -151,7 +151,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/bg",
+      "file": "mainStageErect/bg",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -175,7 +175,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/server",
+      "file": "mainStageErect/server",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -199,7 +199,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/lights",
+      "file": "mainStageErect/lights",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -223,7 +223,7 @@
         1,
         1700
       ],
-      "file": "gameplay/stages/mainStageErect/light-orange",
+      "file": "mainStageErect/light-orange",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -247,7 +247,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/light-green",
+      "file": "mainStageErect/light-green",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -271,7 +271,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/light-red",
+      "file": "mainStageErect/light-red",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -295,7 +295,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mainStageErect/light-above",
+      "file": "mainStageErect/light-above",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

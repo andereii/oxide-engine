@@ -68,7 +68,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyTrain/sky",
+      "file": "phillyTrain/sky",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -92,7 +92,7 @@
         0.9,
         0.9
       ],
-      "file": "gameplay/stages/phillyTrain/city",
+      "file": "phillyTrain/city",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -116,7 +116,7 @@
         0.9,
         0.9
       ],
-      "file": "gameplay/stages/phillyTrain/win",
+      "file": "phillyTrain/win",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -140,7 +140,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyTrain/behind-train",
+      "file": "phillyTrain/behind-train",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -164,7 +164,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyTrain/train",
+      "file": "phillyTrain/train",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -188,7 +188,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyTrain/street",
+      "file": "phillyTrain/street",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

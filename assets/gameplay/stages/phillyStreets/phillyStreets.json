@@ -92,7 +92,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-skyline",
+      "file": "phillyStreets/philly-skyline",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -116,7 +116,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-foreground-city",
+      "file": "phillyStreets/philly-foreground-city",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -141,7 +141,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-construction",
+      "file": "phillyStreets/philly-construction",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -165,7 +165,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-highway-lights",
+      "file": "phillyStreets/philly-highway-lights",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -189,7 +189,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-highway-lightmap",
+      "file": "phillyStreets/philly-highway-lightmap",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -213,7 +213,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-highway",
+      "file": "phillyStreets/philly-highway",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -237,7 +237,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-smog",
+      "file": "phillyStreets/philly-smog",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -261,7 +261,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-cars",
+      "file": "phillyStreets/philly-cars",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -331,7 +331,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-cars",
+      "file": "phillyStreets/philly-cars",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -401,7 +401,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-traffic",
+      "file": "phillyStreets/philly-traffic",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -441,7 +441,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-traffic-lightmap",
+      "file": "phillyStreets/philly-traffic-lightmap",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -465,7 +465,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/philly-foreground",
+      "file": "phillyStreets/philly-foreground",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -489,7 +489,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/phillyStreets/spraycans",
+      "file": "phillyStreets/spraycans",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

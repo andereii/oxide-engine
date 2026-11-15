@@ -92,7 +92,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/spookyMansionErect/bg-trees",
+      "file": "spookyMansionErect/bg-trees",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -125,7 +125,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/spookyMansionErect/bg-dark",
+      "file": "spookyMansionErect/bg-dark",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -149,7 +149,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/spookyMansionErect/bg-light",
+      "file": "spookyMansionErect/bg-light",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -173,7 +173,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/spookyMansionErect/stairs-dark",
+      "file": "spookyMansionErect/stairs-dark",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -197,7 +197,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/spookyMansionErect/stairs-light",
+      "file": "spookyMansionErect/stairs-light",
       "animation": null,
       "visible": true,
       "opacity": 1,

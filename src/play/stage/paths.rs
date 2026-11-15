@@ -4,13 +4,19 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::Color;
 
-pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
+use crate::utils::constants::STAGES_ASSET_PATH;
+
+fn stage_path_candidates(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Vec<PathBuf> {
     let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    let candidates = if cleaned.starts_with("gameplay/") {
+    if cleaned.starts_with("gameplay/") {
         vec![assets_dir.join(cleaned), stage_dir.join(cleaned)]
     } else {
-        vec![stage_dir.join(cleaned)]
-    };
+        vec![assets_dir.join(STAGES_ASSET_PATH).join(cleaned), stage_dir.join(cleaned)]
+    }
+}
+
+pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
+    let candidates = stage_path_candidates(assets_dir, stage_dir, raw);
     for c in candidates {
         if c.join("Animation.json").is_file() {
             return Some(c);
@@ -24,12 +30,7 @@ pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Opti
 }
 
 pub fn resolve_stage_image(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
-    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    let roots = if cleaned.starts_with("gameplay/") {
-        vec![assets_dir.join(cleaned), stage_dir.join(cleaned)]
-    } else {
-        vec![stage_dir.join(cleaned)]
-    };
+    let roots = stage_path_candidates(assets_dir, stage_dir, raw);
 
     for candidate in &roots {
         if candidate.is_file() {

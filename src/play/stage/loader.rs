@@ -9,6 +9,7 @@ use crate::animations::{
     AnimationController, SparrowAtlas, add_animate_atlas_animations, add_sparrow_animations,
     register_default_atlas_idle, register_default_sparrow_idle,
 };
+use crate::utils::constants::STAGES_ASSET_PATH;
 
 use super::paths::{
     parse_hex_color, read_image_dimensions, resolve_atlas_dir, resolve_stage_image, to_asset_rel,
@@ -55,7 +56,7 @@ pub fn load_stage_resource(
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Result<StageResource, String> {
     let assets_dir = resolve_assets_dir();
-    let stage_dir = assets_dir.join("gameplay").join("stages").join(stage_id);
+    let stage_dir = assets_dir.join(STAGES_ASSET_PATH).join(stage_id);
     let json_path = stage_dir.join(format!("{stage_id}.json"));
 
     let raw_json = fs::read_to_string(&json_path)

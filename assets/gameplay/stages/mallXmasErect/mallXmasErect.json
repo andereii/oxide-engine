@@ -68,7 +68,7 @@
         0.9,
         0.9
       ],
-      "file": "gameplay/stages/mallXmasErect/walls",
+      "file": "mallXmasErect/walls",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -92,7 +92,7 @@
         0.85,
         0.85
       ],
-      "file": "gameplay/stages/mallXmasErect/boppers-upper",
+      "file": "mallXmasErect/boppers-upper",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -127,7 +127,7 @@
         0.9,
         0.9
       ],
-      "file": "gameplay/stages/mallXmasErect/escalator",
+      "file": "mallXmasErect/escalator",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -151,7 +151,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mallXmasErect/tree",
+      "file": "mallXmasErect/tree",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -172,7 +172,7 @@
       "name": "bottomBoppers",
       "layer": 50,
       "scale": 1,
-      "file": "gameplay/stages/mallXmasErect/boppers-bottom",
+      "file": "mallXmasErect/boppers-bottom",
       "animation": "animateatlas",
       "visible": true,
       "opacity": 1,
@@ -211,7 +211,7 @@
         0.9,
         0.9
       ],
-      "file": "gameplay/stages/mallXmasErect/white",
+      "file": "mallXmasErect/white",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -235,7 +235,7 @@
         1.1,
         1
       ],
-      "file": "gameplay/stages/mallXmas/snow-foreground",
+      "file": "mallXmas/snow-foreground",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -283,7 +283,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mallXmas/santa",
+      "file": "mallXmas/santa",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
