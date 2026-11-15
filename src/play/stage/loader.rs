@@ -35,6 +35,7 @@ pub enum StagePropKind {
         layout: Handle<TextureAtlasLayout>,
         controller: AnimationController,
         frame_size: [f32; 2],
+        frame_sizes: HashMap<usize, [f32; 2]>,
     },
     CompositeAtlas {
         textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
@@ -194,16 +195,49 @@ fn resolve_prop_visual(
                     if let Some(anim) = pick_starting_anim(prop, &controller) {
                         controller.play(&anim, true, false, 0);
                     }
-                    let frame_size = atlas
+                    let frame_sizes: HashMap<usize, [f32; 2]> = atlas
                         .frames
-                        .first()
-                        .map(|f| [f.frame_width.max(f.width) as f32, f.frame_height.max(f.height) as f32])
+                        .iter()
+                        .filter_map(|f| {
+                            let (unrot_w, unrot_h) = if f.rotated {
+                                (f.height, f.width)
+                            } else {
+                                (f.width, f.height)
+                            };
+                            indices.get(&f.name).copied().map(|idx| {
+                                (
+                                    idx,
+                                    [
+                                        f.frame_width.max(unrot_w) as f32,
+                                        f.frame_height.max(unrot_h) as f32,
+                                    ],
+                                )
+                            })
+                        })
+                        .collect();
+                    let frame_size = controller
+                        .current_atlas_index()
+                        .and_then(|idx| frame_sizes.get(&idx).copied())
+                        .or_else(|| {
+                            atlas.frames.first().map(|f| {
+                                let (unrot_w, unrot_h) = if f.rotated {
+                                    (f.height, f.width)
+                                } else {
+                                    (f.width, f.height)
+                                };
+                                [
+                                    f.frame_width.max(unrot_w) as f32,
+                                    f.frame_height.max(unrot_h) as f32,
+                                ]
+                            })
+                        })
                         .unwrap_or([0.0, 0.0]);
                     return Some(StagePropKind::AnimatedAtlas {
                         texture: asset_server.load(mods.to_asset_server_path(&img_path)),
                         layout: layouts.add(layout),
                         controller,
                         frame_size,
+                        frame_sizes,
                     });
                 }
                 if !xml_path.is_file()

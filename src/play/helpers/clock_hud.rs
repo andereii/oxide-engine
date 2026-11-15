@@ -2,8 +2,11 @@ use crate::scripting::{HookKind, ScriptEvent};
 use crate::utils::conductor::ConductorUpdate;
 use crate::utils::constants::{
     AUDIO_CORRECTION_EASE_RATIO, CONDUCTOR_DRIFT_THRESHOLD_MS, HEALTH_LERP_FACTOR, HEALTH_MAX,
-    HEALTH_MIN, MAX_RELATIVE_CAM_ZOOM, MUSIC_EASE_RATIO, STEPS_PER_BEAT,
+    HEALTH_MIN, MAX_RELATIVE_CAM_ZOOM, STEPS_PER_BEAT,
 };
+
+const CLOCK_FORWARD_DEADBAND_MS: f64 = 14.0;
+const CLOCK_BACKWARD_DEADBAND_MS: f64 = -32.0;
 
 use super::super::scene::PlayState;
 
@@ -40,15 +43,17 @@ impl PlayState {
             .is_none_or(|prev| (raw_audio_ms - prev).abs() > 0.05);
         self.last_raw_audio_ms = Some(raw_audio_ms);
 
-        let next_pos = if drift_ms > 0.0 {
-            let ease_ratio = 1.0 - (-(MUSIC_EASE_RATIO * self.playback_rate) * elapsed_s).exp();
-            predicted_ms + drift_ms * ease_ratio
+        // Ignore audio mixer buffer quantization jitter (~20-25ms) so note scrolling runs
+        // smoothly at frame rate, converging gently only when drift leaves the deadband.
+        let ease_ratio =
+            1.0 - (-(AUDIO_CORRECTION_EASE_RATIO * self.playback_rate) * elapsed_s).exp();
+        let next_pos = if drift_ms > CLOCK_FORWARD_DEADBAND_MS {
+            predicted_ms + (drift_ms - CLOCK_FORWARD_DEADBAND_MS) * ease_ratio
         } else if (audio_advanced || drift_ms < -CONDUCTOR_DRIFT_THRESHOLD_MS)
-            && drift_ms < -(delta_ms + 1e-6)
+            && drift_ms < CLOCK_BACKWARD_DEADBAND_MS
         {
-            let excess_ms = drift_ms + delta_ms;
-            let ease_ratio = 1.0 - (-(AUDIO_CORRECTION_EASE_RATIO * self.playback_rate) * elapsed_s).exp();
-            (predicted_ms + excess_ms * ease_ratio).max(prev_pos + delta_ms * 0.25)
+            let excess_ms = drift_ms - CLOCK_BACKWARD_DEADBAND_MS;
+            (predicted_ms + excess_ms * ease_ratio).max(prev_pos + delta_ms * 0.7)
         } else {
             predicted_ms
         };

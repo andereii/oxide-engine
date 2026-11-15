@@ -90,6 +90,7 @@ pub const SCREEN_HEIGHT: f32 = 720.0;
 pub const RESYNC_THRESHOLD_MS: f64 = 40.0;
 pub const RESYNC_COOLDOWN_S: f64 = 0.5;
 pub const CONDUCTOR_DRIFT_THRESHOLD_MS: f64 = 65.0;
+#[allow(dead_code)]
 pub const MUSIC_EASE_RATIO: f64 = 42.0;
 pub const AUDIO_CORRECTION_EASE_RATIO: f64 = 8.0;
 pub const MAX_RELATIVE_CAM_ZOOM: f64 = 1.35;

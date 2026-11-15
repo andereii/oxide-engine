@@ -38,10 +38,20 @@ pub(super) fn get_or_load_sparrow(
         .frames
         .iter()
         .filter_map(|f| {
-            indices
-                .get(&f.name)
-                .copied()
-                .map(|idx| (idx, [f.frame_width as f32, f.frame_height as f32]))
+            let (unrot_w, unrot_h) = if f.rotated {
+                (f.height, f.width)
+            } else {
+                (f.width, f.height)
+            };
+            indices.get(&f.name).copied().map(|idx| {
+                (
+                    idx,
+                    [
+                        f.frame_width.max(unrot_w) as f32,
+                        f.frame_height.max(unrot_h) as f32,
+                    ],
+                )
+            })
         })
         .collect();
     let texture = asset_server.load(mods.to_asset_server_path(&png));

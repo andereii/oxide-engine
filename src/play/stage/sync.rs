@@ -29,6 +29,9 @@ pub struct DynamicScriptProp {
 }
 
 #[derive(Component)]
+pub struct StageAtlasFrameSizes(pub HashMap<usize, [f32; 2]>);
+
+#[derive(Component)]
 pub struct StageCompositePiece;
 
 #[derive(Component)]
@@ -108,7 +111,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                 layout,
                 controller,
                 frame_size,
-                ..
+                frame_sizes,
             } => {
                 let initial_idx = controller.current_atlas_index().unwrap_or(0);
                 let mut sprite = Sprite::from_atlas_image(
@@ -134,6 +137,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     stage.coord_mode,
                     *frame_size,
                 );
+                let atlas_sizes = StageAtlasFrameSizes(frame_sizes.clone());
                 if d.dance_every != 0.0 || !d.animations.is_empty() {
                     let mut bopper = Bopper::new(d.dance_every);
                     bopper.name = d.name.clone();
@@ -145,6 +149,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         controller.clone(),
                         bopper,
                         visual,
+                        atlas_sizes,
                     ));
                 } else {
                     commands.spawn((
@@ -153,6 +158,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         visibility,
                         controller.clone(),
                         visual,
+                        atlas_sizes,
                     ));
                 }
             }
@@ -252,6 +258,7 @@ pub fn sync_stage_props(
         Option<&mut Bopper>,
         Option<&DynamicScriptProp>,
         Option<&StageCompositeProp>,
+        Option<&StageAtlasFrameSizes>,
     )>,
     mut pieces: StagePiecesQuery,
 ) {
@@ -280,6 +287,7 @@ pub fn sync_stage_props(
         bopper_opt,
         dyn_opt,
         composite_opt,
+        frame_sizes_opt,
     ) in &mut animated_props
     {
         let is_hud = dyn_opt.is_some_and(|d| d.hud);
@@ -335,7 +343,7 @@ pub fn sync_stage_props(
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
-        let (anim_off, frame_off, anim_flip, rotated) = match (anim_opt, bopper_opt) {
+        let (anim_off, frame_off, anim_flip, rotated, atlas_idx) = match (anim_opt, bopper_opt) {
             (Some(mut anim), Some(mut bopper)) => {
                 bopper.sync_finished(&anim);
                 if let Some(steps) = step_range.clone() {
@@ -343,7 +351,8 @@ pub fn sync_stage_props(
                         bopper.on_step_hit(step, &mut anim);
                     }
                 }
-                if let Some(idx) = anim.current_atlas_index() {
+                let idx = anim.current_atlas_index();
+                if let Some(idx) = idx {
                     set_atlas_index(&mut sprite, idx);
                 }
                 (
@@ -351,6 +360,7 @@ pub fn sync_stage_props(
                     anim.current_frame_offset(),
                     anim.current_flip(),
                     anim.current_frame_rotated(),
+                    idx,
                 )
             }
             (Some(anim), None) => (
@@ -358,15 +368,20 @@ pub fn sync_stage_props(
                 anim.current_frame_offset(),
                 anim.current_flip(),
                 anim.current_frame_rotated(),
+                anim.current_atlas_index(),
             ),
-            _ => ([0.0, 0.0], [0.0, 0.0], [false, false], false),
+            _ => ([0.0, 0.0], [0.0, 0.0], [false, false], false, None),
         };
+
+        let cur_raw_size = frame_sizes_opt
+            .and_then(|fs| atlas_idx.and_then(|idx| fs.0.get(&idx).copied()))
+            .unwrap_or(vis.raw_size);
 
         let (mut world_cx, mut world_cy) = match vis.coord_mode {
             StageCoordMode::Center => (vis.base_position[0], vis.base_position[1]),
             StageCoordMode::TopLeft => (
-                vis.base_position[0] + vis.raw_size[0] * vis.base_scale[0] * 0.5,
-                vis.base_position[1] + vis.raw_size[1] * vis.base_scale[1] * 0.5,
+                vis.base_position[0] + cur_raw_size[0] * vis.base_scale[0] * 0.5,
+                vis.base_position[1] + cur_raw_size[1] * vis.base_scale[1] * 0.5,
             ),
         };
         world_cx -= anim_off[0] * vis.base_scale[0];
@@ -375,14 +390,16 @@ pub fn sync_stage_props(
         let screen_cx = world_cx - eff_scroll_x;
         let screen_cy = world_cy - eff_scroll_y;
 
-        let bx = (screen_cx - SCREEN_WIDTH * 0.5) * prop_zoom
-            + frame_off[0] * vis.base_scale[0] * prop_zoom;
-        let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * prop_zoom
-            + frame_off[1] * vis.base_scale[1] * prop_zoom;
-
         let base_rot = -vis.base_angle_deg.to_radians();
         let eff_flip_x = vis.base_flip[0] ^ anim_flip[0];
         let eff_flip_y = vis.base_flip[1] ^ anim_flip[1];
+        let foff_x = if eff_flip_x { -frame_off[0] } else { frame_off[0] };
+        let foff_y = if eff_flip_y { -frame_off[1] } else { frame_off[1] };
+
+        let bx = (screen_cx - SCREEN_WIDTH * 0.5) * prop_zoom
+            + foff_x * vis.base_scale[0] * prop_zoom;
+        let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * prop_zoom
+            + foff_y * vis.base_scale[1] * prop_zoom;
         let rot_delta = if rotated {
             if eff_flip_x ^ eff_flip_y { -FRAC_PI_2 } else { FRAC_PI_2 }
         } else {
