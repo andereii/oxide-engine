@@ -32,42 +32,46 @@ fn onUpdate() {
         prop_alpha("lights", this.light_alpha);
     }
 
-    if this.train_enabled && this.train_moving {
-        this.train_sound_ms += elapsed * 1000.0;
-        this.train_frame_timing += elapsed;
-        while this.train_frame_timing >= TRAIN_FRAME_TIME {
-            this.train_frame_timing -= TRAIN_FRAME_TIME;
-            if this.train_sound_ms >= 4700.0 {
-                if !this.started_moving {
-                    this.started_moving = true;
-                    gf_anim("hairBlow");
-                }
+    if !this.train_enabled || !this.train_moving {
+        return;
+    }
 
-                this.train_x -= 400.0;
-                set_prop("train", "x", this.train_x);
+    this.train_sound_ms += elapsed * 1000.0;
+    this.train_frame_timing += elapsed;
+    while this.train_frame_timing >= TRAIN_FRAME_TIME {
+        this.train_frame_timing -= TRAIN_FRAME_TIME;
+        if this.train_sound_ms < 4700.0 {
+            continue;
+        }
 
-                if this.train_x < -2000.0 && !this.train_finishing {
-                    this.train_x = -1150.0;
-                    set_prop("train", "x", this.train_x);
-                    this.train_cars -= 1;
-                    if this.train_cars <= 0 {
-                        this.train_finishing = true;
-                    }
-                }
+        if !this.started_moving {
+            this.started_moving = true;
+            gf_anim("hairBlow");
+        }
 
-                if this.train_x < -4000.0 && this.train_finishing {
-                    if this.started_moving {
-                        gf_anim("hairFall");
-                    }
-                    this.train_x = TRAIN_START_X;
-                    set_prop("train", "x", this.train_x);
-                    this.train_moving = false;
-                    this.train_cars = 8;
-                    this.train_finishing = false;
-                    this.started_moving = false;
-                    this.train_sound_ms = 0.0;
-                }
+        this.train_x -= 400.0;
+        set_prop("train", "x", this.train_x);
+
+        if this.train_x < -2000.0 && !this.train_finishing {
+            this.train_x = -1150.0;
+            set_prop("train", "x", this.train_x);
+            this.train_cars -= 1;
+            if this.train_cars <= 0 {
+                this.train_finishing = true;
             }
+        }
+
+        if this.train_x < -4000.0 && this.train_finishing {
+            if this.started_moving {
+                gf_anim("hairFall");
+            }
+            this.train_x = TRAIN_START_X;
+            set_prop("train", "x", this.train_x);
+            this.train_moving = false;
+            this.train_cars = 8;
+            this.train_finishing = false;
+            this.started_moving = false;
+            this.train_sound_ms = 0.0;
         }
     }
 }
