@@ -7,11 +7,11 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::mods::{ModRegistry, ModStore};
-use crate::play::characters::loader::{
-    CharactersResource, LoadedCharacter, load_single_character,
+use crate::play::characters::loader::LoadedCharacter;
+use crate::play::characters::{
+    CharacterActor, CharacterRole, CharacterSyncState, CharactersResource, load_single_character,
+    spawn_single_character,
 };
-use crate::play::characters::spawn::spawn_single_character;
-use crate::play::characters::{CharacterActor, CharacterRole, CharacterSyncState};
 use crate::play::hud::countdown::{CountdownAssets, load_countdown_assets};
 use crate::play::hud::healthbar::HealthBarBgVisual;
 use crate::play::hud::popups::{PopupAssets, load_popup_assets};
@@ -584,8 +584,8 @@ fn build_character_watch(mods: &ModRegistry, loaded: &LoadedCharacter) -> Domain
     let icon_id = loaded
         .data
         .health_icon
-        .id
-        .as_deref()
+        .as_ref()
+        .and_then(|hi| hi.id.as_deref())
         .unwrap_or(char_id.as_str());
     for icon_rel in [
         format!("gameplay/characters/{char_id}/icon-{icon_id}.png"),
@@ -716,17 +716,19 @@ fn build_audio_watch(mods: &ModRegistry, state: &PlayState) -> DomainWatch {
             w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
         }
     }
-    for track in &state.chart.audio.tracks {
+    for track in state.chart.audio.instrumental.values() {
         if let Some(p) = mods.resolve_file(&song_asset_path_in(mods, song_id, &track.file)) {
             w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
         }
     }
-    for vocal in &state.chart.audio.player_vocals {
-        if let Some(p) = mods.resolve_file(&song_asset_path_in(mods, song_id, &vocal.file)) {
-            w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
-        }
-    }
-    for vocal in &state.chart.audio.opponent_vocals {
+    for vocal in state
+        .chart
+        .audio
+        .player_vocal
+        .iter()
+        .chain(state.chart.audio.opponent_vocal.iter())
+        .chain(state.chart.audio.spectator_vocal.iter())
+    {
         if let Some(p) = mods.resolve_file(&song_asset_path_in(mods, song_id, &vocal.file)) {
             w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
         }
