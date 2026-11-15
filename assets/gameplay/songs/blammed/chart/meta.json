@@ -113,6 +113,135 @@
           }
         }
       }
+    },
+    "pico-easy": {
+      "scrollSpeed": 2.4,
+      "stage": "phillyTrainErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "pico"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: Metaroom (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 165,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2.5,
+      "stage": "phillyTrainErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "pico"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: Metaroom (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 165,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.6,
+      "stage": "phillyTrainErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "pico"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: Metaroom (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 165,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

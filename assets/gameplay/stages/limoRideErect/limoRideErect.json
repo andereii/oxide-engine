@@ -68,7 +68,7 @@
         0.9,
         0.9
       ],
-      "file": "gameplay/stages/limoRideErect/limo-sunset",
+      "file": "limoRideErect/limo-sunset",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -92,7 +92,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRideErect/shooting-star",
+      "file": "limoRideErect/shooting-star",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -131,7 +131,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRideErect/bg-limo",
+      "file": "limoRideErect/bg-limo",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -170,7 +170,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRideErect/limo-drive",
+      "file": "limoRideErect/limo-drive",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -209,7 +209,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRide/fast-car",
+      "file": "limoRide/fast-car",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -233,7 +233,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRide/henchmen",
+      "file": "limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -339,7 +339,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRide/henchmen",
+      "file": "limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -445,7 +445,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRide/henchmen",
+      "file": "limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -551,7 +551,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRide/henchmen",
+      "file": "limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -657,7 +657,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/limoRide/henchmen",
+      "file": "limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

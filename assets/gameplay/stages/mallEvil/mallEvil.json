@@ -92,7 +92,7 @@
         0.8,
         0.8
       ],
-      "file": "gameplay/stages/mallEvil/background",
+      "file": "mallEvil/background",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -116,7 +116,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mallEvil/tree",
+      "file": "mallEvil/tree",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -140,7 +140,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/mallEvil/snow",
+      "file": "mallEvil/snow",
       "animation": null,
       "visible": true,
       "opacity": 1,

@@ -8,6 +8,7 @@ use crate::animations::{
     register_default_atlas_idle, register_default_sparrow_idle,
 };
 use crate::mods::ModRegistry;
+use crate::utils::constants::STAGES_ASSET_PATH;
 
 use super::paths::{
     parse_hex_color, read_image_dimensions, resolve_atlas_dir_in, resolve_stage_image_in,
@@ -55,12 +56,11 @@ pub fn load_stage_resource(
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Result<StageResource, String> {
     let json_path = mods
-        .resolve_file(&format!("gameplay/stages/{stage_id}/{stage_id}.json"))
+        .resolve_file(&format!("{STAGES_ASSET_PATH}/{stage_id}/{stage_id}.json"))
         .or_else(|| mods.resolve_file(&format!("stages/{stage_id}/{stage_id}.json")))
         .unwrap_or_else(|| {
             mods.assets_dir
-                .join("gameplay")
-                .join("stages")
+                .join(STAGES_ASSET_PATH)
                 .join(stage_id)
                 .join(format!("{stage_id}.json"))
         });

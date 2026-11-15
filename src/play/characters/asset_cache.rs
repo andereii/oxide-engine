@@ -4,7 +4,7 @@ use std::path::Path;
 use bevy::prelude::*;
 
 use crate::animations::animate_atlas::AnimateAtlas;
-use crate::animations::atlas_composite::{build_composite_clip, compute_composite_bounds};
+use crate::animations::atlas_composite::{build_composite_clip, compute_atlas_whole_bounds};
 use crate::animations::base::BaseAnimationData;
 use crate::animations::{AnimationController, PackerAtlas, SparrowAtlas};
 use crate::mods::ModRegistry;
@@ -54,6 +54,8 @@ pub(super) fn get_or_load_sparrow(
     Some((src_idx, sp_idx))
 }
 
+pub(super) type CachedAnimateAtlas = (usize, AnimateAtlas, HashMap<String, usize>, [f32; 2], [f32; 2]);
+
 pub(super) fn get_or_load_animate(
     mods: &ModRegistry,
     char_id: &str,
@@ -61,8 +63,8 @@ pub(super) fn get_or_load_animate(
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
     sources: &mut Vec<SheetSource>,
-    atlas_cache: &mut HashMap<String, (usize, AnimateAtlas, HashMap<String, usize>)>,
-) -> Option<(usize, AnimateAtlas, HashMap<String, usize>)> {
+    atlas_cache: &mut HashMap<String, CachedAnimateAtlas>,
+) -> Option<CachedAnimateAtlas> {
     if let Some(hit) = atlas_cache.get(raw_path) {
         return Some(hit.clone());
     }
@@ -74,6 +76,7 @@ pub(super) fn get_or_load_animate(
     }
     let atlas = AnimateAtlas::from_dir(&dir).ok()?;
     let (layout, indices) = atlas.build_layout();
+    let (bounds_min, bounds_size) = compute_atlas_whole_bounds(&atlas, &indices);
     let texture = asset_server.load(mods.to_asset_server_path(&png));
     let layout_handle = layouts.add(layout);
     let src_idx = sources.len();
@@ -82,7 +85,7 @@ pub(super) fn get_or_load_animate(
         layout: layout_handle,
         frame_sizes: HashMap::new(),
     });
-    let val = (src_idx, atlas, indices);
+    let val = (src_idx, atlas, indices, bounds_min, bounds_size);
     atlas_cache.insert(raw_path.to_string(), val.clone());
     Some(val)
 }
@@ -158,11 +161,11 @@ pub(super) fn load_composite_anim(
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
     sources: &mut Vec<SheetSource>,
-    atlas_cache: &mut HashMap<String, (usize, AnimateAtlas, HashMap<String, usize>)>,
+    atlas_cache: &mut HashMap<String, CachedAnimateAtlas>,
     controller: &mut AnimationController,
     clips: &mut HashMap<String, ClipVisual>,
 ) {
-    let Some((src_i, atlas, indices)) =
+    let Some((src_i, atlas, indices, bounds_min, bounds_size)) =
         get_or_load_animate(mods, char_id, rel_path, asset_server, layouts, sources, atlas_cache)
     else {
         return;
@@ -174,25 +177,7 @@ pub(super) fn load_composite_anim(
     controller.add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
     controller.set_offset(&anim.name, clip.offset);
     controller.set_flip(&anim.name, clip.flip);
-    let first = clip.frames.first().map(Vec::as_slice).unwrap_or(&[]);
-    let (feet_anchor, _) = compute_composite_bounds(first);
-    clips.insert(anim.name.clone(), ClipVisual::Composite { source_idx: src_i, clip, feet_anchor });
-}
-
-pub(super) fn finalize_composite_feet(clips: &mut HashMap<String, ClipVisual>, starting_anim: &str) {
-    let mut ref_by_source: HashMap<usize, [f32; 2]> = HashMap::new();
-    for key in [starting_anim, "idle", "danceRight", "danceLeft"] {
-        if let Some(ClipVisual::Composite { source_idx, feet_anchor, .. }) = clips.get(key) {
-            ref_by_source.entry(*source_idx).or_insert(*feet_anchor);
-        }
-    }
-    for vis in clips.values_mut() {
-        if let ClipVisual::Composite { source_idx, feet_anchor, .. } = vis
-            && let Some(&shared) = ref_by_source.get(source_idx)
-        {
-            *feet_anchor = shared;
-        }
-    }
+    clips.insert(anim.name.clone(), ClipVisual::Composite { source_idx: src_i, clip, bounds_min, bounds_size });
 }
 
 pub(super) fn resolve_idle_size(
@@ -204,11 +189,7 @@ pub(super) fn resolve_idle_size(
     for key in [starting_anim, "idle", "danceRight", "danceLeft"] {
         let Some(vis) = clips.get(key) else { continue };
         match vis {
-            ClipVisual::Composite { clip, .. } => {
-                if let Some(first) = clip.frames.first() {
-                    return compute_composite_bounds(first).1;
-                }
-            }
+            ClipVisual::Composite { bounds_size, .. } => return *bounds_size,
             ClipVisual::Sheet { source_idx } => {
                 if let Some(def) = controller.animations.get(key)
                     && let Some(&first_id) = def.frames.first()

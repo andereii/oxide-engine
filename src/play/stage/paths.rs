@@ -5,21 +5,27 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Color;
 
 use crate::mods::ModRegistry;
+use crate::utils::constants::STAGES_ASSET_PATH;
 
-pub fn resolve_atlas_dir_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Option<PathBuf> {
+fn stage_rel_candidates(stage_id: &str, raw: &str) -> Vec<String> {
     let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    let rels = if cleaned.starts_with("gameplay/") {
+    if cleaned.starts_with("gameplay/") {
         vec![
             cleaned.to_string(),
-            format!("gameplay/stages/{stage_id}/{cleaned}"),
+            format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"),
         ]
     } else {
         vec![
-            format!("gameplay/stages/{stage_id}/{cleaned}"),
+            format!("{STAGES_ASSET_PATH}/{cleaned}"),
+            format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"),
+            format!("stages/{cleaned}"),
             format!("stages/{stage_id}/{cleaned}"),
         ]
-    };
-    for rel in rels {
+    }
+}
+
+pub fn resolve_atlas_dir_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Option<PathBuf> {
+    for rel in stage_rel_candidates(stage_id, raw) {
         if let Some(dir) = mods.resolve_dir(&rel)
             && dir.join("Animation.json").is_file()
         {
@@ -36,28 +42,13 @@ pub fn resolve_atlas_dir_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Op
 }
 
 pub fn resolve_stage_image_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Option<PathBuf> {
-    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    let rels = if cleaned.starts_with("gameplay/") {
-        vec![
-            cleaned.to_string(),
-            format!("gameplay/stages/{stage_id}/{cleaned}"),
-        ]
-    } else {
-        vec![
-            format!("gameplay/stages/{stage_id}/{cleaned}"),
-            format!("stages/{stage_id}/{cleaned}"),
-        ]
-    };
-
-    for rel in &rels {
+    for rel in &stage_rel_candidates(stage_id, raw) {
         if let Some(found) = mods.resolve_with_extensions(rel, &["png", "jpg", "jpeg", "webp"]) {
             return Some(found);
         }
     }
 
-    let stage_dirs = [
-        mods.assets_dir.join("gameplay").join("stages").join(stage_id),
-    ];
+    let stage_dirs = [mods.assets_dir.join(STAGES_ASSET_PATH).join(stage_id)];
     for stage_dir in stage_dirs {
         if let Some(found) = resolve_stage_image(&mods.assets_dir, &stage_dir, raw) {
             return Some(found);
@@ -66,13 +57,17 @@ pub fn resolve_stage_image_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> 
     None
 }
 
-pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
+fn stage_path_candidates(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Vec<PathBuf> {
     let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    let candidates = if cleaned.starts_with("gameplay/") {
+    if cleaned.starts_with("gameplay/") {
         vec![assets_dir.join(cleaned), stage_dir.join(cleaned)]
     } else {
-        vec![stage_dir.join(cleaned)]
-    };
+        vec![assets_dir.join(STAGES_ASSET_PATH).join(cleaned), stage_dir.join(cleaned)]
+    }
+}
+
+pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
+    let candidates = stage_path_candidates(assets_dir, stage_dir, raw);
     for c in candidates {
         if c.join("Animation.json").is_file() {
             return Some(c);
@@ -86,12 +81,7 @@ pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Opti
 }
 
 pub fn resolve_stage_image(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
-    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    let roots = if cleaned.starts_with("gameplay/") {
-        vec![assets_dir.join(cleaned), stage_dir.join(cleaned)]
-    } else {
-        vec![stage_dir.join(cleaned)]
-    };
+    let roots = stage_path_candidates(assets_dir, stage_dir, raw);
 
     for candidate in &roots {
         if candidate.is_file() {

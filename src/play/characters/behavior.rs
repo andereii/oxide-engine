@@ -23,7 +23,8 @@ pub enum ClipVisual {
     Composite {
         source_idx: usize,
         clip: CompositeClip,
-        feet_anchor: [f32; 2],
+        bounds_min: [f32; 2],
+        bounds_size: [f32; 2],
     },
 }
 

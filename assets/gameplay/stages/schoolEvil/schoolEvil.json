@@ -92,7 +92,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvil/evil-school",
+      "file": "schoolEvil/evil-school",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -117,7 +117,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvil/evil-school-back-trees",
+      "file": "schoolEvil/evil-school-back-trees",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -142,7 +142,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvil/evil-school-street",
+      "file": "schoolEvil/evil-school-street",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -167,7 +167,7 @@
         6,
         6
       ],
-      "file": "gameplay/stages/schoolEvil/evil-school-trees",
+      "file": "schoolEvil/evil-school-trees",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

@@ -37,6 +37,7 @@ pub(super) fn convert_layer(raw: LayerRaw) -> AnimateTimelineLayer {
         .collect();
     AnimateTimelineLayer {
         name: raw.layer_name.unwrap_or_default(),
+        visible: !matches!(raw.layer_type.as_deref(), Some("Clp" | "Clipper" | "Fld" | "Folder" | "Guide")),
         frames,
     }
 }
@@ -53,7 +54,7 @@ fn parse_matrix(mx: Option<[f32; 6]>, m3d: Option<[f32; 16]>) -> [f32; 6] {
         let p = [(0.0_f32, 0.0_f32), (1.0, 0.0), (0.0, 1.0)].map(|(x, y)| {
             let z = m[3] * x + m[7] * y + m[15];
             let inv_z = if z.abs() > 1e-6 { 1.0 / z } else { 1.0 };
-            (m[0] * x + m[4] * y + m[12] * inv_z, m[1] * x + m[5] * y + m[13] * inv_z)
+            ((m[0] * x + m[4] * y + m[12]) * inv_z, (m[1] * x + m[5] * y + m[13]) * inv_z)
         });
         return [
             p[1].0 - p[0].0,
@@ -150,6 +151,8 @@ pub(super) struct TimelineRaw {
 pub(super) struct LayerRaw {
     #[serde(rename = "Layer_name", alias = "LN")]
     pub layer_name: Option<String>,
+    #[serde(rename = "LT")]
+    pub layer_type: Option<String>,
     #[serde(rename = "FR", default)]
     pub frames: Vec<FrameRaw>,
 }

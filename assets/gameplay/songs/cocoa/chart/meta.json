@@ -113,6 +113,135 @@
           }
         }
       }
+    },
+    "pico-easy": {
+      "scrollSpeed": 2.3,
+      "stage": "mallXmasErect",
+      "characters": {
+        "players": [
+          "pico-christmas"
+        ],
+        "opponents": [
+          "parents-christmas"
+        ],
+        "spectator": [
+          "nene-christmas"
+        ]
+      },
+      "credits": [
+        "Artist: six impala (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 100,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-christmas-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-parents-christmas-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2.6,
+      "stage": "mallXmasErect",
+      "characters": {
+        "players": [
+          "pico-christmas"
+        ],
+        "opponents": [
+          "parents-christmas"
+        ],
+        "spectator": [
+          "nene-christmas"
+        ]
+      },
+      "credits": [
+        "Artist: six impala (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 100,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-christmas-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-parents-christmas-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.7,
+      "stage": "mallXmasErect",
+      "characters": {
+        "players": [
+          "pico-christmas"
+        ],
+        "opponents": [
+          "parents-christmas"
+        ],
+        "spectator": [
+          "nene-christmas"
+        ]
+      },
+      "credits": [
+        "Artist: six impala (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 100,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-christmas-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-parents-christmas-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

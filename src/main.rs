@@ -1,5 +1,6 @@
 mod animations;
 mod audio;
+mod cli;
 mod input;
 mod mods;
 mod play;
@@ -7,21 +8,30 @@ mod scripting;
 mod utils;
 
 use animations::AnimationsPlugin;
+use cli::LaunchFlags;
 use oxin_app::{WindowConfig, run_window};
 use play::PlayPlugin;
 
 fn main() {
-    let vsync = std::env::var("OXIDE_VSYNC")
-        .map(|v| v != "0")
-        .unwrap_or(true);
+    let flags = LaunchFlags::from_env_args();
+    if flags.show_help {
+        LaunchFlags::print_help();
+        return;
+    }
+
+    let vsync = flags.vsync.unwrap_or_else(|| {
+        std::env::var("OXIDE_VSYNC")
+            .map(|v| v != "0")
+            .unwrap_or(true)
+    });
     run_window(
         WindowConfig {
             title: "Oxide Engine - PlayState".to_string(),
             vsync,
             ..Default::default()
         },
-        |app| {
-            app.add_plugins((AnimationsPlugin, PlayPlugin));
+        move |app| {
+            app.add_plugins((AnimationsPlugin, PlayPlugin::with_flags(flags)));
         },
     );
 }

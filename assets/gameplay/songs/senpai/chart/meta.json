@@ -113,6 +113,135 @@
           }
         }
       }
+    },
+    "pico-easy": {
+      "scrollSpeed": 2.1,
+      "stage": "schoolErect",
+      "characters": {
+        "players": [
+          "pico-pixel"
+        ],
+        "opponents": [
+          "senpai"
+        ],
+        "spectator": [
+          "nene-pixel"
+        ]
+      },
+      "credits": [
+        "Artist: Tee Lopes (Feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 144,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-senpai-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2.2,
+      "stage": "schoolErect",
+      "characters": {
+        "players": [
+          "pico-pixel"
+        ],
+        "opponents": [
+          "senpai"
+        ],
+        "spectator": [
+          "nene-pixel"
+        ]
+      },
+      "credits": [
+        "Artist: Tee Lopes (Feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 144,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-senpai-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.4,
+      "stage": "schoolErect",
+      "characters": {
+        "players": [
+          "pico-pixel"
+        ],
+        "opponents": [
+          "senpai"
+        ],
+        "spectator": [
+          "nene-pixel"
+        ]
+      },
+      "credits": [
+        "Artist: Tee Lopes (Feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 144,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-senpai-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

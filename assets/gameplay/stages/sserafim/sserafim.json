@@ -125,7 +125,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/bg",
+      "file": "sserafim/bg",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -149,7 +149,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/floor",
+      "file": "sserafim/floor",
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.0,
@@ -173,7 +173,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/back-tables",
+      "file": "sserafim/back-tables",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -197,7 +197,7 @@
         400,
         1
       ],
-      "file": "gameplay/stages/sserafim/cutscene/counter-stretch",
+      "file": "sserafim/cutscene/counter-stretch",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -221,7 +221,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/cutscene/burger-cutscene",
+      "file": "sserafim/cutscene/burger-cutscene",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -245,7 +245,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/back-stools",
+      "file": "sserafim/back-stools",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -269,7 +269,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/lights/back-light-color",
+      "file": "sserafim/lights/back-light-color",
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.0,
@@ -293,7 +293,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/lights/back-light-white",
+      "file": "sserafim/lights/back-light-white",
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.0,
@@ -317,7 +317,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/truck-stuff",
+      "file": "sserafim/truck-stuff",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -341,7 +341,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/truck-door",
+      "file": "sserafim/truck-door",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -365,7 +365,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/lights/truck-light-1",
+      "file": "sserafim/lights/truck-light-1",
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.0,
@@ -389,7 +389,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/lights/truck-light-2",
+      "file": "sserafim/lights/truck-light-2",
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.0,
@@ -413,7 +413,7 @@
         1,
         1
       ],
-      "file": "gameplay/stages/sserafim/front-stool",
+      "file": "sserafim/front-stool",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

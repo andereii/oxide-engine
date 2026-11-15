@@ -57,6 +57,135 @@
     },
     "hard": {
       "scrollSpeed": 2.5
+    },
+    "pico-easy": {
+      "scrollSpeed": 2.1,
+      "stage": "tankmanBattlefieldErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "tankman"
+        ],
+        "spectator": [
+          "nene-tankmen"
+        ]
+      },
+      "credits": [
+        "Artist: tsuyunoshi (ft. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 185,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-tankman-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2.3,
+      "stage": "tankmanBattlefieldErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "tankman"
+        ],
+        "spectator": [
+          "nene-tankmen"
+        ]
+      },
+      "credits": [
+        "Artist: tsuyunoshi (ft. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 185,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-tankman-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.6,
+      "stage": "tankmanBattlefieldErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "tankman"
+        ],
+        "spectator": [
+          "nene-tankmen"
+        ]
+      },
+      "credits": [
+        "Artist: tsuyunoshi (ft. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 185,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-tankman-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

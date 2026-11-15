@@ -68,7 +68,7 @@
         1.75,
         1.75
       ],
-      "file": "gameplay/stages/phillyBlazin/sky-blur",
+      "file": "phillyBlazin/sky-blur",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -92,7 +92,7 @@
         1.75,
         1.75
       ],
-      "file": "gameplay/stages/phillyBlazin/lightning",
+      "file": "phillyBlazin/lightning",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -126,7 +126,7 @@
         1.75,
         1.75
       ],
-      "file": "gameplay/stages/phillyBlazin/street-blur",
+      "file": "phillyBlazin/street-blur",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -150,7 +150,7 @@
         1.75,
         1.75
       ],
-      "file": "gameplay/stages/phillyBlazin/street-blur",
+      "file": "phillyBlazin/street-blur",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

@@ -5,6 +5,7 @@ use crate::utils::ecs::{set_sprite_color, set_visibility};
 
 use super::judgement::Judgement;
 use crate::mods::ModRegistry;
+use crate::play::camera::hud::hud_render_layer;
 use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
@@ -223,7 +224,7 @@ pub fn sync_popups(
 }
 
 fn next_popup_z(step: &mut u32) -> f32 {
-    let z = 4.0 + (*step as f32) * 0.001;
+    let z = 11.0 + ((*step % 900) as f32) * 0.001;
     *step = step.saturating_add(1);
     z
 }
@@ -258,7 +259,7 @@ fn spawn_or_reuse(
     }
     let mut sprite = Sprite::from_image(p.texture);
     sprite.color = color;
-    commands.spawn((sprite, tf, Visibility::Visible, next_vis));
+    commands.spawn((sprite, tf, Visibility::Visible, hud_render_layer(), next_vis));
 }
 
 fn judgement_index(j: Judgement) -> Option<usize> {

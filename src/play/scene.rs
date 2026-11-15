@@ -120,7 +120,7 @@ impl PlayState {
             opponent_vocals_volume: 1.0,
             conductor: Conductor::new(bpm),
             camera,
-            player_strumline: Strumline::new(!params.bot_play_mode, scroll_speed, params.note_style.clone()),
+            player_strumline: Strumline::new(true, scroll_speed, params.note_style.clone()),
             opponent_strumline: Strumline::new(false, scroll_speed, params.note_style),
             note_kinds: NoteKindManager::default(),
             song_events: Vec::new(),

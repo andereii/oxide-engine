@@ -6,6 +6,7 @@ use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::audio::SongAudioPlayer;
+use crate::cli::LaunchFlags;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{
@@ -34,7 +35,16 @@ use super::stage::{
 };
 use super::types::{PauseMode, PlayPhase, PlayStateParams, SongChart};
 
-pub struct PlayPlugin;
+#[derive(Default)]
+pub struct PlayPlugin {
+    pub flags: LaunchFlags,
+}
+
+impl PlayPlugin {
+    pub fn with_flags(flags: LaunchFlags) -> Self {
+        Self { flags }
+    }
+}
 
 #[derive(Component)]
 struct HudTextVisual;
@@ -82,7 +92,16 @@ impl Plugin for PlayPlugin {
         let mod_store = ModStore::with_root(&mods.mods_dir);
         let script_host = ScriptHost::with_default_backends();
 
-        let selection = SongSelection::default();
+        let mut selection = SongSelection::default();
+        if let Some(song) = &self.flags.song_id {
+            selection.song_id.clone_from(song);
+        }
+        if let Some(diff) = &self.flags.difficulty {
+            selection.difficulty.clone_from(diff);
+        }
+        if let Some(var) = &self.flags.variation {
+            selection.variation.clone_from(var);
+        }
         let (chart, note_style, load_error) = match load_song_chart_in(
             &mods,
             &selection.song_id,
@@ -99,6 +118,11 @@ impl Plugin for PlayPlugin {
         let mut state = PlayState::new(PlayStateParams {
             chart,
             note_style,
+            practice_mode: self.flags.practice_mode,
+            bot_play_mode: self.flags.bot_play_mode,
+            minimal_mode: self.flags.minimal_mode,
+            start_timestamp_ms: self.flags.start_timestamp_ms,
+            playback_rate: self.flags.playback_rate,
             ..default()
         });
         if let Some(err) = load_error {
@@ -273,9 +297,11 @@ fn setup_play_scene(
     }
 
     commands.spawn((
-        Text::new(""),
+        Text2d::new(""),
         TextFont { font_size: FontSize::Px(20.0), ..default() },
-        Node { position_type: PositionType::Absolute, left: Val::Px(24.0), bottom: Val::Px(20.0), ..default() },
+        bevy::sprite::Anchor::BOTTOM_LEFT,
+        Transform::from_xyz(-SCREEN_WIDTH * 0.5 + 24.0, -SCREEN_HEIGHT * 0.5 + 20.0, 10.8),
+        super::camera::hud::hud_render_layer(),
         HudTextVisual,
     ));
 }
@@ -432,6 +458,7 @@ fn handle_play_input(
         return;
     }
 
+    if state.is_bot_play_mode { return; }
     let pos_ms = state.conductor.song_position_ms;
     precise.poll_keyboard(&keys, pos_ms);
 
@@ -749,7 +776,7 @@ fn spawn_one_shot(commands: &mut Commands, handle: Handle<AudioSource>, volume: 
 fn sync_hud_text(
     state: Res<PlayState>,
     mut cache: Local<(String, String, bool)>,
-    mut hud_text: Query<(&mut Text, &mut Visibility), With<HudTextVisual>>,
+    mut hud_text: Query<(&mut Text2d, &mut Visibility), With<HudTextVisual>>,
 ) {
     if cache.0 == state.score_text && cache.1 == state.status_message && cache.2 == state.hud_visible {
         return;

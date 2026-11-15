@@ -3,8 +3,7 @@ use std::fs;
 
 use bevy::prelude::*;
 
-use crate::animations::animate_atlas::AnimateAtlas;
-use crate::animations::atlas_composite::{compute_composite_bounds, sample_default_composite_clip};
+use crate::animations::atlas_composite::sample_default_composite_clip;
 use crate::animations::base::add_sparrow_animation;
 use crate::animations::{AnimationController, SparrowAtlas, add_packer_animation, register_default_sparrow_idle};
 use crate::mods::ModRegistry;
@@ -13,7 +12,7 @@ use crate::play::stage::schema::StageCharacterSlot;
 use crate::play::types::CharactersMeta;
 
 use super::asset_cache::{
-    finalize_composite_feet, get_or_load_animate, get_or_load_sparrow, load_composite_anim,
+    CachedAnimateAtlas, get_or_load_animate, get_or_load_sparrow, load_composite_anim,
     load_packer_source, resolve_idle_size,
 };
 use super::behavior::{ClipVisual, SheetSource};
@@ -92,7 +91,7 @@ fn load_single_character(
     let mut clips = HashMap::new();
     let mut sheet_cache: HashMap<String, (usize, usize)> = HashMap::new();
     let mut sparrow_data: Vec<(SparrowAtlas, HashMap<String, usize>)> = Vec::new();
-    let mut atlas_cache: HashMap<String, (usize, AnimateAtlas, HashMap<String, usize>)> = HashMap::new();
+    let mut atlas_cache: HashMap<String, CachedAnimateAtlas> = HashMap::new();
 
     match data.render_type {
         CharacterRenderType::Packer => {
@@ -146,19 +145,16 @@ fn load_single_character(
                 }
             }
             if clips.is_empty()
-                && let Some((src_i, atlas, indices)) = get_or_load_animate(mods, char_id, &default_asset, asset_server, layouts, &mut sources, &mut atlas_cache)
+                && let Some((src_i, atlas, indices, bounds_min, bounds_size)) = get_or_load_animate(mods, char_id, &default_asset, asset_server, layouts, &mut sources, &mut atlas_cache)
                 && let Some(clip) = sample_default_composite_clip(&atlas, &indices)
             {
                 let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
-                let first = clip.frames.first().map(Vec::as_slice).unwrap_or(&[]);
-                let (feet_anchor, _) = compute_composite_bounds(first);
                 controller.add_anim("idle", frame_ids, clip.fps, true);
-                clips.insert("idle".to_string(), ClipVisual::Composite { source_idx: src_i, clip, feet_anchor });
+                clips.insert("idle".to_string(), ClipVisual::Composite { source_idx: src_i, clip, bounds_min, bounds_size });
             }
         }
     }
 
-    finalize_composite_feet(&mut clips, &data.starting_animation);
     let idle_size = resolve_idle_size(&data.starting_animation, &controller, &sources, &clips);
     let max_composite_pieces = clips
         .values()

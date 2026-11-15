@@ -74,30 +74,60 @@ pub fn sample_default_composite_clip(
     })
 }
 
-pub fn compute_composite_bounds(pieces: &[CompositePiece]) -> ([f32; 2], [f32; 2]) {
-    if pieces.is_empty() {
-        return ([0.0, 0.0], [100.0, 100.0]);
-    }
-    let mut min_x = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-    let mut min_y = f32::INFINITY;
-    let mut max_y = f32::NEG_INFINITY;
-
+fn expand_pieces_bounds(pieces: &[CompositePiece], bounds: &mut [f32; 4]) -> bool {
+    let mut any = false;
     for piece in pieces {
+        any = true;
         let (w, h) = upright_size(piece);
         let m = piece.matrix;
         for (cx, cy) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
             let x = m[0] * cx + m[2] * cy + m[4];
             let y = m[1] * cx + m[3] * cy + m[5];
-            min_x = min_x.min(x);
-            max_x = max_x.max(x);
-            min_y = min_y.min(y);
-            max_y = max_y.max(y);
+            bounds[0] = bounds[0].min(x);
+            bounds[1] = bounds[1].min(y);
+            bounds[2] = bounds[2].max(x);
+            bounds[3] = bounds[3].max(y);
         }
     }
-    let feet = [(min_x + max_x) * 0.5, max_y];
-    let size = [(max_x - min_x).max(1.0), (max_y - min_y).max(1.0)];
-    (feet, size)
+    any
+}
+
+/// Computes `flixel-animate`'s `Timeline._bounds` (`getWholeBounds`) across all frames
+/// of visible main-timeline layers, returning `(bounds_min, bounds_size)`.
+pub fn compute_atlas_whole_bounds(
+    atlas: &AnimateAtlas,
+    indices: &HashMap<String, usize>,
+) -> ([f32; 2], [f32; 2]) {
+    let total = layers_duration(&atlas.main_layers);
+    let mut bounds = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    let mut scratch = Vec::new();
+    let mut any = false;
+    for tick in 0..total {
+        scratch.clear();
+        collect_tick(atlas, indices, &atlas.main_layers, tick, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 0, &mut scratch);
+        if expand_pieces_bounds(&scratch, &mut bounds) {
+            any = true;
+        }
+    }
+    if !any {
+        return ([0.0, 0.0], [100.0, 100.0]);
+    }
+    (
+        [bounds[0], bounds[1]],
+        [(bounds[2] - bounds[0]).max(1.0), (bounds[3] - bounds[1]).max(1.0)],
+    )
+}
+
+#[allow(dead_code)]
+pub fn compute_composite_bounds(pieces: &[CompositePiece]) -> ([f32; 2], [f32; 2]) {
+    let mut bounds = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    if !expand_pieces_bounds(pieces, &mut bounds) {
+        return ([0.0, 0.0], [100.0, 100.0]);
+    }
+    (
+        [(bounds[0] + bounds[2]) * 0.5, bounds[3]],
+        [(bounds[2] - bounds[0]).max(1.0), (bounds[3] - bounds[1]).max(1.0)],
+    )
 }
 
 #[inline]
@@ -120,9 +150,9 @@ fn sample_composite_timeline(
             return sample_layers_composite(atlas, indices, layers, None);
         }
     }
-    let labels = atlas.frame_labels();
-    if let Some(&(start, duration)) = labels.get(prefix) {
-        return sample_layers_composite(atlas, indices, &atlas.main_layers, Some((start, start + duration)));
+    let ticks = atlas.find_frame_label_indices(prefix);
+    if !ticks.is_empty() {
+        return sample_layer_ticks(atlas, indices, &atlas.main_layers, &ticks);
     }
     if let Some(layers) = atlas.symbols.get(prefix) {
         return sample_layers_composite(atlas, indices, layers, None);
@@ -138,8 +168,18 @@ fn sample_layers_composite(
 ) -> Vec<Vec<CompositePiece>> {
     let max_end = layers_duration(layers);
     let (start_t, end_t) = range.unwrap_or((0, max_end));
-    let mut out = Vec::with_capacity(end_t.saturating_sub(start_t));
-    for t in start_t..end_t {
+    let ticks: Vec<usize> = (start_t..end_t).collect();
+    sample_layer_ticks(atlas, indices, layers, &ticks)
+}
+
+fn sample_layer_ticks(
+    atlas: &AnimateAtlas,
+    indices: &HashMap<String, usize>,
+    layers: &[AnimateTimelineLayer],
+    ticks: &[usize],
+) -> Vec<Vec<CompositePiece>> {
+    let mut out = Vec::with_capacity(ticks.len());
+    for &t in ticks {
         let mut frame_pieces = Vec::new();
         collect_tick(
             atlas,
@@ -168,7 +208,7 @@ fn collect_tick(
         return;
     }
     // Flash layers are ordered front-to-back (`L[0]` on top), elements within a frame back-to-front.
-    for layer in layers.iter().rev() {
+    for layer in layers.iter().rev().filter(|l| l.visible) {
         let Some(frame) = layer
             .frames
             .iter()

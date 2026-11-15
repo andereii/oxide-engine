@@ -1,5 +1,6 @@
 pub const DEFAULT_DIFFICULTY: &str = "hard";
 pub const DEFAULT_VARIATION: &str = "default";
+pub const STAGES_ASSET_PATH: &str = "gameplay/stages";
 pub const DEFAULT_CHARACTER_DANCE_EVERY: f32 = 1.0;
 pub const DEFAULT_BPM: f64 = 100.0;
 pub const STEPS_PER_BEAT: i32 = 4;
