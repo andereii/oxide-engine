@@ -15,6 +15,7 @@ struct StageFileRaw {
     camera_zoom: Option<f32>,
     #[serde(rename = "coordMode", alias = "coord_mode")]
     coord_mode: Option<String>,
+    scripts: bool,
     stage: Vec<serde_json::Value>,
     props: Vec<StagePropRaw>,
     characters: Option<StageCharactersRaw>,
@@ -212,6 +213,7 @@ pub(crate) fn parse_stage_raw(stage_id: &str, raw_json: &str) -> Result<StageDat
         name: raw.name.unwrap_or_else(|| stage_id.to_string()),
         camera_zoom: raw.camera_zoom.unwrap_or(1.0).max(0.05),
         coord_mode,
+        scripts: raw.scripts,
         characters,
         props,
     })

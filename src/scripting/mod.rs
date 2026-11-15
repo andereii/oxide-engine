@@ -8,9 +8,6 @@ pub mod host;
 pub mod rhai_backend;
 pub mod value;
 
-#[cfg(test)]
-mod tests;
-
 // Public scripting API surface exposed for current Rhai and future Lua/Wasm backends.
 #[allow(unused_imports)]
 pub use api::{

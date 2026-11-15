@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
@@ -7,7 +8,7 @@ use crate::animations::{
     AnimationController, SparrowAtlas, add_animate_atlas_animations, add_sparrow_animations,
     register_default_atlas_idle, register_default_sparrow_idle,
 };
-use crate::mods::ModRegistry;
+use crate::mods::{DiscoveredScript, ModRegistry, ScriptScope};
 use crate::utils::constants::STAGES_ASSET_PATH;
 
 use super::paths::{
@@ -42,6 +43,8 @@ pub struct ResolvedStageProp {
 #[allow(dead_code)]
 pub struct StageResource {
     pub stage_id: String,
+    pub json_path: PathBuf,
+    pub scripts: bool,
     pub name: String,
     pub camera_zoom: f32,
     pub coord_mode: StageCoordMode,
@@ -86,12 +89,57 @@ pub fn load_stage_resource(
 
     Ok(StageResource {
         stage_id: stage_id.to_string(),
+        json_path,
+        scripts: parsed.scripts,
         name: parsed.name,
         camera_zoom: parsed.camera_zoom,
         coord_mode: parsed.coord_mode,
         characters: parsed.characters,
         props,
     })
+}
+
+/// If a stage JSON enables `"scripts": true`, discover sidecar script files
+/// sharing the JSON's stem and directory for any supported script extension.
+pub fn append_stage_sidecar_scripts(
+    mods: &ModRegistry,
+    stage_id: &str,
+    json_path: &Path,
+    supported_exts: &[String],
+    discovered: &mut Vec<DiscoveredScript>,
+) {
+    let stem = json_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(stage_id);
+    for ext in supported_exts {
+        let candidate = json_path.with_extension(ext);
+        if !candidate.is_file() {
+            continue;
+        }
+        let canon = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+        let already_loaded = discovered.iter().any(|d| {
+            fs::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()) == canon
+        });
+        if already_loaded {
+            continue;
+        }
+        let rel_path = candidate
+            .strip_prefix(&mods.assets_dir)
+            .unwrap_or(&candidate)
+            .to_string_lossy()
+            .replace('\\', "/");
+        discovered.push(DiscoveredScript {
+            id: format!("stage:{stage_id}:{stem}.{ext}"),
+            mod_id: "assets".to_string(),
+            name: stem.to_string(),
+            extension: ext.to_ascii_lowercase(),
+            rel_path,
+            path: candidate,
+            scope: ScriptScope::Stage(stage_id.to_string()),
+            priority: 0,
+        });
+    }
 }
 
 fn resolve_prop_visual(

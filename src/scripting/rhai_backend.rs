@@ -1398,6 +1398,7 @@ fn build_configured_engine() -> Arc<Engine> {
     let mut engine = Engine::new();
     engine.set_max_operations(RHAI_MAX_OPERATIONS);
     engine.set_max_call_levels(RHAI_MAX_CALL_LEVELS);
+    engine.set_max_expr_depths(128, 64);
     engine.set_max_array_size(RHAI_MAX_ARRAY_SIZE);
     engine.set_max_map_size(RHAI_MAX_MAP_SIZE);
     engine.set_max_string_size(RHAI_MAX_STRING_SIZE);

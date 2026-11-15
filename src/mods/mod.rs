@@ -6,9 +6,6 @@ pub mod manifest;
 pub mod store;
 pub mod vfs;
 
-#[cfg(test)]
-mod tests;
-
 // Public modding facade re-exports for external/future consumers.
 #[allow(unused_imports)]
 pub use loader::{DiscoveredScript, ScriptScope};

@@ -5,7 +5,7 @@ use crate::mods::ModRegistry;
 use crate::play::camera::hud::HudCamera;
 use crate::play::characters::{CharacterActor, CharacterRole};
 use crate::play::scene::PlayState;
-use crate::play::stage::{DynamicScriptProp, StagePropVisual};
+use crate::play::stage::{DynamicScriptProp, StagePropVisual, StageResource};
 use crate::play::types::{LinearTween, PlayPhase, SongEventData};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::easing::EaseKind;
@@ -439,6 +439,7 @@ pub fn update_stage_shaders(
     time: Res<Time>,
     mut state: ResMut<PlayState>,
     mods: Res<ModRegistry>,
+    stage_res: Option<Res<StageResource>>,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<FunkinSpriteMaterial>>,
     mut runtime: ResMut<StageShaderRuntime>,
@@ -492,26 +493,38 @@ pub fn update_stage_shaders(
         handle_song_shader_event(event, &mut runtime);
     }
 
+    let has_stage_sidecar = stage_res.as_deref().is_some_and(|s| s.scripts);
     if !paused && (runtime.stage_id == "phillyTrain" || runtime.stage_id == "phillyTrainErect") {
-        let beat_s = (state.conductor.beat_length_ms() / 1000.0) as f32;
-        runtime.philly_alpha_shit = (runtime.philly_alpha_shit + beat_s * dt * 1.5).min(1.0);
-        let beat = state.conductor.current_beat;
-        if beat != runtime.last_beat {
-            runtime.last_beat = beat;
-            if beat >= 0 && beat % 4 == 0 {
-                let palette = if runtime.stage_id == "phillyTrainErect" {
-                    &PHILLY_TRAIN_ERECT_LIGHT_COLORS
-                } else {
-                    &PHILLY_TRAIN_LIGHT_COLORS
-                };
-                runtime.philly_light_index = (runtime.philly_light_index + 1) % palette.len();
-                let [r, g, b, a] = argb_to_rgba_f32(palette[runtime.philly_light_index]);
-                for (_, prop, mut sprite) in &mut stage_props {
-                    if prop.name == "lights" {
-                        sprite.color = Color::srgba(r, g, b, a);
-                    }
+        if has_stage_sidecar && runtime.stage_id == "phillyTrain" {
+            // Sidecar `phillyTrain.rhai` owns light color & fade progress via `prop_tint`/`prop_alpha`;
+            // transfer its alpha decay into `Building`'s `alpha_shit` without double-fading.
+            for (_, prop, mut sprite) in &mut stage_props {
+                if prop.name == "lights" {
+                    runtime.philly_alpha_shit = (1.0 - sprite.color.alpha()).clamp(0.0, 1.0);
+                    sprite.color.set_alpha(1.0);
                 }
-                runtime.philly_alpha_shit = 0.0;
+            }
+        } else {
+            let beat_s = (state.conductor.beat_length_ms() / 1000.0) as f32;
+            runtime.philly_alpha_shit = (runtime.philly_alpha_shit + beat_s * dt * 1.5).min(1.0);
+            let beat = state.conductor.current_beat;
+            if beat != runtime.last_beat {
+                runtime.last_beat = beat;
+                if beat >= 0 && beat % 4 == 0 {
+                    let palette = if runtime.stage_id == "phillyTrainErect" {
+                        &PHILLY_TRAIN_ERECT_LIGHT_COLORS
+                    } else {
+                        &PHILLY_TRAIN_LIGHT_COLORS
+                    };
+                    runtime.philly_light_index = (runtime.philly_light_index + 1) % palette.len();
+                    let [r, g, b, a] = argb_to_rgba_f32(palette[runtime.philly_light_index]);
+                    for (_, prop, mut sprite) in &mut stage_props {
+                        if prop.name == "lights" {
+                            sprite.color = Color::srgba(r, g, b, a);
+                        }
+                    }
+                    runtime.philly_alpha_shit = 0.0;
+                }
             }
         }
     }
