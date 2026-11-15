@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 
 use crate::animations::BaseAnimationData;
+use crate::utils::constants::DEFAULT_CHARACTER_DANCE_EVERY;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CharacterRole {
@@ -93,7 +94,7 @@ impl Default for CharacterData {
             offsets: [0.0, 0.0],
             camera_offsets: [0.0, 0.0],
             is_pixel: false,
-            dance_every: 1.0,
+            dance_every: DEFAULT_CHARACTER_DANCE_EVERY,
             sing_time: 8.0,
             animations: Vec::new(),
             starting_animation: "idle".to_string(),

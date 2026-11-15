@@ -121,13 +121,25 @@ impl CharacterActor {
     }
 
     pub fn on_step_hit(&mut self, step: i32) {
-        if self.bopper.dance_every <= 0.0 || self.is_playing_special_anim() {
+        if self.bopper.dance_every <= 0.0
+            || self.is_singing()
+            || self.is_playing_special_anim()
+        {
             return;
         }
         let period = (self.bopper.dance_every * 4.0).round() as i32;
         if period > 0 && step.rem_euclid(period) == 0 {
-            let restart = self.bopper.should_bop;
-            self.dance(restart);
+            let can_bop = match self.controller.current_name() {
+                None => true,
+                Some(cur) if cur.starts_with("dance") => true,
+                Some(cur) if cur.starts_with("idle") => {
+                    cur.ends_with("-hold") || self.controller.is_finished()
+                }
+                Some(_) => false,
+            };
+            if can_bop {
+                self.bopper.dance(&mut self.controller, true);
+            }
         }
     }
 
