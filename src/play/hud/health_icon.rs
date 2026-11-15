@@ -185,7 +185,8 @@ fn spawn_single_icon(
         bop_target_w: 0.0,
     };
     icon.snap_to_target_size();
-    commands.spawn((sprite, Transform::from_xyz(0.0, 0.0, 10.5), anim, hud_render_layer(), icon));
+    let z = if player_id == 0 { 10.6 } else { 10.5 };
+    commands.spawn((sprite, Transform::from_xyz(0.0, 0.0, z), anim, hud_render_layer(), icon));
 }
 
 fn icon_png_exists(assets_dir: &Path, char_id: &str) -> bool {
@@ -245,7 +246,8 @@ pub fn update_icon_state_and_transform(
             0.0
         };
     set_sprite_flip(sprite, icon.flip_x, false);
-    set_transform_full(tf, Vec3::new(bx, by, 10.5), Vec3::new(sx, sy, 1.0), Quat::from_rotation_z(rot_z));
+    let z = if icon.player_id == 0 { 10.6 } else { 10.5 };
+    set_transform_full(tf, Vec3::new(bx, by, z), Vec3::new(sx, sy, 1.0), Quat::from_rotation_z(rot_z));
 }
 
 fn step_icon_state_machine(anim: &mut AnimationController, health: f64) {

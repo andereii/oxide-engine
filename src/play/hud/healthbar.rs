@@ -83,7 +83,7 @@ pub fn spawn_health_bar(
     ply_sprite.custom_size = Some(Vec2::new(inner_w * 0.5, inner_h));
     commands.spawn((
         ply_sprite,
-        Transform::from_xyz(inner_w * 0.25, 0.0, 10.1),
+        Transform::from_xyz(inner_w * 0.25, 0.0, 10.15),
         hud_render_layer(),
         HealthBarFillVisual { is_player: true },
     ));

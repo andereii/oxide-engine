@@ -68,7 +68,7 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
             sprite.color = Color::srgba(1.0, 1.0, 1.0, style.splash_alpha);
             commands.spawn((
                 sprite,
-                Transform::from_xyz(0.0, -900.0, 3.0).with_scale(Vec3::splat(style.splash_scale)),
+                Transform::from_xyz(0.0, -900.0, 15.0).with_scale(Vec3::splat(style.splash_scale)),
                 Visibility::Hidden,
                 anim,
                 hud_render_layer(),
@@ -112,7 +112,7 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
             sprite.color = Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha);
             commands.spawn((
                 sprite,
-                Transform::from_xyz(0.0, -900.0, 3.0)
+                Transform::from_xyz(0.0, -900.0, 15.0)
                     .with_scale(Vec3::splat(style.hold_cover_scale)),
                 Visibility::Hidden,
                 anim,

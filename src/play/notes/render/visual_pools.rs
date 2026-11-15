@@ -65,7 +65,7 @@ pub fn spawn_strumline_and_pools(
             sprite.color = Color::srgba(1.0, 1.0, 1.0, style.notes_alpha);
             commands.spawn((
                 sprite,
-                Transform::from_xyz(0.0, -900.0, 2.0).with_scale(Vec3::splat(style.notes_scale)),
+                Transform::from_xyz(0.0, -900.0, 14.0).with_scale(Vec3::splat(style.notes_scale)),
                 Visibility::Hidden,
                 hud_render_layer(),
                 NoteVisual { is_player, lane: 0, assigned_idx: None, assigned_id: 0 },
@@ -81,7 +81,7 @@ pub fn spawn_strumline_and_pools(
                 body_sprite.color = Color::srgba(1.0, 1.0, 1.0, style.sustains_alpha);
                 commands.spawn((
                     body_sprite,
-                    Transform::from_xyz(0.0, -900.0, 1.0).with_scale(Vec3::splat(style.sustains_scale)),
+                    Transform::from_xyz(0.0, -900.0, 13.0).with_scale(Vec3::splat(style.sustains_scale)),
                     Visibility::Hidden,
                     hud_render_layer(),
                     SustainBodyVisual {
@@ -97,7 +97,7 @@ pub fn spawn_strumline_and_pools(
                 end_sprite.color = Color::srgba(1.0, 1.0, 1.0, style.sustains_alpha);
                 commands.spawn((
                     end_sprite,
-                    Transform::from_xyz(0.0, -900.0, 1.0).with_scale(Vec3::splat(style.sustains_scale)),
+                    Transform::from_xyz(0.0, -900.0, 13.0).with_scale(Vec3::splat(style.sustains_scale)),
                     Visibility::Hidden,
                     hud_render_layer(),
                     SustainEndVisual {
@@ -135,7 +135,7 @@ fn spawn_receptors(
         sprite.color = Color::srgba(1.0, 1.0, 1.0, style.strum_alpha);
         commands.spawn((
             sprite,
-            Transform::from_xyz(strum.lane_x(lane), rec_y, 0.0)
+            Transform::from_xyz(strum.lane_x(lane), rec_y, 12.0)
                 .with_scale(Vec3::splat(style.strum_scale * strum.strumline_scale)),
             anim,
             hud_render_layer(),

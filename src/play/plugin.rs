@@ -169,9 +169,11 @@ fn setup_play_scene(
     }
 
     commands.spawn((
-        Text::new(""),
+        Text2d::new(""),
         TextFont { font_size: FontSize::Px(20.0), ..default() },
-        Node { position_type: PositionType::Absolute, left: Val::Px(24.0), bottom: Val::Px(20.0), ..default() },
+        bevy::sprite::Anchor::BOTTOM_LEFT,
+        Transform::from_xyz(-SCREEN_WIDTH * 0.5 + 24.0, -SCREEN_HEIGHT * 0.5 + 20.0, 10.8),
+        super::camera::hud::hud_render_layer(),
         HudTextVisual,
     ));
 }
@@ -281,7 +283,7 @@ fn spawn_one_shot(commands: &mut Commands, handle: Handle<AudioSource>, volume: 
 fn sync_hud_text(
     state: Res<PlayState>,
     mut cache: Local<(String, String)>,
-    mut hud_text: Query<&mut Text, With<HudTextVisual>>,
+    mut hud_text: Query<&mut Text2d, With<HudTextVisual>>,
 ) {
     if cache.0 == state.score_text && cache.1 == state.status_message {
         return;
