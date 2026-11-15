@@ -216,15 +216,32 @@ impl NoteStyle {
         Ok(style)
     }
 
+    fn skin_rel_candidates(&self, rel: &str) -> Vec<String> {
+        let cleaned = rel.trim().replace('\\', "/");
+        let cleaned = cleaned.trim_start_matches("./").trim_start_matches('/');
+        if cleaned.starts_with("gameplay/") || cleaned.starts_with("noteskins/") {
+            vec![
+                cleaned.to_string(),
+                format!("gameplay/noteskins/{}/{cleaned}", self.id),
+                format!("noteskins/{}/{cleaned}", self.id),
+            ]
+        } else {
+            vec![
+                format!("gameplay/noteskins/{}/{cleaned}", self.id),
+                format!("noteskins/{}/{cleaned}", self.id),
+            ]
+        }
+    }
+
     pub fn asset_path(&self, rel: &str) -> String {
-        format!("gameplay/noteskins/{}/{rel}", self.id)
+        let raw = format!("gameplay/noteskins/{}/{}", self.id, rel.trim());
+        ModRegistry::normalize_rel_path(&raw)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| format!("gameplay/noteskins/{}/{}", self.id, rel.trim()))
     }
 
     pub fn asset_path_in(&self, mods: &ModRegistry, rel: &str) -> String {
-        for candidate in [
-            format!("gameplay/noteskins/{}/{rel}", self.id),
-            format!("noteskins/{}/{rel}", self.id),
-        ] {
+        for candidate in self.skin_rel_candidates(rel) {
             if let Some(path) = mods.resolve_asset_server_path(&candidate) {
                 return path;
             }
@@ -234,20 +251,17 @@ impl NoteStyle {
 
     pub fn disk_xml(&self, rel: &str) -> PathBuf {
         let xml_rel = Path::new(rel).with_extension("xml");
-        resolve_assets_dir()
-            .join("gameplay")
-            .join("noteskins")
-            .join(&self.id)
-            .join(xml_rel)
+        let xml_str = xml_rel.to_string_lossy().replace('\\', "/");
+        let raw = format!("gameplay/noteskins/{}/{xml_str}", self.id);
+        let safe = ModRegistry::normalize_rel_path(&raw)
+            .unwrap_or_else(|_| PathBuf::from(format!("gameplay/noteskins/{}", self.id)));
+        resolve_assets_dir().join(safe)
     }
 
     pub fn disk_xml_in(&self, mods: &ModRegistry, rel: &str) -> PathBuf {
         let xml_rel = Path::new(rel).with_extension("xml");
         let xml_str = xml_rel.to_string_lossy().replace('\\', "/");
-        for candidate in [
-            format!("gameplay/noteskins/{}/{xml_str}", self.id),
-            format!("noteskins/{}/{xml_str}", self.id),
-        ] {
+        for candidate in self.skin_rel_candidates(&xml_str) {
             if let Some(found) = mods.resolve_file(&candidate) {
                 return found;
             }
@@ -274,9 +288,10 @@ impl NoteStyle {
 
     pub fn health_bar_asset_in(&self, mods: &ModRegistry) -> String {
         if let Some(rel) = &self.health_bar.path {
-            let candidate = self.asset_path(rel);
-            if let Some(resolved) = mods.resolve_asset_server_path(&candidate) {
-                return resolved;
+            for candidate in self.skin_rel_candidates(rel) {
+                if let Some(resolved) = mods.resolve_asset_server_path(&candidate) {
+                    return resolved;
+                }
             }
         }
         let fallback = "gameplay/noteskins/funkin/health-bar.png";

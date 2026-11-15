@@ -293,7 +293,7 @@
         6,
         6
       ],
-      "file": "school/bg-freaks",
+      "file": "../school/bg-freaks",
       "animation": "sparrow",
       "visible": true,
       "opacity": 0,

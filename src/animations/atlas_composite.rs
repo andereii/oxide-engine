@@ -130,6 +130,26 @@ pub fn compute_composite_bounds(pieces: &[CompositePiece]) -> ([f32; 2], [f32; 2
     )
 }
 
+pub fn compute_clips_bounds<'a>(
+    clips: impl Iterator<Item = &'a CompositeClip>,
+) -> Option<([f32; 2], [f32; 2])> {
+    let mut bounds = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    let mut any = false;
+    for clip in clips {
+        for frame in &clip.frames {
+            if expand_pieces_bounds(frame, &mut bounds) {
+                any = true;
+            }
+        }
+    }
+    any.then(|| {
+        (
+            [bounds[0], bounds[1]],
+            [(bounds[2] - bounds[0]).max(1.0), (bounds[3] - bounds[1]).max(1.0)],
+        )
+    })
+}
+
 #[inline]
 pub fn upright_size(piece: &CompositePiece) -> (f32, f32) {
     if piece.rotated {
@@ -139,22 +159,40 @@ pub fn upright_size(piece: &CompositePiece) -> (f32, f32) {
     }
 }
 
+fn find_symbol_layers<'a>(atlas: &'a AnimateAtlas, name: &str) -> Option<&'a [AnimateTimelineLayer]> {
+    if let Some(layers) = atlas.symbols.get(name) {
+        return Some(layers);
+    }
+    let trimmed = name.trim();
+    if let Some((_, layers)) = atlas
+        .symbols
+        .iter()
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case(trimmed))
+    {
+        return Some(layers);
+    }
+    if !atlas.main_symbol.is_empty() && atlas.main_symbol.trim().eq_ignore_ascii_case(trimmed) {
+        return Some(&atlas.main_layers);
+    }
+    None
+}
+
 fn sample_composite_timeline(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
     anim_type: &str,
     prefix: &str,
 ) -> Vec<Vec<CompositePiece>> {
-    if anim_type.eq_ignore_ascii_case("symbol") {
-        if let Some(layers) = atlas.symbols.get(prefix) {
-            return sample_layers_composite(atlas, indices, layers, None);
-        }
+    if anim_type.eq_ignore_ascii_case("symbol")
+        && let Some(layers) = find_symbol_layers(atlas, prefix)
+    {
+        return sample_layers_composite(atlas, indices, layers, None);
     }
     let ticks = atlas.find_frame_label_indices(prefix);
     if !ticks.is_empty() {
         return sample_layer_ticks(atlas, indices, &atlas.main_layers, &ticks);
     }
-    if let Some(layers) = atlas.symbols.get(prefix) {
+    if let Some(layers) = find_symbol_layers(atlas, prefix) {
         return sample_layers_composite(atlas, indices, layers, None);
     }
     Vec::new()

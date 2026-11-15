@@ -1,0 +1,196 @@
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use rhai::{Engine, EvalAltResult, Module, ModuleResolver, Position, Scope, Shared};
+
+use crate::mods::ModRegistry;
+use crate::utils::constants::SCRIPT_EXT_RHAI;
+
+pub(super) struct VfsModuleResolver {
+    registry: ModRegistry,
+    cache: Mutex<HashMap<PathBuf, Shared<Module>>>,
+    loading: Mutex<HashSet<PathBuf>>,
+}
+
+struct LoadingGuard<'a> {
+    loading: &'a Mutex<HashSet<PathBuf>>,
+    path: PathBuf,
+}
+
+impl Drop for LoadingGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut set) = self.loading.lock() {
+            set.remove(&self.path);
+        }
+    }
+}
+
+impl VfsModuleResolver {
+    pub(super) fn new(registry: ModRegistry) -> Self {
+        Self {
+            registry,
+            cache: Mutex::new(HashMap::new()),
+            loading: Mutex::new(HashSet::new()),
+        }
+    }
+
+    fn candidate_paths(source_path: Option<&str>, raw_path: &str) -> Vec<String> {
+        let cleaned = raw_path.trim().replace('\\', "/");
+        let cleaned = cleaned.strip_prefix("./").unwrap_or(&cleaned);
+        let mut candidates = Vec::new();
+        if let Some(src) = source_path
+            && let Some((parent, _)) = src.rsplit_once('/')
+            && !parent.is_empty()
+        {
+            candidates.push(format!("{parent}/{cleaned}"));
+        }
+        candidates.push(cleaned.to_string());
+        if !cleaned.starts_with("../") && !cleaned.starts_with("modules/") {
+            candidates.push(format!("modules/{cleaned}"));
+        }
+        if !cleaned.starts_with("../") && !cleaned.starts_with("scripts/") {
+            candidates.push(format!("scripts/{cleaned}"));
+        }
+        candidates
+    }
+
+    fn resolve_candidate(&self, candidate: &str) -> Option<(PathBuf, String)> {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let mut probes = vec![trimmed.to_string()];
+        let has_rhai_ext = Path::new(trimmed)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case(SCRIPT_EXT_RHAI));
+        if !has_rhai_ext {
+            probes.push(format!("{trimmed}.{SCRIPT_EXT_RHAI}"));
+        }
+        for probe in probes {
+            if let Ok(norm) = ModRegistry::normalize_rel_path(&probe)
+                && let Some(disk_path) = self.registry.resolve_file(&probe)
+            {
+                let vfs_rel = norm.to_string_lossy().replace('\\', "/");
+                return Some((disk_path, vfs_rel));
+            }
+        }
+        None
+    }
+
+    fn resolve_vfs_target(
+        &self,
+        source_path: Option<&str>,
+        raw_path: &str,
+    ) -> Option<(PathBuf, String)> {
+        for cand in Self::candidate_paths(source_path, raw_path) {
+            if let Some(hit) = self.resolve_candidate(&cand) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+}
+
+impl ModuleResolver for VfsModuleResolver {
+    fn resolve(
+        &self,
+        engine: &Engine,
+        source_path: Option<&str>,
+        path: &str,
+        pos: Position,
+    ) -> Result<Shared<Module>, Box<EvalAltResult>> {
+        let (disk_path, vfs_rel) = self
+            .resolve_vfs_target(source_path, path)
+            .ok_or_else(|| Box::new(EvalAltResult::ErrorModuleNotFound(path.to_string(), pos)))?;
+
+        if let Ok(cache) = self.cache.lock()
+            && let Some(cached) = cache.get(&disk_path)
+        {
+            return Ok(cached.clone());
+        }
+
+        {
+            let mut loading = self.loading.lock().map_err(|_| {
+                Box::new(EvalAltResult::ErrorInModule(
+                    vfs_rel.clone(),
+                    "module loader mutex poisoned".into(),
+                    pos,
+                ))
+            })?;
+            if !loading.insert(disk_path.clone()) {
+                return Err(Box::new(EvalAltResult::ErrorInModule(
+                    vfs_rel,
+                    format!("circular module import detected for '{path}'").into(),
+                    pos,
+                )));
+            }
+        }
+        let _guard = LoadingGuard {
+            loading: &self.loading,
+            path: disk_path.clone(),
+        };
+
+        let code = fs::read_to_string(&disk_path).map_err(|err| {
+            Box::new(EvalAltResult::ErrorInModule(
+                vfs_rel.clone(),
+                format!("failed to read module '{}': {err}", disk_path.display()).into(),
+                pos,
+            ))
+        })?;
+
+        let mut module_ast = engine.compile(&code).map_err(|err| {
+            Box::new(EvalAltResult::ErrorInModule(
+                vfs_rel.clone(),
+                Box::new(EvalAltResult::from(err)),
+                pos,
+            ))
+        })?;
+        module_ast.set_source(vfs_rel.clone());
+
+        let mut module = Module::eval_ast_as_new(Scope::new(), &module_ast, engine)
+            .map_err(|err| Box::new(EvalAltResult::ErrorInModule(vfs_rel.clone(), err, pos)))?;
+        module.build_index();
+
+        let shared = Shared::new(module);
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(disk_path, shared.clone());
+        }
+        Ok(shared)
+    }
+}
+
+pub(super) fn vfs_rel_for_script(
+    registry: Option<&ModRegistry>,
+    script_path: Option<&Path>,
+    fallback_id: &str,
+) -> String {
+    let (Some(mods), Some(disk_path)) = (registry, script_path) else {
+        return fallback_id.to_string();
+    };
+    for loaded_mod in mods.mods.iter().rev() {
+        if let Ok(rel) = disk_path.strip_prefix(&loaded_mod.root) {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+    }
+    if let Ok(rel) = disk_path.strip_prefix(&mods.assets_dir) {
+        return rel.to_string_lossy().replace('\\', "/");
+    }
+    if let Ok(canon_disk) = disk_path.canonicalize() {
+        for loaded_mod in mods.mods.iter().rev() {
+            if let Ok(canon_root) = loaded_mod.root.canonicalize()
+                && let Ok(rel) = canon_disk.strip_prefix(&canon_root)
+            {
+                return rel.to_string_lossy().replace('\\', "/");
+            }
+        }
+        if let Ok(canon_assets) = mods.assets_dir.canonicalize()
+            && let Ok(rel) = canon_disk.strip_prefix(&canon_assets)
+        {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+    }
+    fallback_id.to_string()
+}

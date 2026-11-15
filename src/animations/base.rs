@@ -111,6 +111,7 @@ pub fn register_default_sparrow_idle(
 }
 
 /// Registers Adobe Animate Texture Atlas animations (`framelabel` or `symbol`).
+#[allow(dead_code)]
 pub fn add_animate_atlas_animations(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
@@ -151,6 +152,7 @@ pub fn add_animate_atlas_animations(
     }
 }
 
+#[allow(dead_code)]
 pub fn register_default_atlas_idle(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
@@ -188,6 +190,26 @@ fn slice_by_indices(
     (out_f, out_o, out_r)
 }
 
+#[allow(dead_code)]
+fn find_symbol_layers<'a>(atlas: &'a AnimateAtlas, name: &str) -> Option<&'a [AnimateTimelineLayer]> {
+    if let Some(layers) = atlas.symbols.get(name) {
+        return Some(layers);
+    }
+    let trimmed = name.trim();
+    if let Some((_, layers)) = atlas
+        .symbols
+        .iter()
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case(trimmed))
+    {
+        return Some(layers);
+    }
+    if !atlas.main_symbol.is_empty() && atlas.main_symbol.trim().eq_ignore_ascii_case(trimmed) {
+        return Some(&atlas.main_layers);
+    }
+    None
+}
+
+#[allow(dead_code)]
 fn collect_atlas_timeline(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
@@ -195,21 +217,22 @@ fn collect_atlas_timeline(
     anim_type: &str,
     prefix: &str,
 ) -> (Vec<usize>, Vec<[f32; 2]>, Vec<bool>) {
-    if anim_type.eq_ignore_ascii_case("symbol") {
-        if let Some(layers) = atlas.symbols.get(prefix) {
-            return sample_layers(atlas, indices, sprite_map, layers, None);
-        }
+    if anim_type.eq_ignore_ascii_case("symbol")
+        && let Some(layers) = find_symbol_layers(atlas, prefix)
+    {
+        return sample_layers(atlas, indices, sprite_map, layers, None);
     }
     let ticks = atlas.find_frame_label_indices(prefix);
     if !ticks.is_empty() {
         return sample_layer_ticks(atlas, indices, sprite_map, &atlas.main_layers, &ticks);
     }
-    if let Some(layers) = atlas.symbols.get(prefix) {
+    if let Some(layers) = find_symbol_layers(atlas, prefix) {
         return sample_layers(atlas, indices, sprite_map, layers, None);
     }
     (Vec::new(), Vec::new(), Vec::new())
 }
 
+#[allow(dead_code)]
 fn sample_layers(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
@@ -228,6 +251,7 @@ fn sample_layers(
     sample_layer_ticks(atlas, indices, sprite_map, layers, &ticks)
 }
 
+#[allow(dead_code)]
 fn sample_layer_ticks(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
@@ -249,6 +273,7 @@ fn sample_layer_ticks(
     (out_f, out_o, out_r)
 }
 
+#[allow(dead_code)]
 fn resolve_tick(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,

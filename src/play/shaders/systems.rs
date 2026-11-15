@@ -5,7 +5,7 @@ use crate::mods::ModRegistry;
 use crate::play::camera::hud::HudCamera;
 use crate::play::characters::{CharacterActor, CharacterRole};
 use crate::play::scene::PlayState;
-use crate::play::stage::{DynamicScriptProp, StagePropVisual, StageResource};
+use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual, StageResource};
 use crate::play::types::{LinearTween, PlayPhase, SongEventData};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::easing::EaseKind;
@@ -342,7 +342,7 @@ pub fn attach_stage_and_character_shaders(
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<FunkinSpriteMaterial>>,
     mut runtime: ResMut<StageShaderRuntime>,
-    props: Query<(Entity, &StagePropVisual), Without<ManagedSpriteShader>>,
+    props: Query<(Entity, &StagePropVisual, Option<&StageCompositeProp>), Without<ManagedSpriteShader>>,
     mut actors: Query<&mut CharacterActor>,
     char_shaders: Query<(), With<ManagedSpriteShader>>,
     cameras: Query<(Entity, Option<&RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
@@ -356,7 +356,7 @@ pub fn attach_stage_and_character_shaders(
     runtime.reset_for_stage(&stage_id, &song_id);
     runtime.attached = true;
 
-    for (entity, prop) in &props {
+    for (entity, prop, composite_opt) in &props {
         if let Some(mut cfg) = stage_prop_shader(&stage_id, &prop.name) {
             if stage_id == "sserafim" {
                 cfg.sserafim.adjust = runtime.sserafim.adjust;
@@ -364,6 +364,13 @@ pub fn attach_stage_and_character_shaders(
             let aux_rel = aux_path_for_config(&cfg).map(str::to_string);
             let aux_tex = load_aux_handle(&mods, &asset_server, aux_rel.as_deref());
             let handle = materials.add(FunkinSpriteMaterial::from_config(cfg, aux_tex));
+            if let Some(composite) = composite_opt {
+                for &piece_ent in &composite.piece_entities {
+                    if piece_ent != Entity::PLACEHOLDER {
+                        commands.entity(piece_ent).insert(SpriteMaterial(handle.clone()));
+                    }
+                }
+            }
             commands.entity(entity).insert((
                 SpriteMaterial(handle.clone()),
                 ManagedSpriteShader {

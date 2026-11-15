@@ -209,7 +209,7 @@
         1,
         1
       ],
-      "file": "limoRide/fast-car",
+      "file": "../limoRide/fast-car",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -233,7 +233,7 @@
         1,
         1
       ],
-      "file": "limoRide/henchmen",
+      "file": "../limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -339,7 +339,7 @@
         1,
         1
       ],
-      "file": "limoRide/henchmen",
+      "file": "../limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -445,7 +445,7 @@
         1,
         1
       ],
-      "file": "limoRide/henchmen",
+      "file": "../limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -551,7 +551,7 @@
         1,
         1
       ],
-      "file": "limoRide/henchmen",
+      "file": "../limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -657,7 +657,7 @@
         1,
         1
       ],
-      "file": "limoRide/henchmen",
+      "file": "../limoRide/henchmen",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

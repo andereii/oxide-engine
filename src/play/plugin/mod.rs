@@ -92,7 +92,7 @@ impl Plugin for PlayPlugin {
     fn build(&self, app: &mut App) {
         let mods = ModRegistry::from_default_dirs();
         let mod_store = ModStore::with_root(&mods.mods_dir);
-        let script_host = ScriptHost::with_default_backends();
+        let script_host = ScriptHost::with_registry(mods.clone());
 
         let mut selection = SongSelection::default();
         if let Some(song) = &self.flags.song_id {

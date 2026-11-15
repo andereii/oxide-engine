@@ -25,9 +25,13 @@ pub(super) fn get_or_load_sparrow(
     if let Some(&hit) = sheet_cache.get(&key) {
         return Some(hit);
     }
-    let rel_base = resolve_char_rel(char_id, raw_path);
-    let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
-    let xml = mods.resolve_file(&ensure_ext_str(&rel_base, "xml"))?;
+    let (png, xml) = char_rel_candidates(char_id, raw_path)
+        .into_iter()
+        .find_map(|rel_base| {
+            let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
+            let xml = mods.resolve_file(&ensure_ext_str(&rel_base, "xml"))?;
+            Some((png, xml))
+        })?;
     let atlas = SparrowAtlas::from_file(&xml).ok()?;
     let (layout, indices) = atlas.build_layout();
     let frame_sizes = atlas
@@ -68,12 +72,13 @@ pub(super) fn get_or_load_animate(
     if let Some(hit) = atlas_cache.get(raw_path) {
         return Some(hit.clone());
     }
-    let rel_dir = resolve_char_rel(char_id, raw_path);
-    let dir = mods.resolve_dir(&rel_dir)?;
-    let png = dir.join("spritemap1.png");
-    if !dir.join("Animation.json").is_file() || !png.is_file() {
-        return None;
-    }
+    let (dir, png) = char_rel_candidates(char_id, raw_path)
+        .into_iter()
+        .find_map(|rel_dir| {
+            let dir = mods.resolve_dir(&rel_dir)?;
+            let png = dir.join("spritemap1.png");
+            (dir.join("Animation.json").is_file() && png.is_file()).then_some((dir, png))
+        })?;
     let atlas = AnimateAtlas::from_dir(&dir).ok()?;
     let (layout, indices) = atlas.build_layout();
     let (bounds_min, bounds_size) = compute_atlas_whole_bounds(&atlas, &indices);
@@ -97,9 +102,13 @@ pub(super) fn load_packer_source(
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Option<(SheetSource, PackerAtlas, HashMap<String, usize>)> {
-    let rel_base = resolve_char_rel(char_id, raw_path);
-    let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
-    let txt = mods.resolve_file(&ensure_ext_str(&rel_base, "txt"))?;
+    let (png, txt) = char_rel_candidates(char_id, raw_path)
+        .into_iter()
+        .find_map(|rel_base| {
+            let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
+            let txt = mods.resolve_file(&ensure_ext_str(&rel_base, "txt"))?;
+            Some((png, txt))
+        })?;
     let atlas = PackerAtlas::from_file(&txt).ok()?;
     let (layout, indices) = atlas.build_layout();
     let frame_sizes = atlas
@@ -125,12 +134,21 @@ pub(super) fn load_packer_source(
     ))
 }
 
-fn resolve_char_rel(char_id: &str, raw: &str) -> String {
-    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
+fn char_rel_candidates(char_id: &str, raw: &str) -> Vec<String> {
+    let normalized = raw.trim().replace('\\', "/");
+    let cleaned = normalized.trim_start_matches("./").trim_start_matches('/');
     if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
-        cleaned.to_string()
+        vec![
+            cleaned.to_string(),
+            format!("gameplay/characters/{char_id}/{cleaned}"),
+        ]
     } else {
-        format!("gameplay/characters/{char_id}/{cleaned}")
+        vec![
+            format!("gameplay/characters/{char_id}/{cleaned}"),
+            format!("gameplay/characters/{cleaned}"),
+            format!("characters/{char_id}/{cleaned}"),
+            format!("characters/{cleaned}"),
+        ]
     }
 }
 

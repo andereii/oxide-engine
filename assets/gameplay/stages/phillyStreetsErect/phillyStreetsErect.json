@@ -116,7 +116,7 @@
         1,
         1
       ],
-      "file": "phillyStreets/erect/phillyForegroundCity",
+      "file": "../phillyStreets/erect/phillyForegroundCity",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
@@ -189,7 +189,7 @@
         1,
         1
       ],
-      "file": "phillyStreets/philly-highway-lightmap",
+      "file": "../phillyStreets/philly-highway-lightmap",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

@@ -18,7 +18,7 @@ pub struct CompositeAffine2d {
 }
 
 pub fn apply_composite_affine_transforms(
-    mut query: Query<(&CompositeAffine2d, &mut GlobalTransform), With<CharacterPartVisual>>,
+    mut query: Query<(&CompositeAffine2d, &mut GlobalTransform)>,
 ) {
     for (aff, mut global_tf) in &mut query {
         if !aff.active {

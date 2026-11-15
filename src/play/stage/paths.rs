@@ -8,7 +8,8 @@ use crate::mods::ModRegistry;
 use crate::utils::constants::STAGES_ASSET_PATH;
 
 fn stage_rel_candidates(stage_id: &str, raw: &str) -> Vec<String> {
-    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
+    let normalized = raw.trim().replace('\\', "/");
+    let cleaned = normalized.trim_start_matches("./").trim_start_matches('/');
     if cleaned.starts_with("gameplay/") {
         vec![
             cleaned.to_string(),
@@ -16,10 +17,10 @@ fn stage_rel_candidates(stage_id: &str, raw: &str) -> Vec<String> {
         ]
     } else {
         vec![
-            format!("{STAGES_ASSET_PATH}/{cleaned}"),
             format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"),
-            format!("stages/{cleaned}"),
+            format!("{STAGES_ASSET_PATH}/{cleaned}"),
             format!("stages/{stage_id}/{cleaned}"),
+            format!("stages/{cleaned}"),
         ]
     }
 }
@@ -58,12 +59,28 @@ pub fn resolve_stage_image_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> 
 }
 
 fn stage_path_candidates(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Vec<PathBuf> {
-    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    if cleaned.starts_with("gameplay/") {
-        vec![assets_dir.join(cleaned), stage_dir.join(cleaned)]
-    } else {
-        vec![assets_dir.join(STAGES_ASSET_PATH).join(cleaned), stage_dir.join(cleaned)]
+    let normalized = raw.trim().replace('\\', "/");
+    let cleaned = normalized.trim_start_matches("./").trim_start_matches('/');
+    let mut raw_rels = Vec::new();
+    if let Ok(stage_rel) = stage_dir.strip_prefix(assets_dir) {
+        let stage_rel_str = stage_rel.to_string_lossy().replace('\\', "/");
+        if !stage_rel_str.is_empty() {
+            raw_rels.push(format!("{stage_rel_str}/{cleaned}"));
+        }
     }
+    if cleaned.starts_with("gameplay/") {
+        raw_rels.push(cleaned.to_string());
+    } else {
+        raw_rels.push(format!("{STAGES_ASSET_PATH}/{cleaned}"));
+    }
+
+    let mut out = Vec::new();
+    for rel in raw_rels {
+        if let Ok(safe) = ModRegistry::normalize_rel_path(&rel) {
+            out.push(assets_dir.join(safe));
+        }
+    }
+    out
 }
 
 pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {

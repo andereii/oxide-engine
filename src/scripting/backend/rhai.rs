@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rhai::{AST, CallFnOptions, Dynamic, Engine, Scope};
 
-use crate::mods::ScriptScope;
+use crate::mods::{ModRegistry, ScriptScope};
 use crate::scripting::api::{ScriptContext, script_clamp, script_lerp, script_remap};
 use crate::scripting::events::{HookKind, ScriptEvent};
 use crate::scripting::value::{ScriptLanguage, ScriptValue};
@@ -20,9 +20,10 @@ use super::api::stage::{
     register_character_and_modchart_api, register_props_tweens_timers_and_store_api,
 };
 use super::context::{RhaiEvent, register_event_type, with_tls_context};
+use super::rhai_resolver::{VfsModuleResolver, vfs_rel_for_script};
 use super::traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
 
-fn build_configured_engine() -> Arc<Engine> {
+fn build_configured_engine(registry: Option<ModRegistry>) -> Arc<Engine> {
     let mut engine = Engine::new();
     engine.set_max_operations(RHAI_MAX_OPERATIONS);
     engine.set_max_call_levels(RHAI_MAX_CALL_LEVELS);
@@ -30,6 +31,10 @@ fn build_configured_engine() -> Arc<Engine> {
     engine.set_max_array_size(RHAI_MAX_ARRAY_SIZE);
     engine.set_max_map_size(RHAI_MAX_MAP_SIZE);
     engine.set_max_string_size(RHAI_MAX_STRING_SIZE);
+
+    if let Some(mods) = registry {
+        engine.set_module_resolver(VfsModuleResolver::new(mods));
+    }
 
     register_event_type(&mut engine);
     register_core_and_song_api(&mut engine);
@@ -45,6 +50,7 @@ fn build_configured_engine() -> Arc<Engine> {
 
 pub struct RhaiBackend {
     engine: Arc<Engine>,
+    registry: Option<ModRegistry>,
 }
 
 impl Default for RhaiBackend {
@@ -56,7 +62,15 @@ impl Default for RhaiBackend {
 impl RhaiBackend {
     pub fn new() -> Self {
         Self {
-            engine: build_configured_engine(),
+            engine: build_configured_engine(None),
+            registry: None,
+        }
+    }
+
+    pub fn with_registry(registry: ModRegistry) -> Self {
+        Self {
+            engine: build_configured_engine(Some(registry.clone())),
+            registry: Some(registry),
         }
     }
 }
@@ -71,13 +85,16 @@ impl ScriptBackend for RhaiBackend {
     }
 
     fn compile(&self, source: ScriptSource) -> Result<Box<dyn ScriptInstance>, ScriptError> {
-        let ast = self
+        let mut ast = self
             .engine
             .compile(&source.code)
             .map_err(|err| ScriptError::Compile {
                 script_id: source.id.clone(),
                 message: err.to_string(),
             })?;
+        let source_label =
+            vfs_rel_for_script(self.registry.as_ref(), source.path.as_deref(), &source.id);
+        ast.set_source(source_label);
 
         let mut fn_arities = HashMap::new();
         for fn_meta in ast.iter_functions() {

@@ -164,7 +164,7 @@
         1,
         1
       ],
-      "file": "phillyTrain/train",
+      "file": "../phillyTrain/train",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

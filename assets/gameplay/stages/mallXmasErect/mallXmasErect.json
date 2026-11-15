@@ -235,7 +235,7 @@
         1.1,
         1
       ],
-      "file": "mallXmas/snow-foreground",
+      "file": "../mallXmas/snow-foreground",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -283,7 +283,7 @@
         1,
         1
       ],
-      "file": "mallXmas/santa",
+      "file": "../mallXmas/santa",
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,

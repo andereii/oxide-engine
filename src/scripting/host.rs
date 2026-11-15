@@ -50,6 +50,12 @@ impl ScriptHost {
         host
     }
 
+    pub fn with_registry(mods: ModRegistry) -> Self {
+        let mut host = Self::empty();
+        host.register_backend(Box::new(RhaiBackend::with_registry(mods)));
+        host
+    }
+
     pub fn register_backend(&mut self, backend: Box<dyn ScriptBackend>) {
         self.backends.insert(backend.language(), backend);
     }

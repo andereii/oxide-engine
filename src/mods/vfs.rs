@@ -144,18 +144,27 @@ impl ModRegistry {
         if replaced.is_empty() || replaced.starts_with('/') {
             return Err(ModError::InvalidPath(rel.to_string()));
         }
-        let mut out = PathBuf::new();
+        let mut parts: Vec<&std::ffi::OsStr> = Vec::new();
         for comp in Path::new(&replaced).components() {
             match comp {
-                Component::Normal(part) => out.push(part),
+                Component::Normal(part) => parts.push(part),
                 Component::CurDir => {}
-                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                Component::ParentDir => {
+                    if parts.pop().is_none() {
+                        return Err(ModError::InvalidPath(rel.to_string()));
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => {
                     return Err(ModError::InvalidPath(rel.to_string()));
                 }
             }
         }
-        if out.as_os_str().is_empty() {
+        if parts.is_empty() {
             return Err(ModError::InvalidPath(rel.to_string()));
+        }
+        let mut out = PathBuf::new();
+        for part in parts {
+            out.push(part);
         }
         Ok(out)
     }
