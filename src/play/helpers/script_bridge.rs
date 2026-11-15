@@ -67,6 +67,8 @@ impl PlayState {
             cam_angle_deg: self.camera.angle_deg,
             hud_zoom: self.camera.hud_zoom,
             char_positions: self.script_char_positions.clone(),
+            char_anims: self.script_char_anims.clone(),
+            char_anim_finished: self.script_char_anim_finished.clone(),
             lane_offsets,
             lane_angles,
             lane_scales,

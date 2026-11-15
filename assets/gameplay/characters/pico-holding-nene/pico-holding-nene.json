@@ -1,14 +1,24 @@
 {
   "version": "1.0.0",
   "name": "Pico (Holding Nene)",
+  "script": true,
   "assetPath": "gameplay/characters/pico-holding-nene/pico-holding-nene",
   "healthIcon": {
     "id": "pico"
   },
-  "offsets": [52, 16],
-  "cameraOffsets": [-32, 24],
+  "offsets": [
+    52,
+    16
+  ],
+  "cameraOffsets": [
+    -32,
+    24
+  ],
   "death": {
-    "cameraOffsets": [-100, 25]
+    "cameraOffsets": [
+      -100,
+      25
+    ]
   },
   "flipX": true,
   "renderType": "multianimateatlas",
@@ -66,27 +76,39 @@
       "assetPath": "gameplay/characters/pico-holding-nene/pico-holding-nene-dead",
       "name": "firstDeath",
       "prefix": "intro",
-      "offsets": [543, 0]
+      "offsets": [
+        543,
+        0
+      ]
     },
     {
       "assetPath": "gameplay/characters/pico-holding-nene/pico-holding-nene-dead",
       "name": "deathLoop",
       "prefix": "loop",
       "looped": true,
-      "offsets": [543, 0]
+      "offsets": [
+        543,
+        0
+      ]
     },
     {
       "assetPath": "gameplay/characters/pico-holding-nene/pico-holding-nene-dead",
       "name": "deathConfirm",
       "prefix": "confirm",
-      "offsets": [543, 0]
+      "offsets": [
+        543,
+        0
+      ]
     },
     {
       "assetPath": "gameplay/characters/pico-holding-nene/pico-holding-nene-dead",
       "name": "deathConfirm-loop",
       "prefix": "confirm loop",
       "looped": true,
-      "offsets": [543, 0]
+      "offsets": [
+        543,
+        0
+      ]
     }
   ]
 }

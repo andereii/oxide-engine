@@ -1,19 +1,29 @@
 {
   "version": "1.0.0",
   "name": "Pico (Christmas)",
+  "script": true,
   "assetPath": "gameplay/characters/pico-christmas/pico-christmas",
   "healthIcon": {
     "id": "pico",
     "flipX": false
   },
   "death": {
-    "cameraOffsets": [-18, 68],
+    "cameraOffsets": [
+      -18,
+      68
+    ],
     "cameraZoom": 1.0
   },
   "flipX": true,
   "renderType": "multianimateatlas",
-  "offsets": [43, 32],
-  "cameraOffsets": [47, 132],
+  "offsets": [
+    43,
+    32
+  ],
+  "cameraOffsets": [
+    47,
+    132
+  ],
   "animations": [
     {
       "name": "idle",

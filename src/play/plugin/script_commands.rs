@@ -6,6 +6,7 @@ use crate::scripting::{LogLevel, ScriptCommand, TweenProp};
 
 use super::super::camera::hud::hud_render_layer;
 use super::super::characters::CharacterActor;
+use super::super::notes::data::NoteDirection;
 use super::super::shaders::systems::{ShaderScriptCommand, parse_wiggle_effect_type};
 use super::super::stage::schema::StageCoordMode;
 use super::super::stage::{DynamicScriptProp, StagePropVisual};
@@ -41,6 +42,7 @@ pub(super) fn apply_ecs_script_commands(
                     if actor_matches_target(&actor, target) {
                         actor.controller.play(anim, *force, false, 0);
                         actor.hold_timer = 0.0;
+                        actor.script_anim_override = true;
                         matched_actor = true;
                     }
                 }
@@ -51,6 +53,16 @@ pub(super) fn apply_ecs_script_commands(
                         {
                             ctrl.play(anim, *force, false, 0);
                         }
+                    }
+                }
+            }
+            ScriptCommand::PlaySing { target, dir, miss, suffix } => {
+                let note_dir = NoteDirection::from_int(*dir as i32);
+                for mut actor in actors.iter_mut() {
+                    if actor_matches_target(&actor, target) {
+                        actor.play_sing(note_dir, *miss, suffix);
+                        actor.hold_timer = 0.0;
+                        actor.script_anim_override = true;
                     }
                 }
             }
@@ -73,6 +85,14 @@ pub(super) fn apply_ecs_script_commands(
                 for mut actor in actors.iter_mut() {
                     if actor_matches_target(&actor, target) {
                         actor.mod_tint = *color;
+                    }
+                }
+            }
+            ScriptCommand::SetCharacterAlpha { target, alpha } => {
+                let alpha = alpha.clamp(0.0, 1.0);
+                for mut actor in actors.iter_mut() {
+                    if actor_matches_target(&actor, target) {
+                        actor.mod_tint[3] = alpha;
                     }
                 }
             }

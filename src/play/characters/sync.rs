@@ -83,15 +83,19 @@ pub fn sync_characters(
             actor.reset_character();
         } else if !paused {
             actor.on_update(elapsed_s, song_pos_ms, step_len_ms, player_holding);
-            for sig in player_signals.iter() {
-                actor.handle_player_signal(sig, &state.note_kinds);
-            }
-            for sig in opponent_signals.iter() {
-                actor.handle_opponent_signal(sig, &state.note_kinds);
-            }
-            if let Some(steps) = step_range.clone() {
-                for step in steps {
-                    actor.on_step_hit(step);
+            let skip_default_sing = actor.script_anim_override;
+            actor.script_anim_override = false;
+            if !skip_default_sing {
+                for sig in player_signals.iter() {
+                    actor.handle_player_signal(sig, &state.note_kinds);
+                }
+                for sig in opponent_signals.iter() {
+                    actor.handle_opponent_signal(sig, &state.note_kinds);
+                }
+                if let Some(steps) = step_range.clone() {
+                    for step in steps {
+                        actor.on_step_hit(step);
+                    }
                 }
             }
         }

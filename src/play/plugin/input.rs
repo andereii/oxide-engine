@@ -4,6 +4,7 @@ use crate::input::{Action, Controls, PreciseInputManager};
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost};
 
+use super::super::characters::CharactersResource;
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
 use super::super::stage::{DynamicScriptProp, StageResource};
@@ -24,6 +25,7 @@ pub(super) fn handle_play_input(
     mut state: ResMut<PlayState>,
     mut playlist: ResMut<PlayStatePlaylist>,
     stage_res: Option<Res<StageResource>>,
+    chars_res: Option<Res<CharactersResource>>,
     dyn_props: Query<Entity, With<DynamicScriptProp>>,
 ) {
     if controls.just_pressed(&keys, Action::ReloadMods) {
@@ -53,6 +55,16 @@ pub(super) fn handle_play_input(
             .as_deref()
             .filter(|s| s.scripts)
             .map(|s| (s.stage_id.clone(), s.json_path.clone()));
+        let char_script_sources: Vec<(String, std::path::PathBuf)> = chars_res
+            .as_deref()
+            .map(|cr| {
+                cr.characters
+                    .iter()
+                    .filter(|c| c.data.script)
+                    .map(|c| (c.id.clone(), c.json_path.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let cmds = load_and_init_scripts(
             &mods,
             &mut mod_store,
@@ -60,6 +72,7 @@ pub(super) fn handle_play_input(
             &mut state,
             &mut playlist,
             stage_script_source.as_ref(),
+            &char_script_sources,
         );
         pending_ecs.0.extend(cmds);
         state.status_message = format!(

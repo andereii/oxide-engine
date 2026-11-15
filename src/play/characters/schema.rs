@@ -83,6 +83,8 @@ pub struct CharacterData {
     pub apply_stage_matrix: Option<bool>,
     #[serde(rename = "atlasSettings")]
     pub atlas_settings: Option<AtlasSettings>,
+    #[serde(default, alias = "scripts")]
+    pub script: bool,
 }
 
 impl CharacterData {
@@ -115,6 +117,7 @@ impl Default for CharacterData {
             flip_x: false,
             apply_stage_matrix: None,
             atlas_settings: None,
+            script: false,
         }
     }
 }

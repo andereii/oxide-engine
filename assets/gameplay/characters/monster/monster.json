@@ -1,10 +1,17 @@
 {
   "version": "1.0.0",
   "name": "Monster",
+  "script": true,
   "assetPath": "gameplay/characters/monster/monster",
   "renderType": "animateatlas",
-  "offsets": [0, 1],
-  "cameraOffsets": [0, 29],
+  "offsets": [
+    0,
+    1
+  ],
+  "cameraOffsets": [
+    0,
+    29
+  ],
   "animations": [
     {
       "name": "idle",

@@ -47,6 +47,7 @@ pub(super) fn build_watch_plan(res: &HotReloadRes) -> WatchPlan {
             &res.mods,
             &res.state,
             res.stage_res.as_deref(),
+            res.chars_res.as_deref(),
             &res.script_host,
         ),
         audio: build_audio_watch(&res.mods, &res.state),
@@ -455,6 +456,7 @@ pub(super) fn build_script_watch(
     mods: &ModRegistry,
     state: &PlayState,
     stage: Option<&StageResource>,
+    chars: Option<&CharactersResource>,
     script_host: &ScriptHost,
 ) -> DomainWatch {
     let mut w = DomainWatch::default();
@@ -470,6 +472,16 @@ pub(super) fn build_script_watch(
         }
         if let Some(parent) = st.json_path.parent() {
             track_script_dir_tree(&mut w, parent, 2);
+        }
+    }
+    if let Some(chars_res) = chars {
+        for ch in &chars_res.characters {
+            for ext in ["rhai", "lua", "hxc"] {
+                w.track_meta(ch.json_path.with_extension(ext));
+            }
+            if let Some(parent) = ch.json_path.parent() {
+                track_script_dir_tree(&mut w, parent, 2);
+            }
         }
     }
     let stage_id = &state.chart.stage_id;

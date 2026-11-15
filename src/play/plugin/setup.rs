@@ -8,7 +8,9 @@ use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptV
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
-use super::super::characters::{CharacterRole, load_characters_resource, spawn_characters};
+use super::super::characters::{
+    CharacterRole, append_character_sidecar_scripts, load_characters_resource, spawn_characters,
+};
 use super::super::hud::countdown::load_countdown_assets;
 use super::super::hud::healthbar::spawn_health_bar;
 use super::super::hud::popups::load_popup_assets;
@@ -45,6 +47,7 @@ pub(super) fn setup_play_scene(
 
     if !state.critical_failure {
         let mut stage_script_source: Option<(String, std::path::PathBuf)> = None;
+        let mut char_script_sources: Vec<(String, std::path::PathBuf)> = Vec::new();
         if !state.is_minimal_mode {
             let stage_id = state.chart.stage_id.clone();
             let loaded_stage = match load_stage_resource(&mods, &stage_id, &asset_server, &mut layouts) {
@@ -99,6 +102,9 @@ pub(super) fn setup_play_scene(
                     .script_char_positions
                     .entry(alias.to_string())
                     .or_insert(c.slot.position);
+                if c.data.script {
+                    char_script_sources.push((c.id.clone(), c.json_path.clone()));
+                }
             }
             spawn_characters(&mut commands, &chars);
             spawn_health_bar(
@@ -157,6 +163,7 @@ pub(super) fn setup_play_scene(
             &mut state,
             &mut playlist,
             stage_script_source.as_ref(),
+            &char_script_sources,
         );
         pending_ecs.0.extend(cmds);
     }
@@ -178,6 +185,7 @@ pub(crate) fn load_and_init_scripts(
     state: &mut PlayState,
     playlist: &mut PlayStatePlaylist,
     stage_script_source: Option<&(String, std::path::PathBuf)>,
+    char_script_sources: &[(String, std::path::PathBuf)],
 ) -> Vec<ScriptCommand> {
     let mut char_ids: Vec<&str> = Vec::new();
     for id in &state.chart.characters.players {
@@ -228,6 +236,12 @@ pub(crate) fn load_and_init_scripts(
     if let Some((stage_id, json_path)) = stage_script_source {
         let supported = script_host.supported_extensions();
         append_stage_sidecar_scripts(mods, stage_id, json_path, &supported, &mut discovered);
+    }
+    if !char_script_sources.is_empty() {
+        let supported = script_host.supported_extensions();
+        for (char_id, json_path) in char_script_sources {
+            append_character_sidecar_scripts(mods, char_id, json_path, &supported, &mut discovered);
+        }
     }
     script_host.load_discovered(&discovered);
     for err in &script_host.compile_errors {

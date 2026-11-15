@@ -182,7 +182,18 @@ pub(crate) fn hot_reload_assets_system(
         }
 
         if force_chars {
+            let had_char_scripts = res
+                .chars_res
+                .as_deref()
+                .is_some_and(|cr| cr.characters.iter().any(|c| c.data.script));
             reload_all_characters_domain(&mut commands, &mut res, &mut q);
+            let has_char_scripts = res
+                .chars_res
+                .as_deref()
+                .is_some_and(|cr| cr.characters.iter().any(|c| c.data.script));
+            if had_char_scripts != has_char_scripts || has_char_scripts {
+                reload_scripts = true;
+            }
         } else {
             for (char_id, char_diff) in evt.chars {
                 let old_watch = hmr.plan.chars.get(&char_id).cloned().unwrap_or_default();
@@ -195,8 +206,15 @@ pub(crate) fn hot_reload_assets_system(
                     }
                     DomainDiff::Full(paths) => {
                         reload_asset_paths(&res.asset_server, &paths);
+                        let old_char_script =
+                            find_loaded_char(res.chars_res.as_deref(), &char_id)
+                                .is_some_and(|c| c.data.script);
                         reload_single_character_domain(&mut commands, &mut res, &mut q, &char_id);
                         let loaded = find_loaded_char(res.chars_res.as_deref(), &char_id);
+                        let new_char_script = loaded.is_some_and(|c| c.data.script);
+                        if old_char_script != new_char_script || new_char_script {
+                            reload_scripts = true;
+                        }
                         let new_watch = build_character_watch(&res.mods, &char_id, loaded);
                         let extra_paths =
                             new_watch.collect_changed_or_new_server_paths(&old_watch);

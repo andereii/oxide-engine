@@ -236,8 +236,10 @@ impl PlayState {
             }
             ScriptCommand::Log { .. }
             | ScriptCommand::PlayAnim { .. }
+            | ScriptCommand::PlaySing { .. }
             | ScriptCommand::SetCharacterScale { .. }
             | ScriptCommand::SetCharacterTint { .. }
+            | ScriptCommand::SetCharacterAlpha { .. }
             | ScriptCommand::SetCharacterVisible { .. }
             | ScriptCommand::SetCharacterDanceEvery { .. }
             | ScriptCommand::SetPropVisible { .. }

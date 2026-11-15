@@ -114,6 +114,7 @@ impl PlayState {
                 HookKind::SongEvent,
                 ScriptEvent::new(HookKind::SongEvent)
                     .with_field("name", event.kind.clone())
+                    .with_field("kind", event.kind.clone())
                     .with_field("time", event.time_ms)
                     .with_field("value", ScriptValue::from_json(&event.raw_value)),
             ));

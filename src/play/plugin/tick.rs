@@ -41,19 +41,35 @@ pub(super) fn tick_play_state(
         sync.was_countdown = true;
     }
 
+    let mut seen_aliases = [false; 3];
     for actor in &scripts.actors {
         state
             .script_char_positions
             .insert(actor.id.clone(), actor.slot.position);
-        let alias = match actor.role {
-            CharacterRole::Player => "bf",
-            CharacterRole::Opponent => "dad",
-            CharacterRole::Spectator => "gf",
+        let cur_anim = actor.controller.current.clone().unwrap_or_default();
+        let anim_finished = actor.controller.is_finished();
+        state
+            .script_char_anims
+            .insert(actor.id.clone(), cur_anim.clone());
+        state
+            .script_char_anim_finished
+            .insert(actor.id.clone(), anim_finished);
+        let (alias, role_idx) = match actor.role {
+            CharacterRole::Player => ("bf", 0),
+            CharacterRole::Opponent => ("dad", 1),
+            CharacterRole::Spectator => ("gf", 2),
         };
         state
             .script_char_positions
             .entry(alias.to_string())
             .or_insert(actor.slot.position);
+        if !seen_aliases[role_idx] {
+            seen_aliases[role_idx] = true;
+            state.script_char_anims.insert(alias.to_string(), cur_anim);
+            state
+                .script_char_anim_finished
+                .insert(alias.to_string(), anim_finished);
+        }
     }
     for (_, vis, sprite, _, _) in &scripts.props {
         state

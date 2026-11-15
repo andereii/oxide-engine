@@ -32,6 +32,43 @@ pub fn register_character_and_modchart_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn("play_sing", |target: &str, dir: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let dir = dyn_to_usize(&dir)?;
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::PlaySing {
+                target: target.to_string(),
+                dir,
+                miss: false,
+                suffix: String::new(),
+            });
+        })
+    });
+    engine.register_fn(
+        "play_sing",
+        |target: &str, dir: Dynamic, miss: bool, suffix: &str| -> Result<(), Box<EvalAltResult>> {
+            let dir = dyn_to_usize(&dir)?;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::PlaySing {
+                    target: target.to_string(),
+                    dir,
+                    miss,
+                    suffix: suffix.to_string(),
+                });
+            })
+        },
+    );
+    engine.register_fn("char_anim", |target: &str| {
+        with_ctx(|c| c.snapshot.char_anims.get(target).cloned().unwrap_or_default())
+    });
+    engine.register_fn("char_anim_finished", |target: &str| {
+        with_ctx(|c| {
+            c.snapshot
+                .char_anim_finished
+                .get(target)
+                .copied()
+                .unwrap_or(false)
+        })
+    });
     engine.register_fn("bf_anim", |name: &str| {
         with_ctx(|c| {
             c.commands.push(ScriptCommand::PlayAnim {
@@ -92,6 +129,15 @@ pub fn register_character_and_modchart_api(engine: &mut Engine) {
             c.commands.push(ScriptCommand::SetCharacterTint {
                 target: target.to_string(),
                 color: parse_hex_rgba(hex),
+            });
+        })
+    });
+    engine.register_fn("char_alpha", |target: &str, alpha: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let alpha = dyn_to_f64(&alpha)? as f32;
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetCharacterAlpha {
+                target: target.to_string(),
+                alpha,
             });
         })
     });

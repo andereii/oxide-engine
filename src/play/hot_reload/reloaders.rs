@@ -476,6 +476,17 @@ pub(super) fn reload_scripts_domain(
         .as_ref()
         .filter(|s| s.scripts)
         .map(|s| (s.stage_id.clone(), s.json_path.clone()));
+    let char_script_sources: Vec<(String, std::path::PathBuf)> = res
+        .chars_res
+        .as_ref()
+        .map(|cr| {
+            cr.characters
+                .iter()
+                .filter(|c| c.data.script)
+                .map(|c| (c.id.clone(), c.json_path.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let cmds = load_and_init_scripts(
         &res.mods,
@@ -484,6 +495,7 @@ pub(super) fn reload_scripts_domain(
         &mut res.state,
         &mut res.playlist,
         stage_script_source.as_ref(),
+        &char_script_sources,
     );
     res.pending_ecs.0.extend(cmds);
     if res.script_host.compile_errors.is_empty() && res.state.status_message.starts_with("HMR ") {

@@ -1,16 +1,33 @@
 {
   "version": "1.0.0",
   "name": "Pico (Speaker Shooter)",
+  "script": true,
   "assetPath": "gameplay/characters/pico-speaker/pico-speaker",
   "renderType": "animateatlas",
-  "offsets": [39, 6],
-  "cameraOffsets": [86, 8],
+  "offsets": [
+    39,
+    6
+  ],
+  "cameraOffsets": [
+    86,
+    8
+  ],
   "animations": [
     {
       "name": "idle",
       "prefix": "Shoot 1",
       "looped": true,
-      "frameIndices": [17, 18, 19, 20, 21, 22, 23, 24, 25]
+      "frameIndices": [
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25
+      ]
     },
     {
       "name": "shoot1",
@@ -20,7 +37,12 @@
       "name": "shoot1-hold",
       "prefix": "Shoot 1",
       "looped": true,
-      "frameIndices": [22, 23, 24, 25]
+      "frameIndices": [
+        22,
+        23,
+        24,
+        25
+      ]
     },
     {
       "name": "shoot2",
@@ -30,7 +52,12 @@
       "name": "shoot2-hold",
       "prefix": "Shoot 2",
       "looped": true,
-      "frameIndices": [56, 57, 58, 59]
+      "frameIndices": [
+        56,
+        57,
+        58,
+        59
+      ]
     },
     {
       "name": "shoot3",
@@ -40,7 +67,12 @@
       "name": "shoot3-hold",
       "prefix": "Shoot 3",
       "looped": true,
-      "frameIndices": [49, 50, 51, 52]
+      "frameIndices": [
+        49,
+        50,
+        51,
+        52
+      ]
     },
     {
       "name": "shoot4",
@@ -50,7 +82,12 @@
       "name": "shoot4-hold",
       "prefix": "Shoot 4",
       "looped": true,
-      "frameIndices": [49, 50, 51, 52]
+      "frameIndices": [
+        49,
+        50,
+        51,
+        52
+      ]
     }
   ]
 }

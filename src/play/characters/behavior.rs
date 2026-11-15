@@ -62,6 +62,7 @@ pub struct CharacterActor {
     pub sampler_applied: bool,
     pub mod_tint: [f32; 4],
     pub mod_visible: bool,
+    pub script_anim_override: bool,
     pub sheet_entity: Entity,
     pub piece_entities: Vec<Entity>,
 }

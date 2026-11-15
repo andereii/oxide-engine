@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
 use crate::animations::atlas_composite::sample_default_composite_clip;
 use crate::animations::base::add_sparrow_animation;
 use crate::animations::{AnimationController, SparrowAtlas, add_packer_animation, register_default_sparrow_idle};
-use crate::mods::ModRegistry;
+use crate::mods::{DiscoveredScript, ModRegistry, ScriptScope};
 use crate::play::stage::StageResource;
 use crate::play::stage::schema::StageCharacterSlot;
 use crate::play::types::CharactersMeta;
@@ -23,6 +24,7 @@ pub struct LoadedCharacter {
     pub id: String,
     pub role: CharacterRole,
     pub slot: StageCharacterSlot,
+    pub json_path: PathBuf,
     pub data: CharacterData,
     pub controller: AnimationController,
     pub sources: Vec<SheetSource>,
@@ -186,6 +188,7 @@ pub fn load_single_character(
         id: char_id.to_string(),
         role,
         slot,
+        json_path,
         data,
         controller,
         sources,
@@ -194,4 +197,55 @@ pub fn load_single_character(
         max_composite_pieces,
         facing_flip_x,
     })
+}
+
+/// If a character JSON enables `"script": true` (or `"scripts": true`), discover sidecar
+/// script files sharing the JSON's stem and directory for any supported script extension.
+pub fn append_character_sidecar_scripts(
+    mods: &ModRegistry,
+    char_id: &str,
+    json_path: &Path,
+    supported_exts: &[String],
+    discovered: &mut Vec<DiscoveredScript>,
+) {
+    let stem = json_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(char_id);
+    for ext in supported_exts {
+        let candidate = json_path.with_extension(ext);
+        if !candidate.is_file() {
+            continue;
+        }
+        let canon = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+        let already_loaded = discovered.iter().any(|d| {
+            fs::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()) == canon
+        });
+        if already_loaded {
+            continue;
+        }
+        let mut mod_id = "assets".to_string();
+        let mut rel_path = candidate
+            .strip_prefix(&mods.assets_dir)
+            .unwrap_or(&candidate)
+            .to_string_lossy()
+            .replace('\\', "/");
+        for m in &mods.mods {
+            if let Ok(rel) = candidate.strip_prefix(&m.root) {
+                mod_id = m.manifest.id.clone();
+                rel_path = rel.to_string_lossy().replace('\\', "/");
+                break;
+            }
+        }
+        discovered.push(DiscoveredScript {
+            id: format!("character:{char_id}:{stem}.{ext}"),
+            mod_id,
+            name: stem.to_string(),
+            extension: ext.to_ascii_lowercase(),
+            rel_path,
+            path: candidate,
+            scope: ScriptScope::Character(char_id.to_string()),
+            priority: 0,
+        });
+    }
 }

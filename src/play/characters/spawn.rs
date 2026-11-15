@@ -102,6 +102,7 @@ pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::L
         sampler_applied: false,
         mod_tint: [1.0; 4],
         mod_visible: true,
+        script_anim_override: false,
         sheet_entity,
         piece_entities,
     };

@@ -57,6 +57,12 @@ pub enum ScriptCommand {
         anim: String,
         force: bool,
     },
+    PlaySing {
+        target: String,
+        dir: usize,
+        miss: bool,
+        suffix: String,
+    },
     SetCharacterPos {
         target: String,
         x: f32,
@@ -70,6 +76,10 @@ pub enum ScriptCommand {
     SetCharacterTint {
         target: String,
         color: [f32; 4],
+    },
+    SetCharacterAlpha {
+        target: String,
+        alpha: f32,
     },
     SetCharacterVisible {
         target: String,

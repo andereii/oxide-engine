@@ -1,10 +1,17 @@
 {
   "version": "1.0.0",
   "name": "Tankman",
+  "script": true,
   "renderType": "multianimateatlas",
   "assetPath": "gameplay/characters/tankman/tankman-basic-animations",
-  "offsets": [3, -44],
-  "cameraOffsets": [-3, 32],
+  "offsets": [
+    3,
+    -44
+  ],
+  "cameraOffsets": [
+    -3,
+    32
+  ],
   "animations": [
     {
       "name": "idle",
@@ -30,31 +37,46 @@
       "assetPath": "gameplay/characters/tankman/tankman-extra-animations",
       "name": "hehPrettyGood",
       "prefix": "pretty good",
-      "offsets": [5, -40]
+      "offsets": [
+        5,
+        -40
+      ]
     },
     {
       "assetPath": "gameplay/characters/tankman/tankman-extra-animations",
       "name": "ugh",
       "prefix": "ugh",
-      "offsets": [5, -40]
+      "offsets": [
+        5,
+        -40
+      ]
     },
     {
       "assetPath": "gameplay/characters/tankman/tankman-extra-animations",
       "name": "laugh",
       "prefix": "laugh",
-      "offsets": [5, -40]
+      "offsets": [
+        5,
+        -40
+      ]
     },
     {
       "assetPath": "gameplay/characters/tankman/tankman-extra-animations",
       "name": "beat it",
       "prefix": "beat it",
-      "offsets": [5, -40]
+      "offsets": [
+        5,
+        -40
+      ]
     },
     {
       "assetPath": "gameplay/characters/tankman/tankman-extra-animations",
       "name": "augh",
       "prefix": "argh",
-      "offsets": [5, -40]
+      "offsets": [
+        5,
+        -40
+      ]
     }
   ]
 }
