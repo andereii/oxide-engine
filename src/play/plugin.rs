@@ -6,7 +6,7 @@ use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::characters::{CharacterSyncState, apply_composite_affine_transforms, load_characters_resource, spawn_characters, sync_characters};
-use super::hud::camera::{spawn_hud_camera, sync_hud_camera};
+use super::camera::hud::{spawn_hud_camera, sync_hud_camera};
 use super::hud::countdown::{load_countdown_assets, sync_countdown};
 use super::hud::healthbar::{spawn_health_bar, sync_health_bar};
 use super::hud::popups::{load_popup_assets, sync_popups};

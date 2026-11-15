@@ -119,6 +119,10 @@ pub struct SongEventData {
     pub strumline_target: String,
     pub render_distance_ms: Option<f64>,
     pub use_default_render_distance: bool,
+    pub target_char: Option<i64>,
+    pub bop_intensity: f64,
+    pub bop_rate: f64,
+    pub bop_offset: f64,
 }
 
 impl Default for SongEventData {
@@ -143,6 +147,10 @@ impl Default for SongEventData {
             strumline_target: "both".to_string(),
             render_distance_ms: None,
             use_default_render_distance: false,
+            target_char: None,
+            bop_intensity: 1.0,
+            bop_rate: 4.0,
+            bop_offset: 0.0,
         }
     }
 }
@@ -232,11 +240,9 @@ impl LinearTween {
     pub fn linear(start: f64, target: f64, duration_s: f64) -> Self {
         Self::eased(start, target, duration_s, EaseKind::Linear)
     }
-
     pub fn eased(start: f64, target: f64, duration_s: f64, ease: EaseKind) -> Self {
         Self { start, target, elapsed_s: 0.0, duration_s, ease }
     }
-
     pub fn value(&self) -> f64 {
         if self.duration_s <= 0.0 {
             return self.target;
@@ -254,6 +260,8 @@ impl LinearTween {
 #[derive(Debug, Clone)]
 pub struct CameraState {
     pub follow_point: [f64; 2],
+    pub follow_target: Option<[f64; 2]>,
+    pub focus_points: [Option<[f64; 2]>; 3],
     pub follow_x_tween: Option<LinearTween>,
     pub follow_y_tween: Option<LinearTween>,
     pub current_zoom: f64,
@@ -272,6 +280,8 @@ impl Default for CameraState {
     fn default() -> Self {
         Self {
             follow_point: [0.0, 0.0],
+            follow_target: None,
+            focus_points: [None; 3],
             follow_x_tween: None,
             follow_y_tween: None,
             current_zoom: DEFAULT_CAMERA_ZOOM,

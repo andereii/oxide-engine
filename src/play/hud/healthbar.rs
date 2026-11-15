@@ -11,7 +11,7 @@ use crate::utils::constants::{
 };
 use crate::utils::ecs::{set_sprite_custom_size, set_transform_pos_scale};
 
-use super::camera::hud_render_layer;
+use crate::play::camera::hud::hud_render_layer;
 use super::health_icon::{HealthIcon, spawn_health_icons, update_icon_state_and_transform};
 
 #[derive(Component)]

@@ -6,7 +6,7 @@ use crate::animations::AnimationController;
 use crate::utils::constants::{KEY_COUNT, NOTE_SPLASH_CAP};
 
 use super::effects::{HoldCoverPhase, HoldCoverVisual, NoteSplashVisual};
-use crate::play::hud::camera::hud_render_layer;
+use crate::play::camera::hud::hud_render_layer;
 use crate::play::notes::render::{AnimClipFrames, NoteskinAssets};
 
 const SPLASH_KEYS: [[&str; 4]; KEY_COUNT] = [

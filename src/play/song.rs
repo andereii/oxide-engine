@@ -147,6 +147,7 @@ pub fn load_song_chart(song_id: &str, difficulty: &str, variation: &str) -> Resu
         .map(|(_, v)| v);
 
     let mut chart = merge_metadata(song_id, &diff_key, variation, &meta, overlay);
+    chart.events = crate::play::camera::events::load_song_events(&chart_dir.join("events.json"), &diff_key);
 
     let raw_notes = all_charts
         .iter()

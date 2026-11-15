@@ -4,7 +4,7 @@ use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 use crate::utils::constants::{HIT_WINDOW_MS, KEY_COUNT};
 
-use crate::play::hud::camera::hud_render_layer;
+use crate::play::camera::hud::hud_render_layer;
 use crate::play::notes::strum::Strumline;
 use super::visuals::{NoteVisual, NoteskinAssets, ReceptorVisual, SustainBodyVisual, SustainEndVisual};
 

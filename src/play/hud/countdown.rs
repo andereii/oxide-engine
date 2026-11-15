@@ -6,7 +6,7 @@ use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
 
-use super::camera::hud_render_layer;
+use crate::play::camera::hud::hud_render_layer;
 
 #[derive(Clone)]
 pub struct CountdownGraphicSpec {

@@ -15,7 +15,7 @@ use crate::utils::constants::{
 };
 use crate::utils::ecs::{set_atlas_index, set_sprite_flip, set_transform_full};
 
-use super::camera::hud_render_layer;
+use crate::play::camera::hud::hud_render_layer;
 
 #[derive(Component)]
 pub struct HealthIcon {

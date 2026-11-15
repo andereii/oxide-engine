@@ -14,14 +14,10 @@ use crate::utils::ecs::{
 };
 
 use super::behavior::{CharacterActor, ClipVisual};
+use super::schema::CharacterRole;
 use super::spawn::{CharacterPartVisual, CompositeAffine2d};
 
-type CharPartsQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static mut Sprite, &'static mut Transform, &'static mut Visibility, &'static mut CompositeAffine2d),
-    With<CharacterPartVisual>,
->;
+type CharPartsQuery<'w, 's> = Query<'w, 's, (&'static mut Sprite, &'static mut Transform, &'static mut Visibility, &'static mut CompositeAffine2d), With<CharacterPartVisual>>;
 
 #[derive(Resource, Default)]
 pub struct CharacterSyncState {
@@ -102,6 +98,9 @@ pub fn sync_characters(
                 actor.on_step_hit(current_step);
             }
         }
+
+        let idx = match actor.role { CharacterRole::Player => 0, CharacterRole::Opponent => 1, CharacterRole::Spectator => 2 };
+        state.camera.focus_points[idx] = Some(actor.camera_focus_point);
 
         sync_actor_visuals(&actor, cam_scroll_x, cam_scroll_y, zoom, &mut parts);
     }
