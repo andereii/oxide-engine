@@ -19,5 +19,6 @@ pub struct TrackHandle {
     pub entity: Option<Entity>,
     pub started: bool,
     pub pending: bool,
+    pub resync_cooldown_s: f64,
 }
 

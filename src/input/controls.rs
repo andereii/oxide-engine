@@ -109,9 +109,9 @@ impl Controls {
         self.bind_keys(Action::UiLeft, vec![KeyCode::KeyA, KeyCode::ArrowLeft]);
         self.bind_keys(Action::UiRight, vec![KeyCode::KeyD, KeyCode::ArrowRight]);
         self.bind_keys(Action::UiDown, vec![KeyCode::KeyS, KeyCode::ArrowDown]);
-        self.bind_keys(Action::Accept, vec![KeyCode::Space, KeyCode::Enter]);
-        self.bind_keys(Action::Back, vec![KeyCode::Backspace, KeyCode::Escape]);
-        self.bind_keys(Action::Pause, vec![KeyCode::Enter, KeyCode::Escape]);
+        self.bind_keys(Action::Accept, vec![KeyCode::KeyZ, KeyCode::Space, KeyCode::Enter]);
+        self.bind_keys(Action::Back, vec![KeyCode::KeyX, KeyCode::Backspace, KeyCode::Escape]);
+        self.bind_keys(Action::Pause, vec![KeyCode::KeyP, KeyCode::Enter, KeyCode::Escape]);
         self.bind_keys(Action::Reset, vec![KeyCode::KeyR]);
         self.bind_keys(Action::CutsceneAdvance, vec![KeyCode::KeyZ, KeyCode::Space, KeyCode::Enter]);
         self.bind_keys(Action::VolumeUp, vec![KeyCode::Equal, KeyCode::NumpadAdd]);
@@ -123,10 +123,10 @@ impl Controls {
 
         match scheme {
             KeyboardScheme::Solo => {
-                self.bind_keys(Action::NoteLeft, vec![KeyCode::KeyA, KeyCode::ArrowLeft, KeyCode::KeyD]);
-                self.bind_keys(Action::NoteDown, vec![KeyCode::KeyS, KeyCode::ArrowDown, KeyCode::KeyF]);
-                self.bind_keys(Action::NoteUp, vec![KeyCode::KeyW, KeyCode::ArrowUp, KeyCode::KeyJ]);
-                self.bind_keys(Action::NoteRight, vec![KeyCode::ArrowRight, KeyCode::KeyK]);
+                self.bind_keys(Action::NoteLeft, vec![KeyCode::KeyA, KeyCode::ArrowLeft]);
+                self.bind_keys(Action::NoteDown, vec![KeyCode::KeyS, KeyCode::ArrowDown]);
+                self.bind_keys(Action::NoteUp, vec![KeyCode::KeyW, KeyCode::ArrowUp]);
+                self.bind_keys(Action::NoteRight, vec![KeyCode::KeyD, KeyCode::ArrowRight]);
             }
             KeyboardScheme::Duo(true) => {
                 self.bind_keys(Action::NoteLeft, vec![KeyCode::KeyA]);

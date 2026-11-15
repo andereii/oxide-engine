@@ -5,9 +5,38 @@ use bevy::prelude::{AssetServer, AudioSource, Commands, Query, Resource};
 
 use crate::play::song::song_asset_path;
 use crate::play::types::SongChart;
+use crate::utils::constants::RESYNC_THRESHOLD_MS;
 
 use super::sound::{TrackHandle, TrackRole};
 use super::voices::VoicesGroup;
+
+pub const RESYNC_COOLDOWN_S: f64 = 0.5;
+
+/// Only vocal tracks resync periodically (instrumental is the master clock),
+/// and never before `resync_cooldown_s` settles an async `rodio` seek.
+pub fn should_resync_track(role: TrackRole, cooldown_s: f64) -> bool {
+    role != TrackRole::Instrumental && cooldown_s <= 0.0
+}
+
+/// Returns `Some(target_ms)` when a started, non-pending audio track has drifted from
+/// `master_time_ms` beyond V-Slice's `RESYNC_THRESHOLD_MS` (40ms).
+pub fn track_resync_target_ms(
+    started: bool,
+    pending: bool,
+    actual_ms: f64,
+    master_time_ms: f64,
+    offset_ms: f64,
+) -> Option<f64> {
+    if !started || pending {
+        return None;
+    }
+    let target_ms = (master_time_ms - offset_ms).max(0.0);
+    if (actual_ms - target_ms).abs() > RESYNC_THRESHOLD_MS {
+        Some(target_ms)
+    } else {
+        None
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct SongAudioPlayer {
@@ -143,6 +172,7 @@ impl SongAudioPlayer {
             entity: Some(entity),
             started: false,
             pending: false,
+            resync_cooldown_s: 0.0,
         });
     }
 
@@ -177,6 +207,7 @@ impl SongAudioPlayer {
                 sink.pause();
                 track.pending = true;
                 track.started = false;
+                track.resync_cooldown_s = 0.0;
             } else {
                 if target_ms > 20.0 {
                     let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
@@ -184,6 +215,7 @@ impl SongAudioPlayer {
                 sink.play();
                 track.pending = false;
                 track.started = true;
+                track.resync_cooldown_s = RESYNC_COOLDOWN_S;
             }
         }
     }
@@ -256,45 +288,86 @@ impl SongAudioPlayer {
             return None;
         }
         let inst = self.tracks.iter().find(|t| t.role == TrackRole::Instrumental)?;
+        if !inst.started || inst.pending {
+            return None;
+        }
         let entity = inst.entity?;
         let sink = sinks.get(entity).ok()?;
         if sink.is_paused() || sink.empty() {
             return None;
         }
-        Some(sink.position().as_secs_f64() * 1000.0 + inst.offset_ms)
+        let pos = sink.position();
+        if inst.resync_cooldown_s > 0.0 && pos.is_zero() {
+            return None;
+        }
+        Some(pos.as_secs_f64() * 1000.0 + inst.offset_ms)
     }
 
-    pub fn tick(&mut self, master_time_ms: f64, sinks: &mut Query<&mut AudioSink>) {
-        if !self.is_playing || self.is_paused || self.all_tracks_ready {
+    pub fn tick(&mut self, master_time_ms: f64, elapsed_s: f64, sinks: &mut Query<&mut AudioSink>) {
+        if !self.is_playing || self.is_paused {
             return;
         }
-        for track in &mut self.tracks {
-            if track.role == TrackRole::Instrumental && !track.started {
-                if let Some(entity) = track.entity {
-                    if let Ok(mut sink) = sinks.get_mut(entity) {
-                        let target_ms = (master_time_ms - track.offset_ms).max(0.0);
-                        if target_ms > 20.0 {
-                            let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
+        if !self.all_tracks_ready {
+            for track in &mut self.tracks {
+                if track.role == TrackRole::Instrumental && !track.started {
+                    if let Some(entity) = track.entity {
+                        if let Ok(mut sink) = sinks.get_mut(entity) {
+                            let target_ms = (master_time_ms - track.offset_ms).max(0.0);
+                            if target_ms > 20.0 {
+                                let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
+                            }
+                            sink.set_speed(self.playback_rate);
+                            sink.set_volume(Volume::Linear(
+                                (track.base_volume * self.instrumental_volume).clamp(0.0, 1.0),
+                            ));
+                            sink.play();
+                            track.started = true;
+                            track.pending = false;
+                            track.resync_cooldown_s = RESYNC_COOLDOWN_S;
                         }
-                        sink.set_speed(self.playback_rate);
-                        sink.set_volume(Volume::Linear(
-                            (track.base_volume * self.instrumental_volume).clamp(0.0, 1.0),
-                        ));
-                        sink.play();
-                        track.started = true;
-                        track.pending = false;
                     }
                 }
             }
+            self.voices.update_pending(
+                &mut self.tracks,
+                master_time_ms,
+                true,
+                self.playback_rate,
+                sinks,
+            );
+            self.all_tracks_ready = self.tracks.iter().all(|t| t.started && !t.pending);
         }
-        self.voices.update_pending(
-            &mut self.tracks,
-            master_time_ms,
-            true,
-            self.playback_rate,
-            sinks,
-        );
-        self.all_tracks_ready = self.tracks.iter().all(|t| t.started && !t.pending);
+
+        let sync_reference_ms = self.master_time_ms(sinks).unwrap_or(master_time_ms);
+
+        // Sync vocal tracks against actual instrumental time, with cooldown so async
+        // `rodio::Player::try_seek` settles without spamming blocking seeks every frame.
+        for track in &mut self.tracks {
+            track.resync_cooldown_s = (track.resync_cooldown_s - elapsed_s).max(0.0);
+            if !should_resync_track(track.role, track.resync_cooldown_s) {
+                continue;
+            }
+            let Some(entity) = track.entity else {
+                continue;
+            };
+            let Ok(sink) = sinks.get_mut(entity) else {
+                continue;
+            };
+            if sink.empty() || sink.is_paused() {
+                continue;
+            }
+            let actual_ms = sink.position().as_secs_f64() * 1000.0;
+            if let Some(target_ms) = track_resync_target_ms(
+                track.started,
+                track.pending,
+                actual_ms,
+                sync_reference_ms,
+                track.offset_ms,
+            ) {
+                let _ = sink.try_seek(Duration::from_secs_f64(target_ms / 1000.0));
+                track.resync_cooldown_s = RESYNC_COOLDOWN_S;
+            }
+        }
     }
 }
 

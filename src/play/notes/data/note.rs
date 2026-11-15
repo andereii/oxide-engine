@@ -75,6 +75,8 @@ pub struct ActiveHold {
     pub note_idx: usize,
     pub note_id: usize,
     pub lane: NoteDirection,
+    pub strum_time_ms: f64,
+    pub full_length_ms: f64,
     pub end_ms: f64,
     pub remaining_ms: f64,
     pub dropped: bool,

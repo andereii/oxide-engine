@@ -2,10 +2,11 @@ use std::collections::VecDeque;
 
 use bevy::prelude::Resource;
 
-use crate::utils::conductor::Conductor;
+use crate::utils::conductor::{Conductor, ConductorUpdate};
 use crate::utils::constants::{
-    DEFAULT_BOP_INTENSITY, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE, HEALTH_LERP_FACTOR, HEALTH_MAX,
-    HEALTH_MIN, HEALTH_STARTING,
+    CONDUCTOR_DRIFT_THRESHOLD_MS, DEFAULT_BOP_INTENSITY, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE,
+    HEALTH_LERP_FACTOR, HEALTH_MAX, HEALTH_MIN, HEALTH_STARTING, MAX_RELATIVE_CAM_ZOOM,
+    MUSIC_EASE_RATIO, STEPS_PER_BEAT,
 };
 
 use super::judgement::Tallies;
@@ -59,6 +60,7 @@ pub struct PlayState {
     pub score_text: String,
     pub status_message: String,
     pub last_hud_key: (i64, u32, u32, i32),
+    pub last_raw_audio_ms: Option<f64>,
 }
 
 impl PlayState {
@@ -115,6 +117,7 @@ impl PlayState {
             score_text: String::new(),
             status_message: String::new(),
             last_hud_key: (i64::MIN, u32::MAX, u32::MAX, i32::MIN),
+            last_raw_audio_ms: None,
         };
         state.create();
         state
@@ -131,6 +134,7 @@ impl PlayState {
     pub fn start_countdown(&mut self) {
         self.is_in_countdown = true;
         self.starting_song = true;
+        self.last_raw_audio_ms = None;
         self.phase = PlayPhase::Countdown;
         self.countdown_ticks_remaining = 4;
         self.countdown_timer_s = 0.0;
@@ -143,9 +147,49 @@ impl PlayState {
     pub fn start_song(&mut self) {
         self.starting_song = false;
         self.is_in_countdown = false;
+        self.last_raw_audio_ms = None;
         self.phase = PlayPhase::Playing;
         self.conductor.update(self.start_timestamp_ms);
         self.status_message = format!("Playing: {} [{}]", self.chart.song_name, self.current_difficulty);
+    }
+
+    fn sync_song_clock(&mut self, elapsed_s: f64, audio_time_ms: Option<f64>) -> ConductorUpdate {
+        const AUDIO_DRIFT_EASE_RATIO: f64 = 8.0;
+        let delta_ms = elapsed_s * 1000.0 * self.playback_rate;
+        let prev_pos = self.conductor.song_position_ms;
+        let predicted_ms = prev_pos + delta_ms;
+
+        let (false, Some(raw_audio_ms)) = (self.is_in_countdown, audio_time_ms) else {
+            self.last_raw_audio_ms = None;
+            return self.conductor.update(predicted_ms);
+        };
+
+        let target_ms = raw_audio_ms + self.conductor.combined_offset();
+        let drift_ms = target_ms - predicted_ms;
+        if drift_ms.abs().round() > CONDUCTOR_DRIFT_THRESHOLD_MS {
+            self.last_raw_audio_ms = Some(raw_audio_ms);
+            return self.conductor.update_with_offsets(raw_audio_ms, true);
+        }
+
+        // rodio updates `sink.position()` only when its audio mixer buffer refills,
+        // so repeated identical readings between refills are stale. Integrate
+        // `delta_ms` smoothly on stale frames instead of stalling or pulling back.
+        let audio_advanced = self
+            .last_raw_audio_ms
+            .is_none_or(|prev| (raw_audio_ms - prev).abs() > 0.05);
+        self.last_raw_audio_ms = Some(raw_audio_ms);
+
+        let next_pos = if drift_ms > 0.0 {
+            let ease_ratio = 1.0 - (-(MUSIC_EASE_RATIO * self.playback_rate) * elapsed_s).exp();
+            predicted_ms + drift_ms * ease_ratio
+        } else if audio_advanced && drift_ms < -(delta_ms + 1e-6) {
+            let excess_ms = drift_ms + delta_ms;
+            let ease_ratio = 1.0 - (-(AUDIO_DRIFT_EASE_RATIO * self.playback_rate) * elapsed_s).exp();
+            (predicted_ms + excess_ms * ease_ratio).max(prev_pos + delta_ms * 0.25)
+        } else {
+            predicted_ms
+        };
+        self.conductor.update(next_pos)
     }
 
     pub fn update(&mut self, elapsed_s: f64, audio_time_ms: Option<f64>, playlist: &mut PlayStatePlaylist) {
@@ -158,17 +202,12 @@ impl PlayState {
             return;
         }
 
-        self.update_health_bar();
+        self.update_health_bar(elapsed_s);
         self.update_score_text();
         self.advance_tweens(elapsed_s);
 
-        let delta_ms = elapsed_s * 1000.0 * self.playback_rate;
-        let next_pos = match (self.is_in_countdown, audio_time_ms) {
-            (false, Some(ms)) if (ms - self.conductor.song_position_ms).abs() > 25.0 => ms,
-            (false, Some(ms)) if ms > self.conductor.song_position_ms => ms,
-            _ => self.conductor.song_position_ms + delta_ms,
-        };
-        let tick = self.conductor.update(next_pos);
+        let tick = self.sync_song_clock(elapsed_s, audio_time_ms);
+        let next_pos = self.conductor.song_position_ms;
         self.player_strumline.update_notes(elapsed_s, next_pos, self.start_timestamp_ms);
         self.opponent_strumline.update_notes(elapsed_s, next_pos, self.start_timestamp_ms);
 
@@ -189,6 +228,9 @@ impl PlayState {
             }
         }
 
+        if tick.step_changed {
+            self.step_hit();
+        }
         if tick.beat_changed {
             self.beat_hit();
         }
@@ -235,16 +277,20 @@ impl PlayState {
         self.start_countdown();
     }
 
-    pub fn beat_hit(&mut self) {
-        if self.camera.zoom_rate > 0.0 {
-            let rate = self.camera.zoom_rate.max(1.0) as i32;
-            let offset = self.camera.zoom_rate_offset as i32;
-            if (self.conductor.current_beat - offset).rem_euclid(rate) == 0 {
+    pub fn step_hit(&mut self) {
+        if self.camera.hud_zoom < MAX_RELATIVE_CAM_ZOOM * self.camera.default_hud_zoom
+            && self.camera.zoom_rate > 0.0
+        {
+            let step_period = (self.camera.zoom_rate * f64::from(STEPS_PER_BEAT)).round() as i32;
+            let step_offset = (self.camera.zoom_rate_offset * f64::from(STEPS_PER_BEAT)).round() as i32;
+            if step_period > 0 && (self.conductor.current_step + step_offset).rem_euclid(step_period) == 0 {
                 self.camera.bop_multiplier = self.camera.bop_intensity;
-                self.camera.hud_zoom = self.camera.default_hud_zoom + self.camera.hud_zoom_intensity;
+                self.camera.hud_zoom += self.camera.hud_zoom_intensity * self.camera.default_hud_zoom;
             }
         }
     }
+
+    pub fn beat_hit(&mut self) {}
 
     pub fn pause(&mut self, mode: PauseMode) {
         if !self.may_pause_game || matches!(self.phase, PlayPhase::GameOver | PlayPhase::Ended) {
@@ -283,9 +329,14 @@ impl PlayState {
         );
     }
 
-    pub fn update_health_bar(&mut self) {
+    pub fn update_health_bar(&mut self, elapsed_s: f64) {
         self.health = self.health.clamp(HEALTH_MIN, HEALTH_MAX);
-        self.health_lerp += (self.health - self.health_lerp) * HEALTH_LERP_FACTOR;
+        if self.is_bot_play_mode {
+            self.health_lerp = HEALTH_MAX;
+        } else {
+            let alpha = 1.0 - (1.0 - HEALTH_LERP_FACTOR).powf(elapsed_s * 60.0);
+            self.health_lerp += (self.health - self.health_lerp) * alpha;
+        }
     }
 
     pub fn update_score_text(&mut self) {

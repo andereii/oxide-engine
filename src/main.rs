@@ -9,9 +9,13 @@ use oxin_app::{WindowConfig, run_window};
 use play::PlayPlugin;
 
 fn main() {
+    let vsync = std::env::var("OXIDE_VSYNC")
+        .map(|v| v != "0")
+        .unwrap_or(true);
     run_window(
         WindowConfig {
             title: "Oxide Engine - PlayState".to_string(),
+            vsync,
             ..Default::default()
         },
         |app| {

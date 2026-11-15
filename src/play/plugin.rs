@@ -92,7 +92,8 @@ impl Plugin for PlayPlugin {
                     sync_popups,
                     sync_hud_text,
                 )
-                    .chain(),
+                    .chain()
+                    .before(crate::animations::sprite::step_animations),
             );
     }
 }
@@ -234,8 +235,9 @@ fn tick_play_state(
         sync.was_countdown = true;
     }
 
+    let dt = f64::from(time.delta_secs()).min(0.1);
     let master_ms = audio.master_time_ms(&sinks);
-    state.update(f64::from(time.delta_secs()), master_ms, &mut playlist);
+    state.update(dt, master_ms, &mut playlist);
 
     if let Some(step) = state.pending_countdown_step.take() {
         if let Some(handle) = sfx.countdown_sounds.get(step).and_then(|h| h.clone()) {
@@ -264,7 +266,8 @@ fn tick_play_state(
             state.opponent_vocals_volume as f32,
             &mut sinks,
         );
-        audio.tick(state.conductor.song_position_ms, &mut sinks);
+        let sync_ms = (state.conductor.song_position_ms - state.conductor.combined_offset()).max(0.0);
+        audio.tick(sync_ms, dt, &mut sinks);
     }
 }
 

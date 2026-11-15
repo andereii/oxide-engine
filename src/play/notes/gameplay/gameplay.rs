@@ -177,14 +177,18 @@ impl PlayState {
             };
 
             if res.botplay_hit {
-                let (is_hold, lane, note_id, end_ms, rem, scoreable, note_kind) = {
+                let (is_hold, lane, note_id, strum_time_ms, full_length_ms, end_ms, rem, scoreable, note_kind) = {
                     let note = &self.player_strumline.notes[idx];
-                    let end_ms = note.data.time_ms + note.data.sustain_length_ms;
-                    let rem = (end_ms - pos_ms).clamp(0.0, note.data.sustain_length_ms);
+                    let strum_time_ms = note.data.time_ms;
+                    let full_length_ms = note.data.sustain_length_ms;
+                    let end_ms = strum_time_ms + full_length_ms;
+                    let rem = (end_ms - pos_ms).clamp(0.0, full_length_ms);
                     (
                         note.is_hold_note(),
                         note.lane,
                         note.data.id,
+                        strum_time_ms,
+                        full_length_ms,
                         end_ms,
                         rem,
                         note.data.scoreable,
@@ -203,6 +207,8 @@ impl PlayState {
                         note_idx: idx,
                         note_id,
                         lane,
+                        strum_time_ms,
+                        full_length_ms,
                         end_ms,
                         remaining_ms: rem,
                         dropped: false,
@@ -251,12 +257,14 @@ impl PlayState {
         }
 
         let is_hold = note.is_hold_note();
-        let hold_end_ms = note.data.time_ms + note.data.sustain_length_ms;
+        let strum_time_ms = note.data.time_ms;
+        let full_length_ms = note.data.sustain_length_ms;
+        let hold_end_ms = strum_time_ms + full_length_ms;
         let lane = note.lane;
         let note_id = note.data.id;
         let scoreable = note.data.scoreable;
         let note_kind = note.data.kind.clone();
-        let rem = (hold_end_ms - self.conductor.song_position_ms).clamp(0.0, note.data.sustain_length_ms);
+        let rem = (hold_end_ms - self.conductor.song_position_ms).clamp(0.0, full_length_ms);
         let is_combo_break = judgement.is_combo_break();
         let prev_combo = self.tallies.combo;
 
@@ -270,6 +278,8 @@ impl PlayState {
                 note_idx,
                 note_id,
                 lane,
+                strum_time_ms,
+                full_length_ms,
                 end_ms: hold_end_ms,
                 remaining_ms: rem,
                 dropped: false,

@@ -23,7 +23,7 @@ impl Strumline {
         let dir = note.lane;
         let is_hold = note.is_hold_note();
         let end_ms = note.data.time_ms + note.data.sustain_length_ms;
-        let rem = (end_ms - self.visual_song_position).clamp(0.0, note.data.sustain_length_ms);
+        let rem = (end_ms - self.song_position_ms).clamp(0.0, note.data.sustain_length_ms);
         note.has_been_hit = true;
         if is_hold {
             note.hold_hit = true;
@@ -39,6 +39,9 @@ impl Strumline {
         self.play_confirm(dir);
         if is_hold {
             self.pending_hold_covers.push(HoldCoverCmd::Start(dir));
+        }
+        if self.ghost_tap_enabled {
+            self.ghost_tap_timer = crate::utils::constants::GHOST_TAP_DELAY_S;
         }
     }
 
@@ -105,6 +108,7 @@ impl Strumline {
     }
 
     pub fn update_notes(&mut self, elapsed_s: f64, song_pos_ms: f64, start_timestamp_ms: f64) {
+        self.song_position_ms = song_pos_ms;
         self.visual_song_position = match &self.scroll_velocity {
             Some(sv) => sv.resolve_visual_song_position(song_pos_ms, self.scroll_speed, &mut self.lag_state),
             None => song_pos_ms,

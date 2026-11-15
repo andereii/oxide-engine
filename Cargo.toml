@@ -15,7 +15,7 @@ name = "oxide"
 path = "src/main.rs"
 
 [dependencies]
-bevy = "=0.20.1"
+bevy = { version = "=0.20.1", default-features = false, features = ["2d", "ui", "audio"] }
 oxin-app = { path = "crates/oxin-app" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,9 +25,13 @@ audio = []
 
 [profile.dev]
 opt-level = 1
+# Line tables keep panic backtraces readable while avoiding heavy full-DWARF RAM/link overhead.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
-opt-level = 3
+# Keep third-party crates optimized for smooth dev FPS without -O3 LLVM bloat or dep debuginfo.
+opt-level = 2
+debug = 0
 
 [profile.release]
 opt-level = 3

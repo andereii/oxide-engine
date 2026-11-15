@@ -5,5 +5,5 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bevy = "=0.20.1"
+bevy = { version = "=0.20.1", default-features = false, features = ["2d", "ui", "audio"] }
 

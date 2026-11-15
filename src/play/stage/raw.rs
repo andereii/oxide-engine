@@ -176,7 +176,7 @@ fn parse_anim_kind(raw: &str) -> Option<StageAnimKind> {
     }
 }
 
-pub(super) fn parse_stage_raw(stage_id: &str, raw_json: &str) -> Result<StageData, String> {
+pub(crate) fn parse_stage_raw(stage_id: &str, raw_json: &str) -> Result<StageData, String> {
     let raw: StageFileRaw = serde_json::from_str(raw_json)
         .map_err(|e| format!("failed to parse stage '{stage_id}': {e}"))?;
 

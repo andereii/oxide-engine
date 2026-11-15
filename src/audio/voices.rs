@@ -63,6 +63,7 @@ impl VoicesGroup {
                         sink.play();
                         track.pending = false;
                         track.started = true;
+                        track.resync_cooldown_s = 0.5;
                     }
                 }
             }

@@ -10,4 +10,7 @@ pub mod song;
 pub mod stage;
 pub mod types;
 
+#[cfg(test)]
+mod parity_tests;
+
 pub use plugin::PlayPlugin;

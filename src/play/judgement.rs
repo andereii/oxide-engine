@@ -94,7 +94,7 @@ pub fn score_note(note_diff_ms: f64) -> i32 {
         return PBOT1_MAX_SCORE;
     }
     let factor = 1.0 - (1.0 / (1.0 + (-PBOT1_SCORING_SLOPE * (abs_timing - PBOT1_SCORING_OFFSET)).exp()));
-    (f64::from(PBOT1_MAX_SCORE) * factor + PBOT1_MIN_SCORE).round() as i32
+    (f64::from(PBOT1_MAX_SCORE) * factor + PBOT1_MIN_SCORE).trunc() as i32
 }
 
 pub fn miss_score() -> i32 {

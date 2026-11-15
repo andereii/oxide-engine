@@ -10,6 +10,14 @@ use crate::play::notes::data::{ActiveHold, NoteDirection, process_note_window};
 use crate::play::notes::strum::{CharNoteSignal, HoldCoverCmd};
 use crate::play::scene::PlayState;
 
+fn compute_hold_remaining_ms(hold: &ActiveHold, pos_ms: f64) -> f64 {
+    if pos_ms > hold.strum_time_ms {
+        (hold.end_ms - pos_ms).clamp(0.0, hold.full_length_ms)
+    } else {
+        hold.full_length_ms
+    }
+}
+
 impl PlayState {
     pub(super) fn process_opponent_notes(&mut self, pos_ms: f64) {
         let start = self.opponent_strumline.active_start_index;
@@ -26,14 +34,18 @@ impl PlayState {
             if !res.botplay_hit {
                 continue;
             }
-            let (is_hold, lane, note_id, end_ms, rem, scoreable, note_kind) = {
+            let (is_hold, lane, note_id, strum_time_ms, full_length_ms, end_ms, rem, scoreable, note_kind) = {
                 let note = &self.opponent_strumline.notes[idx];
-                let end_ms = note.data.time_ms + note.data.sustain_length_ms;
-                let rem = (end_ms - pos_ms).clamp(0.0, note.data.sustain_length_ms);
+                let strum_time_ms = note.data.time_ms;
+                let full_length_ms = note.data.sustain_length_ms;
+                let end_ms = strum_time_ms + full_length_ms;
+                let rem = (end_ms - pos_ms).clamp(0.0, full_length_ms);
                 (
                     note.is_hold_note(),
                     note.lane,
                     note.data.id,
+                    strum_time_ms,
+                    full_length_ms,
                     end_ms,
                     rem,
                     note.data.scoreable,
@@ -53,6 +65,8 @@ impl PlayState {
                     note_idx: idx,
                     note_id,
                     lane,
+                    strum_time_ms,
+                    full_length_ms,
                     end_ms,
                     remaining_ms: rem,
                     dropped: false,
@@ -63,19 +77,18 @@ impl PlayState {
             }
         }
 
-        let vis_pos = self.opponent_strumline.visual_song_position;
         for lane_idx in 0..4 {
             let Some(mut hold) = self.opponent_strumline.active_holds[lane_idx] else {
                 continue;
             };
-            hold.remaining_ms = (hold.end_ms - vis_pos).max(0.0);
+            hold.remaining_ms = compute_hold_remaining_ms(&hold, pos_ms);
             if let Some(note) = self.opponent_strumline.notes.get_mut(hold.note_idx) {
                 note.hold_remaining_ms = hold.remaining_ms;
                 if hold.remaining_ms <= SUSTAIN_MIN_REMAINING_MS {
                     note.hold_killed = true;
                 }
             }
-            if hold.remaining_ms <= SUSTAIN_MIN_REMAINING_MS {
+            if hold.remaining_ms <= 0.0 {
                 self.opponent_strumline.active_holds[lane_idx] = None;
                 self.opponent_strumline.play_static(hold.lane);
                 self.opponent_strumline
@@ -89,24 +102,24 @@ impl PlayState {
         }
     }
 
-    pub(super) fn process_player_holds(&mut self, elapsed_s: f64, _pos_ms: f64) {
-        let vis_pos = self.player_strumline.visual_song_position;
-
+    pub(super) fn process_player_holds(&mut self, elapsed_s: f64, pos_ms: f64) {
         for lane_idx in 0..4 {
             let Some(mut hold) = self.player_strumline.active_holds[lane_idx] else {
                 continue;
             };
-            hold.remaining_ms = (hold.end_ms - vis_pos).max(0.0);
+            hold.remaining_ms = compute_hold_remaining_ms(&hold, pos_ms);
             let held = self.is_bot_play_mode || self.player_strumline.is_key_held(hold.lane);
+            // V-Slice only flags hold drops after the note's strum_time has passed.
+            let dropped_now = !hold.dropped && pos_ms > hold.strum_time_ms && !held;
 
-            if held && !hold.dropped {
+            if !hold.dropped && !dropped_now {
                 if let Some(note) = self.player_strumline.notes.get_mut(hold.note_idx) {
                     note.hold_remaining_ms = hold.remaining_ms;
                     if hold.remaining_ms <= SUSTAIN_MIN_REMAINING_MS {
                         note.hold_killed = true;
                     }
                 }
-                if hold.remaining_ms <= SUSTAIN_MIN_REMAINING_MS {
+                if hold.remaining_ms <= 0.0 {
                     self.player_strumline.active_holds[lane_idx] = None;
                     if self.player_strumline.is_key_held(hold.lane) {
                         self.player_strumline.play_press(hold.lane);
@@ -178,15 +191,11 @@ impl PlayState {
         self.apply_score(f64::from(miss_score()), Judgement::Miss, health_change, true);
     }
 
-    pub fn ghost_note_miss(&mut self, _direction: NoteDirection, has_possible_notes: bool) {
+    pub fn ghost_note_miss(&mut self, _direction: NoteDirection, _has_possible_notes: bool) {
         self.player_vocals_volume = 0.0;
         self.pending_miss_sfx = true;
-        if has_possible_notes {
-            self.apply_score(SCORE_GHOST_MISS_PENALTY, Judgement::Miss, HEALTH_GHOST_MISS_PENALTY, true);
-        } else {
-            self.song_score += SCORE_GHOST_MISS_PENALTY;
-            self.health = (self.health + HEALTH_GHOST_MISS_PENALTY).clamp(HEALTH_MIN, HEALTH_MAX);
-        }
+        self.song_score += SCORE_GHOST_MISS_PENALTY;
+        self.health = (self.health + HEALTH_GHOST_MISS_PENALTY).clamp(HEALTH_MIN, HEALTH_MAX);
     }
 
     pub fn apply_score(&mut self, score: f64, judgement: Judgement, health_change: f64, is_combo_break: bool) {

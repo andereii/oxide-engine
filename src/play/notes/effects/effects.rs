@@ -167,17 +167,11 @@ fn activate_splash(
 ) {
     let r1 = xorshift32(&mut vis.rng_state);
     let r2 = xorshift32(&mut vis.rng_state);
-    let variant = &variants[(r1 as usize) % variants.len()];
+    let variant_idx = (r1 as usize) % variants.len();
     let fps_delta = (r2 % 5) as f32 - 2.0;
-    anim.add_anim_frames(
-        "splash",
-        variant.indices.clone(),
-        variant.offsets.clone(),
-        variant.rotated.clone(),
-        (24.0 + fps_delta).max(12.0),
-        false,
-    );
-    anim.play("splash", true, false, 0);
+    let key = super::effect_pools::splash_clip_name(lane, variant_idx);
+    anim.time_scale = (24.0 + fps_delta).max(12.0) / 24.0;
+    anim.play(key.as_ref(), true, false, 0);
     sync_atlas_frame(sprite, anim);
     vis.lane = lane;
     vis.active = true;
