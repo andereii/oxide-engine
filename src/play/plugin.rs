@@ -5,7 +5,7 @@ use crate::audio::SongAudioPlayer;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
-use super::characters::{CharacterSyncState, load_characters_resource, spawn_characters, sync_characters};
+use super::characters::{CharacterSyncState, apply_composite_affine_transforms, load_characters_resource, spawn_characters, sync_characters};
 use super::notes::NoteStyle;
 use super::notes::effects::{spawn_effect_pools, sync_note_effects};
 use super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools, sync_arrow_visuals};
@@ -80,21 +80,8 @@ impl Plugin for PlayPlugin {
             })
             .insert_resource(state)
             .add_systems(Startup, setup_play_scene)
-            .add_systems(
-                Update,
-                (
-                    handle_play_input,
-                    tick_play_state,
-                    sync_stage_props,
-                    sync_characters,
-                    sync_arrow_visuals,
-                    sync_note_effects,
-                    sync_popups,
-                    sync_hud_text,
-                )
-                    .chain()
-                    .before(crate::animations::sprite::step_animations),
-            );
+            .add_systems(Update, (handle_play_input, tick_play_state, sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_popups, sync_hud_text).chain().before(crate::animations::sprite::step_animations))
+            .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
     }
 }
 

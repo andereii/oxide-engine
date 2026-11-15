@@ -6,5 +6,5 @@ pub mod spawn;
 pub mod sync;
 
 pub use loader::load_characters_resource;
-pub use spawn::spawn_characters;
+pub use spawn::{apply_composite_affine_transforms, spawn_characters};
 pub use sync::{CharacterSyncState, sync_characters};

@@ -14,7 +14,14 @@ use crate::utils::ecs::{
 };
 
 use super::behavior::{CharacterActor, ClipVisual};
-use super::spawn::CharacterPartVisual;
+use super::spawn::{CharacterPartVisual, CompositeAffine2d};
+
+type CharPartsQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Sprite, &'static mut Transform, &'static mut Visibility, &'static mut CompositeAffine2d),
+    With<CharacterPartVisual>,
+>;
 
 #[derive(Resource, Default)]
 pub struct CharacterSyncState {
@@ -29,7 +36,7 @@ pub fn sync_characters(
     mut images: ResMut<Assets<Image>>,
     mut signals: Local<(Vec<CharNoteSignal>, Vec<CharNoteSignal>)>,
     mut actors: Query<&mut CharacterActor>,
-    mut parts: Query<(&mut Sprite, &mut Transform, &mut Visibility), With<CharacterPartVisual>>,
+    mut parts: CharPartsQuery,
 ) {
     let (player_signals, opponent_signals) = &mut *signals;
     player_signals.clear();
@@ -105,7 +112,7 @@ fn sync_actor_visuals(
     cam_scroll_x: f32,
     cam_scroll_y: f32,
     zoom: f32,
-    parts: &mut Query<(&mut Sprite, &mut Transform, &mut Visibility), With<CharacterPartVisual>>,
+    parts: &mut CharPartsQuery,
 ) {
     let scale = actor.total_scale();
     let eff_flip = actor.effective_flip();
@@ -117,7 +124,8 @@ fn sync_actor_visuals(
     let cur_clip = actor.controller.current_name().and_then(|n| actor.clips.get(n));
     match cur_clip {
         Some(ClipVisual::Sheet { source_idx }) => {
-            if let Ok((mut sprite, mut tf, mut vis)) = parts.get_mut(actor.sheet_entity) {
+            if let Ok((mut sprite, mut tf, mut vis, mut aff)) = parts.get_mut(actor.sheet_entity) {
+                aff.active = false;
                 sync_sheet_part(
                     actor,
                     *source_idx,
@@ -198,7 +206,11 @@ fn sync_sheet_part(
 
     let bx = (screen_cx - SCREEN_WIDTH * 0.5) * zoom + foff_x * scale[0] * zoom;
     let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * zoom + foff_y * scale[1] * zoom;
-    let rot = if actor.controller.current_frame_rotated() { -FRAC_PI_2 } else { 0.0 };
+    let rot = if actor.controller.current_frame_rotated() {
+        if flip[0] ^ flip[1] { -FRAC_PI_2 } else { FRAC_PI_2 }
+    } else {
+        0.0
+    };
     set_transform_full(
         tf,
         Vec3::new(bx, by, stage_layer_z(actor.slot.layer, 0)),
@@ -221,7 +233,7 @@ fn sync_composite_parts(
     cam_scroll_x: f32,
     cam_scroll_y: f32,
     zoom: f32,
-    parts: &mut Query<(&mut Sprite, &mut Transform, &mut Visibility), With<CharacterPartVisual>>,
+    parts: &mut CharPartsQuery,
 ) {
     let Some(src) = actor.sources.get(source_idx) else {
         hide_entities(&actor.piece_entities, parts);
@@ -237,10 +249,11 @@ fn sync_composite_parts(
     let flip_sy = if flip[1] { -1.0 } else { 1.0 };
 
     for (i, &ent) in actor.piece_entities.iter().enumerate() {
-        let Ok((mut sprite, mut tf, mut vis)) = parts.get_mut(ent) else {
+        let Ok((mut sprite, mut tf, mut vis, mut aff)) = parts.get_mut(ent) else {
             continue;
         };
         let Some(piece) = pieces.get(i) else {
+            aff.active = false;
             set_visibility(&mut vis, Visibility::Hidden);
             continue;
         };
@@ -256,36 +269,29 @@ fn sync_composite_parts(
         } else {
             [m[0], -m[2], -m[1], m[3]]
         };
-        m00 *= flip_sx;
-        m01 *= flip_sx;
-        m10 *= flip_sy;
-        m11 *= flip_sy;
+        let sx = flip_sx * scale[0] * zoom;
+        let sy = flip_sy * scale[1] * zoom;
+        m00 *= sx;
+        m01 *= sx;
+        m10 *= sy;
+        m11 *= sy;
 
-        let det = m00 * m11 - m01 * m10;
-        let (p_flip_x, c0x, c0y) = if det < 0.0 { (true, -m00, -m10) } else { (false, m00, m10) };
-        let sx = c0x.hypot(c0y);
-        let sy = m01.hypot(m11);
-        let rot = c0y.atan2(c0x);
-
+        let pos = Vec3::new(bevy_fx + lx, bevy_fy + ly, stage_layer_z(actor.slot.layer, i));
         set_sprite_atlas(&mut sprite, &src.texture, &src.layout, piece.sprite_index);
         set_sprite_color(&mut sprite, tint);
-        set_sprite_flip(&mut sprite, p_flip_x, false);
-        set_transform_full(
-            &mut tf,
-            Vec3::new(bevy_fx + lx, bevy_fy + ly, stage_layer_z(actor.slot.layer, i)),
-            Vec3::new(sx * scale[0] * zoom, sy * scale[1] * zoom, 1.0),
-            Quat::from_rotation_z(rot),
-        );
+        set_sprite_flip(&mut sprite, false, false);
+        set_transform_full(&mut tf, pos, Vec3::ONE, Quat::IDENTITY);
+        aff.active = true;
+        aff.cols = [m00, m10, m01, m11];
+        aff.translation = pos;
         set_visibility(&mut vis, if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden });
     }
 }
 
-fn hide_entities(
-    entities: &[Entity],
-    parts: &mut Query<(&mut Sprite, &mut Transform, &mut Visibility), With<CharacterPartVisual>>,
-) {
+fn hide_entities(entities: &[Entity], parts: &mut CharPartsQuery) {
     for &ent in entities {
-        if let Ok((_, _, mut vis)) = parts.get_mut(ent) {
+        if let Ok((_, _, mut vis, mut aff)) = parts.get_mut(ent) {
+            aff.active = false;
             set_visibility(&mut vis, Visibility::Hidden);
         }
     }

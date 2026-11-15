@@ -194,10 +194,16 @@ fn collect_tick(
             if let Some(sym) = &elem.symbol_name {
                 if let Some(sub_layers) = atlas.symbols.get(sym) {
                     let dur = layers_duration(sub_layers).max(1);
-                    let child_tick = match elem.loop_mode.as_str() {
-                        "SF" => elem.first_frame,
-                        "PO" => (elem.first_frame + rel_tick).min(dur - 1),
-                        _ => (elem.first_frame + rel_tick) % dur,
+                    let child_tick = if elem.loop_mode.eq_ignore_ascii_case("SF")
+                        || elem.loop_mode.eq_ignore_ascii_case("singleframe")
+                    {
+                        elem.first_frame
+                    } else if elem.loop_mode.eq_ignore_ascii_case("PO")
+                        || elem.loop_mode.eq_ignore_ascii_case("playonce")
+                    {
+                        (elem.first_frame + rel_tick).min(dur - 1)
+                    } else {
+                        (elem.first_frame + rel_tick) % dur
                     };
                     collect_tick(atlas, indices, sub_layers, child_tick, combined, depth + 1, out);
                 }

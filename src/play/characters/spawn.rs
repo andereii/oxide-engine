@@ -1,3 +1,4 @@
+use bevy::math::{Affine3A, Vec3A};
 use bevy::prelude::*;
 
 use crate::animations::Bopper;
@@ -8,6 +9,30 @@ use super::loader::CharactersResource;
 
 #[derive(Component)]
 pub struct CharacterPartVisual;
+
+#[derive(Component, Default, Clone, Copy)]
+pub struct CompositeAffine2d {
+    pub active: bool,
+    pub cols: [f32; 4],
+    pub translation: Vec3,
+}
+
+pub fn apply_composite_affine_transforms(
+    mut query: Query<(&CompositeAffine2d, &mut GlobalTransform), With<CharacterPartVisual>>,
+) {
+    for (aff, mut global_tf) in &mut query {
+        if !aff.active {
+            continue;
+        }
+        let affine = Affine3A::from_cols(
+            Vec3A::new(aff.cols[0], aff.cols[1], 0.0),
+            Vec3A::new(aff.cols[2], aff.cols[3], 0.0),
+            Vec3A::Z,
+            Vec3A::from(aff.translation),
+        );
+        *global_tf = GlobalTransform::from(affine);
+    }
+}
 
 pub fn spawn_characters(commands: &mut Commands, res: &CharactersResource) {
     for loaded in &res.characters {
@@ -27,6 +52,7 @@ pub fn spawn_characters(commands: &mut Commands, res: &CharactersResource) {
                 Transform::from_xyz(0.0, 0.0, z_base),
                 Visibility::Hidden,
                 CharacterPartVisual,
+                CompositeAffine2d::default(),
             ))
             .id();
 
@@ -44,6 +70,7 @@ pub fn spawn_characters(commands: &mut Commands, res: &CharactersResource) {
                     Transform::from_xyz(0.0, 0.0, stage_layer_z(loaded.slot.layer, i)),
                     Visibility::Hidden,
                     CharacterPartVisual,
+                    CompositeAffine2d::default(),
                 ))
                 .id();
             piece_entities.push(piece_entity);

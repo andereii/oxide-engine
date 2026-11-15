@@ -75,8 +75,8 @@ function loadEnvToken() {
   return null;
 }
 
-function hasGhCli() {
-  const res = spawnSync("gh", ["--version"], { stdio: "ignore" });
+function isGhAuthenticated() {
+  const res = spawnSync("gh", ["auth", "status"], { stdio: "ignore" });
   return res.status === 0;
 }
 
@@ -179,19 +179,18 @@ async function main() {
   const repo = getRepoSlug();
   const branch = opts.branch ?? getCurrentBranch();
 
-  if (hasGhCli()) {
+  const token = loadEnvToken();
+  if (token) {
+    await downloadWithToken(repo, branch, opts.runId, token);
+  } else if (isGhAuthenticated()) {
     downloadWithGh(repo, branch, opts.runId);
   } else {
-    const token = loadEnvToken();
-    if (!token) {
-      console.error("Error: Neither 'gh' CLI nor GITHUB_TOKEN/GH_TOKEN was found.");
-      console.error("GitHub requires authentication to download Actions artifacts.");
-      console.error("Choose one of:");
-      console.error("  1. Install GitHub CLI: winget install GitHub.cli && gh auth login");
-      console.error("  2. Put GITHUB_TOKEN=<your_pat_with_actions_read> in .env");
-      process.exit(1);
-    }
-    await downloadWithToken(repo, branch, opts.runId, token);
+    console.error("Error: Neither an authenticated 'gh' CLI nor GITHUB_TOKEN/GH_TOKEN was found.");
+    console.error("GitHub requires authentication to download Actions artifacts.");
+    console.error("Choose one of:");
+    console.error("  1. Install GitHub CLI: winget install GitHub.cli && gh auth login");
+    console.error("  2. Put GITHUB_TOKEN=<your_pat_with_actions_read> in .env");
+    process.exit(1);
   }
 
   const exePath = path.join(BIN_DIR, "oxide.exe");

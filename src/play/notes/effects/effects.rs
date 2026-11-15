@@ -235,8 +235,9 @@ fn apply_frame_transform(
     let scale = effect_scale * strum_scale;
     let f_off = anim.current_frame_offset();
     let z = { let t: &Mut<'_, Transform> = &*transform; t.translation.z };
+    let flip = anim.current_flip();
     let rot = if anim.current_frame_rotated() {
-        Quat::from_rotation_z(-FRAC_PI_2)
+        Quat::from_rotation_z(if flip[0] ^ flip[1] { -FRAC_PI_2 } else { FRAC_PI_2 })
     } else {
         Quat::IDENTITY
     };

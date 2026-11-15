@@ -46,7 +46,23 @@ fn parse_matrix(mx: Option<[f32; 6]>, m3d: Option<[f32; 16]>) -> [f32; 6] {
         return m;
     }
     if let Some(m) = m3d {
-        return [m[0], m[1], m[4], m[5], m[12], m[13]];
+        let has_persp = m[3] != 0.0 || m[7] != 0.0 || m[11] != 0.0 || m[15] != 1.0;
+        if !has_persp {
+            return [m[0], m[1], m[4], m[5], m[12], m[13]];
+        }
+        let p = [(0.0_f32, 0.0_f32), (1.0, 0.0), (0.0, 1.0)].map(|(x, y)| {
+            let z = m[3] * x + m[7] * y + m[15];
+            let inv_z = if z.abs() > 1e-6 { 1.0 / z } else { 1.0 };
+            (m[0] * x + m[4] * y + m[12] * inv_z, m[1] * x + m[5] * y + m[13] * inv_z)
+        });
+        return [
+            p[1].0 - p[0].0,
+            p[1].1 - p[0].1,
+            p[2].0 - p[0].0,
+            p[2].1 - p[0].1,
+            p[0].0,
+            p[0].1,
+        ];
     }
     [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 }

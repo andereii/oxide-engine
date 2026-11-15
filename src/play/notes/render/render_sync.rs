@@ -1,8 +1,13 @@
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
-use crate::utils::ecs::{set_atlas_index, set_sprite_color, set_transform_pos_scale, set_visibility};
+use crate::utils::ecs::{
+    set_atlas_index, set_sprite_color, set_sprite_flip, set_transform_full, set_transform_pos_scale,
+    set_visibility,
+};
 
 use crate::play::notes::data::NoteSprite;
 use crate::play::notes::skin::NoteStyle;
@@ -131,10 +136,25 @@ fn sync_receptors(
         }
         let rec_state = &strum.receptors[rec.lane];
         let z = { let t: &Transform = &*transform; t.translation.z };
-        set_transform_pos_scale(
+        let scale = style.strum_scale * strum.strumline_scale;
+        let f_off = anim.current_frame_offset();
+        let anim_off = anim.current_offset();
+        let flip = anim.current_flip();
+        let rot = if anim.current_frame_rotated() {
+            Quat::from_rotation_z(if flip[0] ^ flip[1] { -FRAC_PI_2 } else { FRAC_PI_2 })
+        } else {
+            Quat::IDENTITY
+        };
+        set_sprite_flip(&mut sprite, flip[0], flip[1]);
+        set_transform_full(
             &mut transform,
-            Vec3::new(strum.lane_x(rec.lane), strum.receptor_y() + rec_state.y_offset, z),
-            Vec3::splat(style.strum_scale * strum.strumline_scale),
+            Vec3::new(
+                strum.lane_x(rec.lane) + (f_off[0] - anim_off[0]) * scale,
+                strum.receptor_y() + rec_state.y_offset + (f_off[1] + anim_off[1]) * scale,
+                z,
+            ),
+            Vec3::splat(scale),
+            rot,
         );
         set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.strum_alpha * rec_state.alpha));
 

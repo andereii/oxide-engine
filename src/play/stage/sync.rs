@@ -208,13 +208,20 @@ pub fn sync_stage_props(
         let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * zoom + frame_off[1] * vis.base_scale[1] * zoom;
 
         let base_rot = -vis.base_angle_deg.to_radians();
+        let eff_flip_x = vis.base_flip[0] ^ anim_flip[0];
+        let eff_flip_y = vis.base_flip[1] ^ anim_flip[1];
+        let rot_delta = if rotated {
+            if eff_flip_x ^ eff_flip_y { -FRAC_PI_2 } else { FRAC_PI_2 }
+        } else {
+            0.0
+        };
         set_transform_full(
             &mut transform,
             Vec3::new(bx, by, vis.z_layer),
             Vec3::new(vis.base_scale[0] * zoom, vis.base_scale[1] * zoom, 1.0),
-            Quat::from_rotation_z(if rotated { base_rot - FRAC_PI_2 } else { base_rot }),
+            Quat::from_rotation_z(base_rot + rot_delta),
         );
-        set_sprite_flip(&mut sprite, vis.base_flip[0] ^ anim_flip[0], vis.base_flip[1] ^ anim_flip[1]);
+        set_sprite_flip(&mut sprite, eff_flip_x, eff_flip_y);
         set_visibility(&mut visibility, Visibility::Visible);
     }
 }
