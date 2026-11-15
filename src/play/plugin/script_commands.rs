@@ -1,16 +1,18 @@
-use std::collections::BTreeSet;
-
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::mods::ModRegistry;
 use crate::scripting::{LogLevel, ScriptCommand, TweenProp};
 
+use super::super::camera::hud::hud_render_layer;
 use super::super::characters::{CharacterActor, CharacterRole, apply_composite_affine_transforms};
+use super::super::shaders::systems::{ShaderScriptCommand, parse_wiggle_effect_type};
 use super::super::stage::schema::StageCoordMode;
 use super::super::stage::{DynamicScriptProp, StagePropVisual};
 use super::actor_matches_target;
+use super::hud_audio::spawn_one_shot;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn apply_ecs_script_commands(
     commands: &mut Commands,
     asset_server: &AssetServer,
@@ -23,7 +25,7 @@ pub(super) fn apply_ecs_script_commands(
         Option<&mut AnimationController>,
         Option<&DynamicScriptProp>,
     )>,
-    pending_shaders: &mut super::shaders::systems::PendingShaderCommands,
+    pending_shaders: &mut super::super::shaders::systems::PendingShaderCommands,
     cmds: &[ScriptCommand],
 ) {
     for cmd in cmds {
@@ -190,15 +192,13 @@ pub(super) fn apply_ecs_script_commands(
                 brightness,
                 contrast,
             } => {
-                pending_shaders.0.push(
-                    super::shaders::systems::ShaderScriptCommand::SetAdjustColor {
-                        target: target.clone(),
-                        hue: *hue,
-                        saturation: *saturation,
-                        brightness: *brightness,
-                        contrast: *contrast,
-                    },
-                );
+                pending_shaders.0.push(ShaderScriptCommand::SetAdjustColor {
+                    target: target.clone(),
+                    hue: *hue,
+                    saturation: *saturation,
+                    brightness: *brightness,
+                    contrast: *contrast,
+                });
             }
             ScriptCommand::SetShaderDropShadow {
                 target,
@@ -215,23 +215,21 @@ pub(super) fn apply_ecs_script_commands(
                 alt_mask_path,
                 mask_threshold,
             } => {
-                pending_shaders.0.push(
-                    super::shaders::systems::ShaderScriptCommand::SetDropShadow {
-                        target: target.clone(),
-                        color: *color,
-                        angle_deg: *angle_deg,
-                        distance: *distance,
-                        strength: *strength,
-                        threshold: *threshold,
-                        hue: *hue,
-                        saturation: *saturation,
-                        brightness: *brightness,
-                        contrast: *contrast,
-                        use_alt_mask: *use_alt_mask,
-                        alt_mask_path: alt_mask_path.clone(),
-                        mask_threshold: *mask_threshold,
-                    },
-                );
+                pending_shaders.0.push(ShaderScriptCommand::SetDropShadow {
+                    target: target.clone(),
+                    color: *color,
+                    angle_deg: *angle_deg,
+                    distance: *distance,
+                    strength: *strength,
+                    threshold: *threshold,
+                    hue: *hue,
+                    saturation: *saturation,
+                    brightness: *brightness,
+                    contrast: *contrast,
+                    use_alt_mask: *use_alt_mask,
+                    alt_mask_path: alt_mask_path.clone(),
+                    mask_threshold: *mask_threshold,
+                });
             }
             ScriptCommand::SetShaderWiggle {
                 target,
@@ -240,15 +238,13 @@ pub(super) fn apply_ecs_script_commands(
                 frequency,
                 amplitude,
             } => {
-                pending_shaders.0.push(
-                    super::shaders::systems::ShaderScriptCommand::SetWiggle {
-                        target: target.clone(),
-                        effect_type: super::shaders::systems::parse_wiggle_effect_type(effect),
-                        speed: *speed,
-                        frequency: *frequency,
-                        amplitude: *amplitude,
-                    },
-                );
+                pending_shaders.0.push(ShaderScriptCommand::SetWiggle {
+                    target: target.clone(),
+                    effect_type: parse_wiggle_effect_type(effect),
+                    speed: *speed,
+                    frequency: *frequency,
+                    amplitude: *amplitude,
+                });
             }
             ScriptCommand::SetCameraRain {
                 scale,
@@ -256,21 +252,17 @@ pub(super) fn apply_ecs_script_commands(
                 color,
                 time_scale_decay,
             } => {
-                pending_shaders.0.push(
-                    super::shaders::systems::ShaderScriptCommand::SetCameraRain {
-                        scale: *scale,
-                        intensity: *intensity,
-                        color: *color,
-                        time_scale_decay: *time_scale_decay,
-                    },
-                );
+                pending_shaders.0.push(ShaderScriptCommand::SetCameraRain {
+                    scale: *scale,
+                    intensity: *intensity,
+                    color: *color,
+                    time_scale_decay: *time_scale_decay,
+                });
             }
             ScriptCommand::ClearShader { target } => {
-                pending_shaders.0.push(
-                    super::shaders::systems::ShaderScriptCommand::ClearShader {
-                        target: target.clone(),
-                    },
-                );
+                pending_shaders.0.push(ShaderScriptCommand::ClearShader {
+                    target: target.clone(),
+                });
             }
             _ => {}
         }

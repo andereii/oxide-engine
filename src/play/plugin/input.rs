@@ -1,12 +1,17 @@
 use bevy::prelude::*;
 
-use crate::audio::SongAudioPlayer;
-use crate::input::{Action, Controls, CursorState, PreciseInputManager};
+use crate::input::{Action, Controls, PreciseInputManager};
+use crate::mods::{ModRegistry, ModStore};
+use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost};
 
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
+use super::super::stage::{DynamicScriptProp, StageResource};
 use super::super::types::{PauseMode, PlayPhase};
+use super::PendingEcsScriptCommands;
+use super::setup::load_and_init_scripts;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_play_input(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,

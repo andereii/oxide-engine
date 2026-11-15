@@ -3,6 +3,7 @@ use crate::utils::easing::EaseKind;
 
 use super::tweens::{TweenProp, TweenTarget};
 
+#[derive(Debug, Clone)]
 pub enum LogLevel {
     Info,
     Warn,
@@ -185,5 +186,3 @@ pub enum ScriptCommand {
     RestartSong,
     PauseSong,
 }
-
-#[derive(Debug, Clone)]

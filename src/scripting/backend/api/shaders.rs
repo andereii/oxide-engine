@@ -1,8 +1,7 @@
 use rhai::{Dynamic, Engine, EvalAltResult};
 
-use crate::scripting::api::ScriptCommand;
-
-use crate::scripting::backend::context::{dyn_to_f64, with_ctx};
+use crate::scripting::api::{ScriptCommand, parse_hex_rgba};
+use crate::scripting::backend::context::{dyn_to_f64, dyn_to_i64, with_ctx};
 
 fn parse_rgb_hex3(hex: &str) -> [f32; 3] {
     let [r, g, b, _] = parse_hex_rgba(hex);

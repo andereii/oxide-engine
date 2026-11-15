@@ -95,5 +95,3 @@ pub struct ScriptTimer {
     pub remaining_s: f64,
     pub repeats_left: Option<u32>,
 }
-
-#[derive(Debug, Clone, Serialize)]

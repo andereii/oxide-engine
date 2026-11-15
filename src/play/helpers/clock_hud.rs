@@ -2,7 +2,7 @@ use crate::scripting::{HookKind, ScriptEvent};
 use crate::utils::conductor::ConductorUpdate;
 use crate::utils::constants::{
     AUDIO_CORRECTION_EASE_RATIO, CONDUCTOR_DRIFT_THRESHOLD_MS, HEALTH_LERP_FACTOR, HEALTH_MAX,
-    HEALTH_MIN, MUSIC_EASE_RATIO, STEPS_PER_BEAT,
+    HEALTH_MIN, MAX_RELATIVE_CAM_ZOOM, MUSIC_EASE_RATIO, STEPS_PER_BEAT,
 };
 
 use super::super::scene::PlayState;
@@ -124,6 +124,4 @@ impl PlayState {
         self.last_hud_key = key;
         self.score_text = format!("Score: {} | Combo: {} | Misses: {} | Health: {}%", key.0, key.1, key.2, key.3);
     }
-
-    /// Captures a read-only gameplay snapshot consumed by script APIs.
 }

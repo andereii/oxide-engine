@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use rhai::{AST, CallFnOptions, Dynamic, Engine, Position, Scope};
+use rhai::{AST, CallFnOptions, Dynamic, Engine, Scope};
 
 use crate::mods::ScriptScope;
 use crate::scripting::api::{ScriptContext, script_clamp, script_lerp, script_remap};

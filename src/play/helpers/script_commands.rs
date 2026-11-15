@@ -1,12 +1,15 @@
 use crate::scripting::{ScriptCommand, TweenProp};
-use crate::utils::constants::{KEY_COUNT, MAX_RELATIVE_CAM_ZOOM};
+use crate::utils::constants::KEY_COUNT;
 use crate::utils::easing::EaseKind;
 
+use super::super::camera::events::parse_raw_song_event;
+use super::super::notes::strum::ReceptorState;
+use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
-use super::super::types::LinearTween;
+use super::super::types::PauseMode;
 
 impl PlayState {
-    fn receptor_mut(&mut self, lane: usize) -> Option<&mut super::notes::strum::ReceptorState> {
+    fn receptor_mut(&mut self, lane: usize) -> Option<&mut ReceptorState> {
         if lane < KEY_COUNT {
             self.player_strumline.receptors.get_mut(lane)
         } else {
@@ -246,8 +249,4 @@ impl PlayState {
             | ScriptCommand::ClearShader { .. } => false,
         }
     }
-
-    /// Dispatches queued lifecycle/gameplay hooks, optionally runs `Update` + timers/tweens,
-    /// applies state mutations, and returns commands requiring Bevy ECS execution.
-    #[allow(clippy::too_many_arguments)]
 }

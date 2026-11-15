@@ -4,11 +4,15 @@ use bevy::prelude::*;
 use crate::audio::SongAudioPlayer;
 use crate::scripting::ScriptCommand;
 
+use super::super::characters::CharacterRole;
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
 use super::super::types::PlayPhase;
-use super::{AudioSyncState, PlaySfxAssets, ScriptTickParams, apply_ecs_script_commands, spawn_one_shot};
+use super::hud_audio::spawn_one_shot;
+use super::script_commands::apply_ecs_script_commands;
+use super::{AudioSyncState, PlaySfxAssets, ScriptTickParams};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn tick_play_state(
     mut commands: Commands,
     time: Res<Time>,

@@ -10,6 +10,7 @@ use super::tweens::{PropertyTween, TweenProp, TweenTarget};
 pub const MAX_CUSTOM_HOOK_DEPTH: usize = 16;
 
 
+#[derive(Debug, Clone)]
 pub struct NewTimerRequest {
     pub script_id: String,
     pub fn_name: String,
@@ -230,5 +231,3 @@ pub fn script_remap(v: f64, in_lo: f64, in_hi: f64, out_lo: f64, out_hi: f64) ->
     let t = (v - in_lo) / span;
     script_lerp(out_lo, out_hi, t)
 }
-
-#[derive(Debug, Clone, Copy, Serialize)]

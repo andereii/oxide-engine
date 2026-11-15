@@ -4,48 +4,37 @@ mod script_commands;
 mod setup;
 mod tick;
 
-use hud_audio::{spawn_one_shot, sync_hud_text};
+use hud_audio::sync_hud_text;
 use input::handle_play_input;
-use script_commands::apply_ecs_script_commands;
-use setup::{load_and_init_scripts, setup_play_scene};
+use setup::setup_play_scene;
 use tick::tick_play_state;
 
-use std::collections::BTreeSet;
-
-use bevy::audio::{AudioPlayer, AudioSink, PlaybackMode, PlaybackSettings, Volume};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
 use crate::audio::SongAudioPlayer;
 use crate::cli::LaunchFlags;
-use crate::input::{Action, Controls, CursorState, PreciseInputManager};
+use crate::input::{Controls, CursorState, PreciseInputManager};
 use crate::mods::{ModRegistry, ModStore};
-use crate::scripting::{
-    HookKind, LogLevel, ScriptCommand, ScriptEvent, ScriptHost, ScriptValue, TweenProp,
-};
-use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::scripting::{ScriptCommand, ScriptHost};
 
+use super::camera::hud::sync_hud_camera;
 use super::characters::{
     CharacterActor, CharacterRole, CharacterSyncState, apply_composite_affine_transforms,
-    load_characters_resource, spawn_characters, sync_characters,
+    sync_characters,
 };
-use super::camera::hud::{hud_render_layer, spawn_hud_camera, sync_hud_camera};
-use super::hud::countdown::{load_countdown_assets, sync_countdown};
-use super::hud::healthbar::{spawn_health_bar, sync_health_bar};
-use super::hud::popups::{load_popup_assets, sync_popups};
+use super::hud::countdown::sync_countdown;
+use super::hud::healthbar::sync_health_bar;
+use super::hud::popups::sync_popups;
 use super::notes::NoteStyle;
-use super::notes::effects::{spawn_effect_pools, sync_note_effects};
-use super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools, sync_arrow_visuals};
+use super::notes::effects::sync_note_effects;
+use super::notes::render::sync_arrow_visuals;
 use super::playlist::PlayStatePlaylist;
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart_in};
-use super::stage::schema::StageCoordMode;
-use super::stage::{
-    DynamicScriptProp, StagePropVisual, StageResource, StageSyncState, append_stage_sidecar_scripts,
-    load_stage_resource, spawn_stage_props, sync_stage_props,
-};
-use super::types::{PauseMode, PlayPhase, PlayStateParams, SongChart};
+use super::stage::{DynamicScriptProp, StagePropVisual, StageSyncState, sync_stage_props};
+use super::types::{PlayStateParams, SongChart};
 
 #[derive(Default)]
 pub struct PlayPlugin {
@@ -75,7 +64,7 @@ pub(super) struct PlaySfxAssets {
 }
 
 #[derive(Resource, Default)]
-pub(super) pub(super) struct PendingEcsScriptCommands(pub(super) Vec<ScriptCommand>);
+pub(super) struct PendingEcsScriptCommands(pub(super) Vec<ScriptCommand>);
 
 #[derive(SystemParam)]
 pub(super) struct ScriptTickParams<'w, 's> {
@@ -161,7 +150,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(StageSyncState::default())
             .insert_resource(CharacterSyncState::default())
             .insert_resource(AudioSyncState {
-                pub(super) was_countdown: state.is_in_countdown,
+                was_countdown: state.is_in_countdown,
                 was_paused: false,
             })
             .insert_resource(state)
@@ -173,8 +162,6 @@ impl Plugin for PlayPlugin {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-
 pub(crate) fn actor_matches_target(actor: &CharacterActor, target: &str) -> bool {
     let lower = target.trim().to_ascii_lowercase();
     match lower.as_str() {
@@ -184,5 +171,3 @@ pub(crate) fn actor_matches_target(actor: &CharacterActor, target: &str) -> bool
         _ => actor.id.eq_ignore_ascii_case(target.trim()),
     }
 }
-
-#[allow(clippy::too_many_arguments)]

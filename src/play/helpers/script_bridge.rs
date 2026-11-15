@@ -1,15 +1,18 @@
+use std::collections::BTreeMap;
+
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{
     HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptMutableState, ScriptStateSnapshot,
     TweenProp,
 };
-use crate::utils::constants::KEY_COUNT;
+use crate::utils::constants::{HEALTH_MAX, HEALTH_MIN, KEY_COUNT, STEPS_PER_BEAT};
 
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
 use super::super::types::PlayPhase;
 
 impl PlayState {
+    /// Captures a read-only gameplay snapshot consumed by script APIs.
     pub fn snapshot_for_scripts(&self, dt_s: f64) -> ScriptStateSnapshot {
         let mut lane_offsets = BTreeMap::new();
         let mut lane_angles = BTreeMap::new();
@@ -123,6 +126,9 @@ impl PlayState {
     }
 
 
+    /// Dispatches queued lifecycle/gameplay hooks, optionally runs `Update` + timers/tweens,
+    /// applies state mutations, and returns commands requiring Bevy ECS execution.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_script_hooks(
         &mut self,
         hooks: Vec<(HookKind, ScriptEvent)>,

@@ -1,9 +1,8 @@
 use rhai::{Dynamic, Engine, EvalAltResult};
 
-use crate::scripting::api::{ScriptCommand, TweenProp, TweenTarget};
-use crate::utils::constants::MS_PER_SEC;
-
-use crate::scripting::backend::context::{dyn_to_f64, dyn_to_i64, dyn_to_usize, runtime_err, with_ctx};
+use crate::scripting::api::{ScriptCommand, TweenProp, TweenTarget, parse_hex_rgba};
+use crate::scripting::backend::context::{dyn_to_f64, dyn_to_usize, with_ctx};
+use crate::scripting::value::ScriptValue;
 
 pub fn register_gameplay_api(engine: &mut Engine) {
     engine.register_fn("hp", || with_ctx(|c| c.mutable.health));

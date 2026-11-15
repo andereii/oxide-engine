@@ -1,3 +1,6 @@
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ScriptApiDoc {
     pub name: &'static str,
     pub signature: &'static str,

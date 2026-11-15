@@ -1,30 +1,26 @@
+use std::collections::BTreeSet;
+
 use bevy::prelude::*;
 
 use crate::audio::SongAudioPlayer;
-use crate::cli::LaunchFlags;
 use crate::mods::{ModRegistry, ModStore};
-use crate::scripting::{HookKind, ScriptEvent, ScriptHost};
+use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptValue};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
-use super::super::characters::{load_characters_resource, spawn_characters};
+use super::super::characters::{CharacterRole, load_characters_resource, spawn_characters};
 use super::super::hud::countdown::load_countdown_assets;
 use super::super::hud::healthbar::spawn_health_bar;
 use super::super::hud::popups::load_popup_assets;
-use super::super::notes::NoteStyle;
 use super::super::notes::effects::spawn_effect_pools;
 use super::super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools};
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
-use super::super::song::{SongSelection, load_song_chart_in};
-use super::super::stage::{
-    StageResource, append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props,
-};
-use super::super::types::{PlayStateParams, SongChart};
-use super::{
-    AudioSyncState, HudTextVisual, PendingEcsScriptCommands, PlaySfxAssets, apply_ecs_script_commands,
-};
+use super::super::song::load_song_chart_in;
+use super::super::stage::{append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props};
+use super::{AudioSyncState, HudTextVisual, PendingEcsScriptCommands, PlaySfxAssets};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn setup_play_scene(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -171,7 +167,7 @@ pub(super) fn setup_play_scene(
         TextFont { font_size: FontSize::Px(20.0), ..default() },
         bevy::sprite::Anchor::BOTTOM_LEFT,
         Transform::from_xyz(-SCREEN_WIDTH * 0.5 + 24.0, -SCREEN_HEIGHT * 0.5 + 20.0, 10.8),
-        super::camera::hud::hud_render_layer(),
+        hud_render_layer(),
         HudTextVisual,
     ));
 }
@@ -265,5 +261,3 @@ pub(super) fn load_and_init_scripts(
         mod_store,
     )
 }
-
-#[allow(clippy::too_many_arguments)]

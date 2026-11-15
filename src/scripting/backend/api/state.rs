@@ -7,6 +7,7 @@ use crate::utils::constants::{
     MS_PER_SEC, STEPS_PER_BEAT,
 };
 
+#[derive(Debug, Clone, Serialize)]
 pub struct ScriptStateSnapshot {
     pub song_id: String,
     pub difficulty: String,
@@ -175,5 +176,3 @@ impl ScriptMutableState {
         }
     }
 }
-
-#[derive(Debug, Clone)]

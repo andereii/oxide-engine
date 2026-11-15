@@ -2,22 +2,13 @@ use std::collections::{BTreeMap, VecDeque};
 
 use bevy::prelude::Resource;
 
-use crate::mods::{ModRegistry, ModStore};
-use crate::scripting::{
-    HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptMutableState, ScriptStateSnapshot,
-    TweenProp,
-};
-use crate::utils::conductor::ConductorUpdate;
+use crate::scripting::{HookKind, ScriptEvent};
 use crate::utils::conductor::Conductor;
 use crate::utils::constants::{
-    AUDIO_CORRECTION_EASE_RATIO, CONDUCTOR_DRIFT_THRESHOLD_MS, DEFAULT_BOP_INTENSITY,
-    DEFAULT_CAMERA_ANGLE_DEG, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE, HEALTH_LERP_FACTOR,
-    HEALTH_MAX, HEALTH_MIN, HEALTH_STARTING, KEY_COUNT, MAX_RELATIVE_CAM_ZOOM,
-    MUSIC_EASE_RATIO, STEPS_PER_BEAT,
+    DEFAULT_BOP_INTENSITY, DEFAULT_CAMERA_ANGLE_DEG, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE,
+    HEALTH_MIN, HEALTH_STARTING,
 };
-use crate::utils::easing::EaseKind;
 
-use super::camera::events::parse_raw_song_event;
 use super::hud::judgement::Tallies;
 use super::hud::popups::PopupEvent;
 use super::notes::{NoteKindManager, Strumline};

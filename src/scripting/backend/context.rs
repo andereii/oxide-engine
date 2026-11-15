@@ -1,6 +1,7 @@
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
-use rhai::{Dynamic, Engine, EvalAltResult};
+use rhai::{Dynamic, Engine, EvalAltResult, Position};
 
 use crate::scripting::api::ScriptContext;
 use crate::scripting::events::ScriptEvent;
