@@ -184,7 +184,8 @@ impl PlayState {
                 self.pause(PauseMode::Standard);
                 true
             }
-            ScriptCommand::SpawnProp { id, pos, color, .. } => {
+            ScriptCommand::SpawnProp { id, pos, color, .. }
+            | ScriptCommand::SpawnAnimatedProp { id, pos, color, .. } => {
                 self.script_prop_positions.insert(id.clone(), *pos);
                 self.script_prop_scales.insert(id.clone(), [1.0, 1.0]);
                 self.script_prop_angles.insert(id.clone(), 0.0);
@@ -236,6 +237,7 @@ impl PlayState {
             }
             ScriptCommand::Log { .. }
             | ScriptCommand::PlayAnim { .. }
+            | ScriptCommand::PlayAnimFrame { .. }
             | ScriptCommand::PlaySing { .. }
             | ScriptCommand::SetCharacterScale { .. }
             | ScriptCommand::SetCharacterTint { .. }

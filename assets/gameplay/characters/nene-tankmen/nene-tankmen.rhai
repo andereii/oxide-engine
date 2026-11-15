@@ -98,11 +98,18 @@ fn onCreate() {
     this.abot = abot_mod::new_abot_state("nene-tankmen");
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("nene-tankmen");
-    if target != "" {
-        let pos = char_pos(target);
-        spawn_sprite("abot_stereo_bg", "gameplay/characters/nene/stereo-bg.png", pos[0] + 55.0, pos[1] + 414.0, 40.0);
     this.heart_played = false;
-    set_adjust_color("abot_stereo_bg", -40.0, -20.0, -40.0, -25.0);
+    if target != "" {
+        let ab = abot_mod::spawn_abot(target, -95.0, 384.0);
+        viz_mod::spawn_viz(ab[0], ab[1], ab[2], false);
+        set_adjust_color("abot_stereo_bg", -40.0, -20.0, -40.0, -25.0);
+        set_adjust_color("abot_pupil", -40.0, -20.0, -40.0, -25.0);
+        set_adjust_color("abot_body", -40.0, -20.0, -40.0, -25.0);
+        let i = 1;
+        while i <= 7 {
+            set_adjust_color("abot_viz_" + i, -30.0, -10.0, -12.0, 0.0);
+            i += 1;
+        }
     }
 }
 
@@ -130,7 +137,11 @@ fn onSongEnd() {
 }
 
 fn onBeatHit() {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     if char_id("bf") == "pico-blazin" { return; }
+    abot_mod::dance_abot();
+    viz_mod::pulse_viz(this.viz);
     let target = find_slot("nene-tankmen");
     if target == "" { return; }
 
@@ -168,10 +179,13 @@ fn onSongEvent(ev) {
 }
 
 fn onNoteHit(ev) {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
+    viz_mod::pulse_viz(this.viz);
     let kind = ev.get("kind");
     if kind == "weekend-1-lightcan" {
-        this.abot.pupil_state = "left";
+        this.abot = abot_mod::move_pupils(this.abot, "left");
     } else if kind == "weekend-1-cockgun" {
-        this.abot.pupil_state = "right";
+        this.abot = abot_mod::move_pupils(this.abot, "right");
     }
 }

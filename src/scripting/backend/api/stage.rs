@@ -1,6 +1,9 @@
-use rhai::{Dynamic, Engine, EvalAltResult};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 
-use crate::scripting::api::{NewTimerRequest, ScriptCommand, TweenProp, TweenTarget, parse_hex_rgba};
+use crate::animations::BaseAnimationData;
+use crate::scripting::api::{
+    NewTimerRequest, ScriptCommand, ScriptPropAnimKind, TweenProp, TweenTarget, parse_hex_rgba,
+};
 use crate::scripting::value::ScriptValue;
 
 use crate::scripting::backend::context::{dyn_to_f64, dyn_to_i64, dyn_to_usize, runtime_err, with_ctx};
@@ -29,6 +32,17 @@ pub fn register_character_and_modchart_api(engine: &mut Engine) {
                 target: target.to_string(),
                 anim: name.to_string(),
                 force: true,
+            });
+        })
+    });
+    engine.register_fn("play_anim_frame", |target: &str, name: &str, frame: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let frame = dyn_to_usize(&frame)?;
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::PlayAnimFrame {
+                target: target.to_string(),
+                anim: name.to_string(),
+                force: true,
+                frame,
             });
         })
     });
@@ -101,6 +115,15 @@ pub fn register_character_and_modchart_api(engine: &mut Engine) {
             let p = c.snapshot.char_positions.get(target).copied().unwrap_or([0.0, 0.0]);
             vec![Dynamic::from(f64::from(p[0])), Dynamic::from(f64::from(p[1]))]
         })
+    });
+    engine.register_fn("char_top_left", |target: &str| {
+        with_ctx(|c| {
+            let p = c.snapshot.char_top_left.get(target).copied().unwrap_or([0.0, 0.0]);
+            vec![Dynamic::from(f64::from(p[0])), Dynamic::from(f64::from(p[1]))]
+        })
+    });
+    engine.register_fn("char_z", |target: &str| {
+        with_ctx(|c| f64::from(c.snapshot.char_z.get(target).copied().unwrap_or(-500.0)))
     });
     engine.register_fn("set_char_pos", |target: &str, x: Dynamic, y: Dynamic| -> Result<(), Box<EvalAltResult>> {
         let x = dyn_to_f64(&x)? as f32;
@@ -324,6 +347,104 @@ pub fn register_props_tweens_timers_and_store_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn("spawn_sprite_tl", |id: &str, path: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let x = dyn_to_f64(&x)? as f32;
+        let y = dyn_to_f64(&y)? as f32;
+        let z = dyn_to_f64(&z)? as f32;
+        with_ctx(|c| {
+            c.snapshot.prop_positions.insert(id.to_string(), [x, y]);
+            c.snapshot.prop_scales.insert(id.to_string(), [1.0, 1.0]);
+            c.snapshot.prop_angles.insert(id.to_string(), 0.0);
+            c.snapshot.prop_alphas.insert(id.to_string(), 1.0);
+            c.commands.push(ScriptCommand::SpawnAnimatedProp {
+                id: id.to_string(),
+                path: path.to_string(),
+                kind: ScriptPropAnimKind::Static,
+                anims: Vec::new(),
+                color: [1.0, 1.0, 1.0, 1.0],
+                size: [0.0, 0.0],
+                pos: [x, y],
+                z,
+                hud: false,
+                top_left: true,
+            });
+        })
+    });
+    engine.register_fn("spawn_rect_tl", |id: &str, w: Dynamic, h: Dynamic, hex: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let w = dyn_to_f64(&w)? as f32;
+        let h = dyn_to_f64(&h)? as f32;
+        let x = dyn_to_f64(&x)? as f32;
+        let y = dyn_to_f64(&y)? as f32;
+        let z = dyn_to_f64(&z)? as f32;
+        with_ctx(|c| {
+            c.snapshot.prop_positions.insert(id.to_string(), [x, y]);
+            c.snapshot.prop_scales.insert(id.to_string(), [1.0, 1.0]);
+            c.snapshot.prop_angles.insert(id.to_string(), 0.0);
+            c.snapshot.prop_alphas.insert(id.to_string(), 1.0);
+            c.commands.push(ScriptCommand::SpawnAnimatedProp {
+                id: id.to_string(),
+                path: String::new(),
+                kind: ScriptPropAnimKind::Rect,
+                anims: Vec::new(),
+                color: parse_hex_rgba(hex),
+                size: [w, h],
+                pos: [x, y],
+                z,
+                hud: false,
+                top_left: true,
+            });
+        })
+    });
+    engine.register_fn("spawn_sparrow", |id: &str, path: &str, x: Dynamic, y: Dynamic, z: Dynamic, anims: Array| -> Result<(), Box<EvalAltResult>> {
+        let x = dyn_to_f64(&x)? as f32;
+        let y = dyn_to_f64(&y)? as f32;
+        let z = dyn_to_f64(&z)? as f32;
+        let anims = parse_script_anims(anims)?;
+        with_ctx(|c| {
+            c.snapshot.prop_positions.insert(id.to_string(), [x, y]);
+            c.snapshot.prop_scales.insert(id.to_string(), [1.0, 1.0]);
+            c.snapshot.prop_angles.insert(id.to_string(), 0.0);
+            c.snapshot.prop_alphas.insert(id.to_string(), 1.0);
+            c.commands.push(ScriptCommand::SpawnAnimatedProp {
+                id: id.to_string(),
+                path: path.to_string(),
+                kind: ScriptPropAnimKind::Sparrow,
+                anims,
+                color: [1.0, 1.0, 1.0, 1.0],
+                size: [0.0, 0.0],
+                pos: [x, y],
+                z,
+                hud: false,
+                top_left: true,
+            });
+        });
+        Ok(())
+    });
+    engine.register_fn("spawn_atlas", |id: &str, path: &str, x: Dynamic, y: Dynamic, z: Dynamic, anims: Array| -> Result<(), Box<EvalAltResult>> {
+        let x = dyn_to_f64(&x)? as f32;
+        let y = dyn_to_f64(&y)? as f32;
+        let z = dyn_to_f64(&z)? as f32;
+        let anims = parse_script_anims(anims)?;
+        with_ctx(|c| {
+            c.snapshot.prop_positions.insert(id.to_string(), [x, y]);
+            c.snapshot.prop_scales.insert(id.to_string(), [1.0, 1.0]);
+            c.snapshot.prop_angles.insert(id.to_string(), 0.0);
+            c.snapshot.prop_alphas.insert(id.to_string(), 1.0);
+            c.commands.push(ScriptCommand::SpawnAnimatedProp {
+                id: id.to_string(),
+                path: path.to_string(),
+                kind: ScriptPropAnimKind::Atlas,
+                anims,
+                color: [1.0, 1.0, 1.0, 1.0],
+                size: [0.0, 0.0],
+                pos: [x, y],
+                z,
+                hud: false,
+                top_left: true,
+            });
+        });
+        Ok(())
+    });
     engine.register_fn("despawn", |id: &str| {
         with_ctx(|c| c.commands.push(ScriptCommand::DespawnProp(id.to_string())))
     });
@@ -530,5 +651,53 @@ pub fn register_props_tweens_timers_and_store_api(engine: &mut Engine) {
         let json = ScriptValue::from_rhai(&val).to_json();
         with_ctx(|c| c.store.set("global", key, json))
     });
+}
+
+fn parse_script_anims(anims: Array) -> Result<Vec<BaseAnimationData>, Box<EvalAltResult>> {
+    let mut out = Vec::with_capacity(anims.len());
+    for item in anims {
+        let Some(map) = item.try_cast::<Map>() else {
+            return Err(runtime_err("animation entry must be an object map"));
+        };
+        let mut data = BaseAnimationData::default();
+        if let Some(v) = map.get("name").and_then(|d| d.clone().into_string().ok()) {
+            data.name = v;
+        }
+        if let Some(v) = map.get("prefix").and_then(|d| d.clone().into_string().ok()) {
+            data.prefix = v;
+        }
+        if let Some(v) = map.get("fps") {
+            data.frame_rate = dyn_to_f64(v)? as f32;
+        }
+        if let Some(v) = map.get("looped").and_then(|d| d.as_bool().ok()) {
+            data.looped = v;
+        }
+        if let Some(v) = map.get("flip_x").and_then(|d| d.as_bool().ok()) {
+            data.flip_x = Some(v);
+        }
+        if let Some(v) = map.get("flip_y").and_then(|d| d.as_bool().ok()) {
+            data.flip_y = Some(v);
+        }
+        if let Some(arr) = map.get("offsets").and_then(|d| d.clone().try_cast::<Array>())
+            && arr.len() >= 2
+        {
+            data.offsets = [dyn_to_f64(&arr[0])? as f32, dyn_to_f64(&arr[1])? as f32];
+        }
+        if let Some(arr) = map.get("indices").and_then(|d| d.clone().try_cast::<Array>()) {
+            for idx in arr {
+                data.frame_indices.push(dyn_to_usize(&idx)?);
+            }
+        } else if let (Some(s), Some(e)) = (map.get("start"), map.get("end")) {
+            let start = dyn_to_usize(s)?;
+            let end = dyn_to_usize(e)?;
+            if start <= end {
+                data.frame_indices.extend(start..=end);
+            } else {
+                data.frame_indices.extend((end..=start).rev());
+            }
+        }
+        out.push(data);
+    }
+    Ok(out)
 }
 

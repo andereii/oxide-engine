@@ -14,7 +14,6 @@ fn reset_car_right(state) {
 }
 
 fn finish_car1() {
-    this.car_waiting = false;
     let dur = rand_range(1.8, 3.0);
     tween_prop("phillyCars", "x", 2795.0, dur, "sineIn");
     tween_prop("phillyCars", "y", 1018.0, dur, "sineIn");
@@ -33,6 +32,7 @@ fn free_car2() {
 fn on_car1_stopped() {
     this.car_waiting = true;
     if !this.lights_stop {
+        this.car_waiting = false;
         finish_car1();
     }
 }
@@ -129,6 +129,7 @@ fn onBeatHit() {
             anim("phillyTraffic", "togreen");
             this.change_interval = 30;
             if this.car_waiting {
+                this.car_waiting = false;
                 finish_car1();
             }
         }

@@ -363,13 +363,19 @@ pub fn sync_stage_props(
                     idx,
                 )
             }
-            (Some(anim), None) => (
-                anim.current_offset(),
-                anim.current_frame_offset(),
-                anim.current_flip(),
-                anim.current_frame_rotated(),
-                anim.current_atlas_index(),
-            ),
+            (Some(anim), None) => {
+                let idx = anim.current_atlas_index();
+                if let Some(idx) = idx {
+                    set_atlas_index(&mut sprite, idx);
+                }
+                (
+                    anim.current_offset(),
+                    anim.current_frame_offset(),
+                    anim.current_flip(),
+                    anim.current_frame_rotated(),
+                    idx,
+                )
+            }
             _ => ([0.0, 0.0], [0.0, 0.0], [false, false], false, None),
         };
 

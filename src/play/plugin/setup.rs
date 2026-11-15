@@ -90,9 +90,20 @@ pub(super) fn setup_play_scene(
                 &mut layouts,
             );
             for c in &chars.characters {
+                let tl_x = c.slot.position[0]
+                    + c.data.offsets[0] * (1.0 + c.slot.scale[0])
+                    - c.idle_size[0] * c.slot.scale[0] * 0.5;
+                let tl_y = c.slot.position[1]
+                    + c.data.offsets[1] * (1.0 + c.slot.scale[1])
+                    - c.idle_size[1] * c.slot.scale[1];
+                let char_z = super::super::stage::schema::stage_layer_z(c.slot.layer, 0);
                 state
                     .script_char_positions
                     .insert(c.id.clone(), c.slot.position);
+                state
+                    .script_char_top_left
+                    .insert(c.id.clone(), [tl_x, tl_y]);
+                state.script_char_z.insert(c.id.clone(), char_z);
                 let alias = match c.role {
                     CharacterRole::Player => "bf",
                     CharacterRole::Opponent => "dad",
@@ -102,6 +113,14 @@ pub(super) fn setup_play_scene(
                     .script_char_positions
                     .entry(alias.to_string())
                     .or_insert(c.slot.position);
+                state
+                    .script_char_top_left
+                    .entry(alias.to_string())
+                    .or_insert([tl_x, tl_y]);
+                state
+                    .script_char_z
+                    .entry(alias.to_string())
+                    .or_insert(char_z);
                 if c.data.script {
                     char_script_sources.push((c.id.clone(), c.json_path.clone()));
                 }

@@ -43,9 +43,20 @@ pub(super) fn tick_play_state(
 
     let mut seen_aliases = [false; 3];
     for actor in &scripts.actors {
+        let tl_x = actor.slot.position[0]
+            + actor.data.offsets[0] * (1.0 + actor.slot.scale[0])
+            - actor.idle_size[0] * actor.slot.scale[0] * 0.5;
+        let tl_y = actor.slot.position[1]
+            + actor.data.offsets[1] * (1.0 + actor.slot.scale[1])
+            - actor.idle_size[1] * actor.slot.scale[1];
+        let char_z = super::super::stage::schema::stage_layer_z(actor.slot.layer, 0);
         state
             .script_char_positions
             .insert(actor.id.clone(), actor.slot.position);
+        state
+            .script_char_top_left
+            .insert(actor.id.clone(), [tl_x, tl_y]);
+        state.script_char_z.insert(actor.id.clone(), char_z);
         let cur_anim = actor.controller.current.clone().unwrap_or_default();
         let anim_finished = actor.controller.is_finished();
         state
@@ -63,6 +74,14 @@ pub(super) fn tick_play_state(
             .script_char_positions
             .entry(alias.to_string())
             .or_insert(actor.slot.position);
+        state
+            .script_char_top_left
+            .entry(alias.to_string())
+            .or_insert([tl_x, tl_y]);
+        state
+            .script_char_z
+            .entry(alias.to_string())
+            .or_insert(char_z);
         if !seen_aliases[role_idx] {
             seen_aliases[role_idx] = true;
             state.script_char_anims.insert(alias.to_string(), cur_anim);
@@ -71,7 +90,7 @@ pub(super) fn tick_play_state(
                 .insert(alias.to_string(), anim_finished);
         }
     }
-    for (_, vis, sprite, _, _) in &scripts.props {
+    for (_, vis, sprite, _, _, _) in &scripts.props {
         state
             .script_prop_positions
             .insert(vis.name.clone(), vis.base_position);
@@ -104,6 +123,7 @@ pub(super) fn tick_play_state(
     apply_ecs_script_commands(
         &mut commands,
         &scripts.asset_server,
+        &mut scripts.layouts,
         &scripts.mods,
         &mut scripts.actors,
         &mut scripts.props,

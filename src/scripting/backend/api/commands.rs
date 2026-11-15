@@ -1,4 +1,14 @@
+use crate::animations::BaseAnimationData;
+
 use super::tweens::TweenProp;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptPropAnimKind {
+    Static,
+    Rect,
+    Sparrow,
+    Atlas,
+}
 
 #[derive(Debug, Clone)]
 pub enum LogLevel {
@@ -56,6 +66,12 @@ pub enum ScriptCommand {
         target: String,
         anim: String,
         force: bool,
+    },
+    PlayAnimFrame {
+        target: String,
+        anim: String,
+        force: bool,
+        frame: usize,
     },
     PlaySing {
         target: String,
@@ -116,6 +132,18 @@ pub enum ScriptCommand {
         pos: [f32; 2],
         z: f32,
         hud: bool,
+    },
+    SpawnAnimatedProp {
+        id: String,
+        path: String,
+        kind: ScriptPropAnimKind,
+        anims: Vec<BaseAnimationData>,
+        color: [f32; 4],
+        size: [f32; 2],
+        pos: [f32; 2],
+        z: f32,
+        hud: bool,
+        top_left: bool,
     },
     DespawnProp(String),
     SetPropNumber {

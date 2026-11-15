@@ -34,7 +34,9 @@ use super::notes::render::sync_arrow_visuals;
 use super::playlist::PlayStatePlaylist;
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart_in};
-use super::stage::{DynamicScriptProp, StagePropVisual, StageSyncState, sync_stage_props};
+use super::stage::{
+    DynamicScriptProp, StageCompositeProp, StagePropVisual, StageSyncState, sync_stage_props,
+};
 use super::types::{PlayStateParams, SongChart};
 
 #[derive(Default)]
@@ -70,6 +72,7 @@ pub(crate) struct PendingEcsScriptCommands(pub(crate) Vec<ScriptCommand>);
 #[derive(SystemParam)]
 pub(super) struct ScriptTickParams<'w, 's> {
     pub(super) asset_server: Res<'w, AssetServer>,
+    pub(super) layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     pub(super) mods: Res<'w, ModRegistry>,
     pub(super) mod_store: ResMut<'w, ModStore>,
     pub(super) script_host: ResMut<'w, ScriptHost>,
@@ -85,6 +88,7 @@ pub(super) struct ScriptTickParams<'w, 's> {
             &'static mut Sprite,
             Option<&'static mut AnimationController>,
             Option<&'static DynamicScriptProp>,
+            Option<&'static StageCompositeProp>,
         ),
     >,
 }

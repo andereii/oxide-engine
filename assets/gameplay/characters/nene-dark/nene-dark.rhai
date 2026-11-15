@@ -99,9 +99,9 @@ fn onCreate() {
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("nene-dark");
     if target != "" {
-        let pos = char_pos(target);
-        spawn_sprite("abot_stereo_bg", "gameplay/characters/nene/stereo-bg.png", pos[0] + 55.0, pos[1] + 414.0, 40.0);
-    prop_tint("abot_stereo_bg", "#FF616785");
+        let ab = abot_mod::spawn_abot(target, -95.0, 384.0);
+        viz_mod::spawn_viz(ab[0], ab[1], ab[2], false);
+        prop_tint("abot_stereo_bg", "#FF616785");
     }
 }
 
@@ -128,7 +128,11 @@ fn onSongEnd() {
 }
 
 fn onBeatHit() {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     if char_id("bf") == "pico-blazin" { return; }
+    abot_mod::dance_abot();
+    viz_mod::pulse_viz(this.viz);
     let target = find_slot("nene-dark");
     if target == "" { return; }
 
@@ -166,10 +170,13 @@ fn onSongEvent(ev) {
 }
 
 fn onNoteHit(ev) {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
+    viz_mod::pulse_viz(this.viz);
     let kind = ev.get("kind");
     if kind == "weekend-1-lightcan" {
-        this.abot.pupil_state = "left";
+        this.abot = abot_mod::move_pupils(this.abot, "left");
     } else if kind == "weekend-1-cockgun" {
-        this.abot.pupil_state = "right";
+        this.abot = abot_mod::move_pupils(this.abot, "right");
     }
 }

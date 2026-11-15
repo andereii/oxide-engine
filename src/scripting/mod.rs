@@ -12,7 +12,7 @@ pub use backend::api;
 #[allow(unused_imports)]
 pub use api::{
     LogLevel, PropertyTween, SCRIPT_API_CATALOG, ScriptApiDoc, ScriptCommand, ScriptContext,
-    ScriptMutableState, ScriptStateSnapshot, TweenProp, TweenTarget,
+    ScriptMutableState, ScriptPropAnimKind, ScriptStateSnapshot, TweenProp, TweenTarget,
 };
 #[allow(unused_imports)]
 pub use backend::{RhaiBackend, ScriptBackend, ScriptError, ScriptInstance, ScriptSource};

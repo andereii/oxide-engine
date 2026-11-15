@@ -68,8 +68,8 @@ fn onCreate() {
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("otis-speaker");
     if target != "" {
-        let pos = char_pos(target);
-        spawn_sprite("abot_stereo_bg", "gameplay/characters/nene/stereo-bg.png", pos[0] + 320.0, pos[1] + 485.0, 40.0);
+        let ab = abot_mod::spawn_abot(target, 170.0, 455.0);
+        viz_mod::spawn_viz(ab[0], ab[1], ab[2], false);
     }
 }
 
@@ -105,7 +105,19 @@ fn onUpdate() {
     }
 }
 
+fn onBeatHit() {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
+    abot_mod::dance_abot();
+    viz_mod::pulse_viz(this.viz);
+}
+
 fn onSongEvent(ev) {
     import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
     this.abot = abot_mod::on_FocusCamera(this.abot, ev);
+}
+
+fn onNoteHit(ev) {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
+    viz_mod::pulse_viz(this.viz);
 }

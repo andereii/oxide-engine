@@ -8,7 +8,7 @@ pub mod stage;
 pub mod state;
 pub mod tweens;
 
-pub use commands::{LogLevel, ScriptCommand};
+pub use commands::{LogLevel, ScriptCommand, ScriptPropAnimKind};
 pub use context::{
     MAX_CUSTOM_HOOK_DEPTH, NewTimerRequest, ScriptContext, parse_hex_rgba, script_clamp,
     script_lerp, script_remap,
