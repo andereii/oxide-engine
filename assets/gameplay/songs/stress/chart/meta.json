@@ -57,6 +57,135 @@
     },
     "hard": {
       "scrollSpeed": 2.6
+    },
+    "pico-easy": {
+      "scrollSpeed": 2.5,
+      "stage": "tankmanBattlefieldErect",
+      "characters": {
+        "players": [
+          "pico-holding-nene"
+        ],
+        "opponents": [
+          "tankman-bloody"
+        ],
+        "spectator": [
+          "otis-speaker"
+        ]
+      },
+      "credits": [
+        "Artist: Saruky",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 178,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-tankman-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2.9,
+      "stage": "tankmanBattlefieldErect",
+      "characters": {
+        "players": [
+          "pico-holding-nene"
+        ],
+        "opponents": [
+          "tankman-bloody"
+        ],
+        "spectator": [
+          "otis-speaker"
+        ]
+      },
+      "credits": [
+        "Artist: Saruky",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 178,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-tankman-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 3.2,
+      "stage": "tankmanBattlefieldErect",
+      "characters": {
+        "players": [
+          "pico-holding-nene"
+        ],
+        "opponents": [
+          "tankman-bloody"
+        ],
+        "spectator": [
+          "otis-speaker"
+        ]
+      },
+      "credits": [
+        "Artist: Saruky",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 178,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-tankman-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

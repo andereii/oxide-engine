@@ -113,6 +113,135 @@
           }
         }
       }
+    },
+    "pico-easy": {
+      "scrollSpeed": 1.6,
+      "stage": "mainStageErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "dad"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: Xploshi (ft. Saster)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 120,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-dad-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2,
+      "stage": "mainStageErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "dad"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: Xploshi (ft. Saster)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 120,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-dad-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.3,
+      "stage": "mainStageErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "dad"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: Xploshi (ft. Saster)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 120,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-dad-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

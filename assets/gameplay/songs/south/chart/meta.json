@@ -113,6 +113,135 @@
           }
         }
       }
+    },
+    "pico-easy": {
+      "scrollSpeed": 1.6,
+      "stage": "spookyMansionErect",
+      "characters": {
+        "players": [
+          "pico-dark"
+        ],
+        "opponents": [
+          "spooky-dark"
+        ],
+        "spectator": [
+          "nene-dark"
+        ]
+      },
+      "credits": [
+        "Artist: six impala (feat. Saster)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 165,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-spooky-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 2.4,
+      "stage": "spookyMansionErect",
+      "characters": {
+        "players": [
+          "pico-dark"
+        ],
+        "opponents": [
+          "spooky-dark"
+        ],
+        "spectator": [
+          "nene-dark"
+        ]
+      },
+      "credits": [
+        "Artist: six impala (feat. Saster)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 165,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-spooky-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.4,
+      "stage": "spookyMansionErect",
+      "characters": {
+        "players": [
+          "pico-dark"
+        ],
+        "opponents": [
+          "spooky-dark"
+        ],
+        "spectator": [
+          "nene-dark"
+        ]
+      },
+      "credits": [
+        "Artist: six impala (feat. Saster)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 165,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-spooky-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

@@ -57,6 +57,135 @@
     },
     "hard": {
       "scrollSpeed": 2.4
+    },
+    "bf-easy": {
+      "scrollSpeed": 2.4,
+      "stage": "phillyStreetsErect",
+      "characters": {
+        "players": [
+          "bf"
+        ],
+        "opponents": [
+          "darnell"
+        ],
+        "spectator": [
+          "gf"
+        ]
+      },
+      "credits": [
+        "Artist: Saruky",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 176,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-darnell-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "bf-normal": {
+      "scrollSpeed": 2.8,
+      "stage": "phillyStreetsErect",
+      "characters": {
+        "players": [
+          "bf"
+        ],
+        "opponents": [
+          "darnell"
+        ],
+        "spectator": [
+          "gf"
+        ]
+      },
+      "credits": [
+        "Artist: Saruky",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 176,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-darnell-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "bf-hard": {
+      "scrollSpeed": 3,
+      "stage": "phillyStreetsErect",
+      "characters": {
+        "players": [
+          "bf"
+        ],
+        "opponents": [
+          "darnell"
+        ],
+        "spectator": [
+          "gf"
+        ]
+      },
+      "credits": [
+        "Artist: Saruky",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 176,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-bf-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-darnell-bf.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
     }
   }
 }

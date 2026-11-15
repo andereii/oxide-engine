@@ -5,11 +5,19 @@
     "scrollSpeed": 1,
     "lanes": 4,
     "characters": {
-      "players": ["bf"],
-      "opponents": ["dad"],
-      "spectator": ["gf"]
+      "players": [
+        "bf"
+      ],
+      "opponents": [
+        "dad"
+      ],
+      "spectator": [
+        "gf"
+      ]
     },
-    "credits": ["Artist: Kawai Sprite"],
+    "credits": [
+      "Artist: Kawai Sprite"
+    ],
     "skins": {
       "hud": "funkin",
       "ui": "funkin"
@@ -88,6 +96,135 @@
           "opponent": {
             "file": "Voices-dad-erect.ogg",
             "offset": 0
+          }
+        }
+      }
+    },
+    "pico-easy": {
+      "scrollSpeed": 1.5,
+      "stage": "mainStageErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "dad"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: That Andy Guy (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 100,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-dad-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-normal": {
+      "scrollSpeed": 1.8,
+      "stage": "mainStageErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "dad"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: That Andy Guy (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 100,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-dad-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        }
+      }
+    },
+    "pico-hard": {
+      "scrollSpeed": 2.3,
+      "stage": "mainStageErect",
+      "characters": {
+        "players": [
+          "pico-playable"
+        ],
+        "opponents": [
+          "dad"
+        ],
+        "spectator": [
+          "nene"
+        ]
+      },
+      "credits": [
+        "Artist: That Andy Guy (feat. Saruky)",
+        "Charter: fabs + Spazkid"
+      ],
+      "audio": {
+        "bpm": 100,
+        "needsVoices": true,
+        "multiVocal": true,
+        "instrumental": {
+          "inst": {
+            "file": "Inst-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          }
+        },
+        "vocals": {
+          "player": {
+            "file": "Voices-pico-playable-pico.ogg",
+            "offset": 0,
+            "vol": 1
+          },
+          "opponent": {
+            "file": "Voices-dad-pico.ogg",
+            "offset": 0,
+            "vol": 1
           }
         }
       }
