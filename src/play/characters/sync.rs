@@ -3,7 +3,9 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
-use crate::animations::atlas_composite::{CompositePiece, upright_size};
+use crate::animations::atlas_composite::{
+    CompositePiece, FlxAnimateTransformParams, compose_flx_piece_bevy_affine, modulate_color,
+};
 use crate::play::notes::CharNoteSignal;
 use crate::play::scene::PlayState;
 use crate::play::stage::schema::stage_layer_z;
@@ -138,16 +140,12 @@ fn sync_actor_visuals(
             }
             hide_entities(&actor.piece_entities, parts);
         }
-        Some(ClipVisual::Composite { source_idx, clip, bounds_min, bounds_size }) => {
+        Some(ClipVisual::Composite { source_idx, clip, stage_matrix }) => {
             hide_entities(&[actor.sheet_entity], parts);
             let pieces = clip.frames.get(actor.controller.frame_cursor).map(Vec::as_slice).unwrap_or(&[]);
-            let feet_anchor = [
-                if flip[0] { bounds_min[0] + bounds_size[0] - actor.idle_size[0] * 0.5 } else { bounds_min[0] + actor.idle_size[0] * 0.5 },
-                if flip[1] { bounds_min[1] + bounds_size[1] - actor.idle_size[1] } else { bounds_min[1] + actor.idle_size[1] },
-            ];
             sync_composite_parts(
-                actor, *source_idx, pieces, feet_anchor, scale, flip, anim_off,
-                tint, cam_scroll_x, cam_scroll_y, zoom, parts,
+                actor, *source_idx, pieces, clip.bounds_min, clip.bounds_size, *stage_matrix,
+                scale, flip, anim_off, tint, cam_scroll_x, cam_scroll_y, zoom, parts,
             );
         }
         None => {
@@ -221,7 +219,9 @@ fn sync_composite_parts(
     actor: &CharacterActor,
     source_idx: usize,
     pieces: &[CompositePiece],
-    feet_anchor: [f32; 2],
+    bounds_min: [f32; 2],
+    bounds_size: [f32; 2],
+    stage_matrix: Option<[f32; 6]>,
     scale: [f32; 2],
     flip: [bool; 2],
     anim_off: [f32; 2],
@@ -235,14 +235,37 @@ fn sync_composite_parts(
         hide_entities(&actor.piece_entities, parts);
         return;
     };
-    let screen_fx = actor.slot.position[0] + actor.data.offsets[0] * (1.0 + scale[0]) - anim_off[0] * scale[0]
+    let screen_fx = actor.slot.position[0]
+        + actor.data.offsets[0] * (1.0 + scale[0])
+        - anim_off[0] * scale[0]
         - cam_scroll_x * actor.slot.scroll_factor[0];
-    let screen_fy = actor.slot.position[1] + actor.data.offsets[1] * (1.0 + scale[1]) - anim_off[1] * scale[1]
+    let screen_fy = actor.slot.position[1]
+        + actor.data.offsets[1] * (1.0 + scale[1])
+        - anim_off[1] * scale[1]
         - cam_scroll_y * actor.slot.scroll_factor[1];
-    let bevy_fx = (screen_fx - SCREEN_WIDTH * 0.5) * zoom;
-    let bevy_fy = (SCREEN_HEIGHT * 0.5 - screen_fy) * zoom;
-    let flip_sx = if flip[0] { -1.0 } else { 1.0 };
-    let flip_sy = if flip[1] { -1.0 } else { 1.0 };
+    let top_left = [
+        screen_fx - actor.idle_size[0] * scale[0] * 0.5,
+        screen_fy - actor.idle_size[1] * scale[1],
+    ];
+    let atlas_settings = actor.data.effective_atlas_settings();
+    let params = FlxAnimateTransformParams {
+        bounds_min,
+        bounds_size,
+        top_left,
+        scale,
+        angle_deg: 0.0,
+        flip,
+        stage_matrix,
+        apply_stage_matrix: atlas_settings.apply_stage_matrix,
+        post_stage_matrix_apply: atlas_settings.post_stage_matrix_apply,
+        screen_size: [SCREEN_WIDTH, SCREEN_HEIGHT],
+        zoom,
+    };
+    let visible = if actor.slot.visible && actor.mod_visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
 
     for (i, &ent) in actor.piece_entities.iter().enumerate() {
         let Ok((mut sprite, mut tf, mut vis, mut aff)) = parts.get_mut(ent) else {
@@ -253,34 +276,17 @@ fn sync_composite_parts(
             set_visibility(&mut vis, Visibility::Hidden);
             continue;
         };
-        let (w, h) = upright_size(piece);
-        let m = piece.matrix;
-        let fcx = m[0] * (w * 0.5) + m[2] * (h * 0.5) + m[4];
-        let fcy = m[1] * (w * 0.5) + m[3] * (h * 0.5) + m[5];
-        let lx = (fcx - feet_anchor[0]) * flip_sx * scale[0] * zoom;
-        let ly = -(fcy - feet_anchor[1]) * flip_sy * scale[1] * zoom;
-
-        let [mut m00, mut m01, mut m10, mut m11] = if piece.rotated {
-            [-m[2], -m[0], m[3], m[1]]
-        } else {
-            [m[0], -m[2], -m[1], m[3]]
-        };
-        let sx = flip_sx * scale[0] * zoom;
-        let sy = flip_sy * scale[1] * zoom;
-        m00 *= sx;
-        m01 *= sx;
-        m10 *= sy;
-        m11 *= sy;
-
-        let pos = Vec3::new(bevy_fx + lx, bevy_fy + ly, stage_layer_z(actor.slot.layer, i));
-        set_sprite_atlas(&mut sprite, &src.texture, &src.layout, piece.sprite_index);
-        set_sprite_color(&mut sprite, tint);
+        let ([bx, by], cols) = compose_flx_piece_bevy_affine(piece, &params);
+        let pos = Vec3::new(bx, by, stage_layer_z(actor.slot.layer, i));
+        let (tex, layout) = src.atlas_pair(piece.spritemap_idx);
+        set_sprite_atlas(&mut sprite, tex, layout, piece.sprite_index);
+        set_sprite_color(&mut sprite, modulate_color(tint, piece.color));
         set_sprite_flip(&mut sprite, false, false);
         set_transform_full(&mut tf, pos, Vec3::ONE, Quat::IDENTITY);
         aff.active = true;
-        aff.cols = [m00, m10, m01, m11];
+        aff.cols = cols;
         aff.translation = pos;
-        set_visibility(&mut vis, if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden });
+        set_visibility(&mut vis, visible);
     }
 }
 

@@ -41,19 +41,20 @@ pub fn spawn_characters(commands: &mut Commands, res: &CharactersResource) {
 }
 
 pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::LoadedCharacter) {
-    let Some(first_src) = loaded.sources.first() else {
-        return;
+    let make_sprite = || match loaded.sources.first() {
+        Some(first_src) => Sprite::from_atlas_image(
+            first_src.texture.clone(),
+            TextureAtlas {
+                layout: first_src.layout.clone(),
+                index: 0,
+            },
+        ),
+        None => Sprite::default(),
     };
     let z_base = stage_layer_z(loaded.slot.layer, 0);
     let sheet_entity = commands
         .spawn((
-            Sprite::from_atlas_image(
-                first_src.texture.clone(),
-                TextureAtlas {
-                    layout: first_src.layout.clone(),
-                    index: 0,
-                },
-            ),
+            make_sprite(),
             Transform::from_xyz(0.0, 0.0, z_base),
             Visibility::Hidden,
             CharacterPartVisual,
@@ -65,13 +66,7 @@ pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::L
     for i in 0..loaded.max_composite_pieces {
         let piece_entity = commands
             .spawn((
-                Sprite::from_atlas_image(
-                    first_src.texture.clone(),
-                    TextureAtlas {
-                        layout: first_src.layout.clone(),
-                        index: 0,
-                    },
-                ),
+                make_sprite(),
                 Transform::from_xyz(0.0, 0.0, stage_layer_z(loaded.slot.layer, i)),
                 Visibility::Hidden,
                 CharacterPartVisual,

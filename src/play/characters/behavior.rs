@@ -14,7 +14,20 @@ use super::schema::{CharacterData, CharacterRole};
 pub struct SheetSource {
     pub texture: Handle<Image>,
     pub layout: Handle<TextureAtlasLayout>,
+    pub extra_layers: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
     pub frame_sizes: HashMap<usize, [f32; 2]>,
+}
+
+impl SheetSource {
+    pub fn atlas_pair(&self, spritemap_idx: usize) -> (&Handle<Image>, &Handle<TextureAtlasLayout>) {
+        if spritemap_idx == 0 {
+            (&self.texture, &self.layout)
+        } else if let Some((tex, layout)) = self.extra_layers.get(spritemap_idx - 1) {
+            (tex, layout)
+        } else {
+            (&self.texture, &self.layout)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -23,8 +36,7 @@ pub enum ClipVisual {
     Composite {
         source_idx: usize,
         clip: CompositeClip,
-        bounds_min: [f32; 2],
-        bounds_size: [f32; 2],
+        stage_matrix: Option<[f32; 6]>,
     },
 }
 

@@ -151,7 +151,7 @@
         1,
         1
       ],
-      "file": "mallXmasErect/tree",
+      "file": "../mallXmas/tree",
       "animation": null,
       "visible": true,
       "opacity": 1,
@@ -178,7 +178,7 @@
       "opacity": 1,
       "position": [
         -300,
-        -200
+        0
       ],
       "flip": [
         false,

@@ -6,11 +6,12 @@ use bevy::prelude::*;
 
 use crate::animations::animate_atlas::AnimateAtlas;
 use crate::animations::atlas_composite::{
-    CompositeClip, build_composite_clip, compute_atlas_whole_bounds, compute_clips_bounds,
+    CompositeClip, build_composite_clip, compute_atlas_whole_bounds,
     sample_default_composite_clip,
 };
 use crate::animations::{
-    AnimationController, SparrowAtlas, add_sparrow_animations, register_default_sparrow_idle,
+    AnimationController, AtlasSettings, SparrowAtlas, add_sparrow_animations,
+    register_default_sparrow_idle,
 };
 use crate::mods::{DiscoveredScript, ModRegistry, ScriptScope};
 use crate::utils::constants::STAGES_ASSET_PATH;
@@ -36,12 +37,13 @@ pub enum StagePropKind {
         frame_size: [f32; 2],
     },
     CompositeAtlas {
-        texture: Handle<Image>,
-        layout: Handle<TextureAtlasLayout>,
+        textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
         controller: AnimationController,
         clips: HashMap<String, CompositeClip>,
         bounds_min: [f32; 2],
         bounds_size: [f32; 2],
+        atlas_settings: AtlasSettings,
+        stage_matrix: Option<[f32; 6]>,
         max_pieces: usize,
     },
 }
@@ -174,56 +176,14 @@ fn resolve_prop_visual(
 
     match prop.anim_kind {
         Some(StageAnimKind::Atlas) => {
-            let dir = resolve_atlas_dir_in(mods, stage_id, file)?;
-            let atlas = AnimateAtlas::from_dir(&dir).ok()?;
-            let (layout, indices) = atlas.build_layout();
-            let mut controller = AnimationController::default();
-            let mut clips = HashMap::new();
-            if prop.animations.is_empty() {
-                if let Some(clip) = sample_default_composite_clip(&atlas, &indices) {
-                    let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
-                    controller.add_anim("idle", frame_ids, clip.fps, clip.looped);
-                    clips.insert("idle".to_string(), clip);
-                }
-            } else {
-                for anim in &prop.animations {
-                    if let Some(clip) = build_composite_clip(&atlas, &indices, anim) {
-                        let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
-                        controller.add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
-                        controller.set_offset(&anim.name, clip.offset);
-                        controller.set_flip(&anim.name, clip.flip);
-                        clips.insert(anim.name.clone(), clip);
-                    }
-                }
-            }
-            if let Some(anim) = pick_starting_anim(prop, &controller) {
-                controller.play(&anim, true, false, 0);
-            }
-            let max_pieces = clips
-                .values()
-                .flat_map(|c| c.frames.iter())
-                .map(Vec::len)
-                .max()
-                .unwrap_or(1)
-                .max(1);
-            let (bounds_min, bounds_size) = compute_clips_bounds(clips.values())
-                .unwrap_or_else(|| compute_atlas_whole_bounds(&atlas, &indices));
-            let img_rel = mods.to_asset_server_path(&dir.join("spritemap1.png"));
-            Some(StagePropKind::CompositeAtlas {
-                texture: asset_server.load(img_rel),
-                layout: layouts.add(layout),
-                controller,
-                clips,
-                bounds_min,
-                bounds_size,
-                max_pieces,
-            })
+            load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts)
         }
         Some(StageAnimKind::Sparrow) => {
-            let img_path = resolve_stage_image_in(mods, stage_id, file)?;
-            let xml_path = img_path.with_extension("xml");
-            if xml_path.is_file() {
-                if let Ok(atlas) = SparrowAtlas::from_file(&xml_path) {
+            if let Some(img_path) = resolve_stage_image_in(mods, stage_id, file) {
+                let xml_path = img_path.with_extension("xml");
+                if xml_path.is_file()
+                    && let Ok(atlas) = SparrowAtlas::from_file(&xml_path)
+                {
                     let (layout, indices) = atlas.build_layout();
                     let mut controller = AnimationController::default();
                     if prop.animations.is_empty() {
@@ -246,12 +206,19 @@ fn resolve_prop_visual(
                         frame_size,
                     });
                 }
+                if !xml_path.is_file()
+                    && let Some(comp) =
+                        load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts)
+                {
+                    return Some(comp);
+                }
+                let size = read_image_dimensions(&img_path).unwrap_or([0.0, 0.0]);
+                return Some(StagePropKind::StaticImage {
+                    texture: asset_server.load(mods.to_asset_server_path(&img_path)),
+                    size,
+                });
             }
-            let size = read_image_dimensions(&img_path).unwrap_or([0.0, 0.0]);
-            Some(StagePropKind::StaticImage {
-                texture: asset_server.load(mods.to_asset_server_path(&img_path)),
-                size,
-            })
+            load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts)
         }
         Some(StageAnimKind::Packer) | None => {
             let img_path = resolve_stage_image_in(mods, stage_id, file)?;
@@ -262,6 +229,89 @@ fn resolve_prop_visual(
             })
         }
     }
+}
+
+fn load_composite_stage_prop(
+    mods: &ModRegistry,
+    stage_id: &str,
+    prop: &StagePropData,
+    file: &str,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) -> Option<StagePropKind> {
+    let dir = resolve_atlas_dir_in(mods, stage_id, file)?;
+    let atlas = AnimateAtlas::from_dir(&dir).ok()?;
+    let (atlas_layouts, indices) = atlas.build_layouts();
+    let textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)> = atlas_layouts
+        .into_iter()
+        .enumerate()
+        .map(|(i, layout)| {
+            let img_rel = mods.to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
+            (asset_server.load(img_rel), layouts.add(layout))
+        })
+        .collect();
+    if textures.is_empty() {
+        return None;
+    }
+
+    let mut controller = AnimationController::default();
+    let mut clips = HashMap::new();
+    if prop.animations.is_empty() {
+        if let Some(clip) = sample_default_composite_clip(&atlas, &indices) {
+            let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
+            controller.add_anim("idle", frame_ids, clip.fps, clip.looped);
+            clips.insert("idle".to_string(), clip);
+        }
+    } else {
+        for anim in &prop.animations {
+            if let Some(clip) = build_composite_clip(&atlas, &indices, anim) {
+                let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
+                controller.add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
+                controller.set_offset(&anim.name, clip.offset);
+                controller.set_flip(&anim.name, clip.flip);
+                clips.insert(anim.name.clone(), clip);
+            }
+        }
+    }
+    let start_anim = pick_starting_anim(prop, &controller);
+    if let Some(anim) = &start_anim {
+        controller.play(anim, true, false, 0);
+    }
+    let max_pieces = clips
+        .values()
+        .flat_map(|c| c.frames.iter())
+        .map(Vec::len)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let ref_clip = start_anim
+        .as_deref()
+        .and_then(|n| clips.get(n))
+        .or_else(|| clips.get("idle"))
+        .or_else(|| clips.values().next());
+    let (bounds_min, mut bounds_size) = ref_clip
+        .map(|c| (c.bounds_min, c.bounds_size))
+        .unwrap_or_else(|| compute_atlas_whole_bounds(&atlas, &indices));
+    if prop.atlas_settings.apply_stage_matrix
+        && !prop.atlas_settings.post_stage_matrix_apply
+        && let Some(sm) = atlas.stage_matrix
+    {
+        bounds_size = [
+            bounds_size[0] * sm[0].abs().max(0.01),
+            bounds_size[1] * sm[3].abs().max(0.01),
+        ];
+    }
+
+    Some(StagePropKind::CompositeAtlas {
+        textures,
+        controller,
+        clips,
+        bounds_min,
+        bounds_size,
+        atlas_settings: prop.atlas_settings,
+        stage_matrix: atlas.stage_matrix,
+        max_pieces,
+    })
 }
 
 fn pick_starting_anim(prop: &StagePropData, controller: &AnimationController) -> Option<String> {

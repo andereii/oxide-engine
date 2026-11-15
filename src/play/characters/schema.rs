@@ -3,7 +3,7 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 
-use crate::animations::BaseAnimationData;
+use crate::animations::{AtlasSettings, BaseAnimationData};
 use crate::utils::constants::DEFAULT_CHARACTER_DANCE_EVERY;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -79,6 +79,20 @@ pub struct CharacterData {
     pub starting_animation: String,
     #[serde(rename = "flipX")]
     pub flip_x: bool,
+    #[serde(rename = "applyStageMatrix")]
+    pub apply_stage_matrix: Option<bool>,
+    #[serde(rename = "atlasSettings")]
+    pub atlas_settings: Option<AtlasSettings>,
+}
+
+impl CharacterData {
+    pub fn effective_atlas_settings(&self) -> AtlasSettings {
+        let mut settings = self.atlas_settings.unwrap_or_default();
+        if let Some(apply) = self.apply_stage_matrix {
+            settings.apply_stage_matrix = apply;
+        }
+        settings
+    }
 }
 
 impl Default for CharacterData {
@@ -99,6 +113,8 @@ impl Default for CharacterData {
             animations: Vec::new(),
             starting_animation: "idle".to_string(),
             flip_x: false,
+            apply_stage_matrix: None,
+            atlas_settings: None,
         }
     }
 }

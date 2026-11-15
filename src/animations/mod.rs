@@ -8,7 +8,7 @@ pub mod packer;
 pub mod sparrow;
 pub mod sprite;
 
-pub use base::{BaseAnimationData, add_sparrow_animations, register_default_sparrow_idle};
+pub use base::{AtlasSettings, BaseAnimationData, add_sparrow_animations, register_default_sparrow_idle};
 pub use bopper::Bopper;
 pub use controller::AnimationController;
 pub use packer::{PackerAtlas, add_packer_animation};

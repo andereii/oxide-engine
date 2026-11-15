@@ -6,6 +6,16 @@ use super::animate_atlas::{AnimateAtlas, AnimateTimelineLayer};
 use super::controller::AnimationController;
 use super::sparrow::SparrowAtlas;
 
+/// Animate texture atlas display settings matching Funkin's `AtlasSpriteSettings` / `TextureAtlasData`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct AtlasSettings {
+    #[serde(rename = "applyStageMatrix")]
+    pub apply_stage_matrix: bool,
+    #[serde(rename = "postStageMatrixApply")]
+    pub post_stage_matrix_apply: bool,
+}
+
 /// Generic animation clip metadata matching Funkin's `AnimationData`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -17,6 +27,10 @@ pub struct BaseAnimationData {
     pub offsets: [f32; 2],
     pub looped: bool,
     pub flip: [bool; 2],
+    #[serde(rename = "flipX")]
+    pub flip_x: Option<bool>,
+    #[serde(rename = "flipY")]
+    pub flip_y: Option<bool>,
     #[serde(rename = "frameRate", alias = "fps")]
     pub frame_rate: f32,
     #[serde(rename = "frameIndices", alias = "indices")]
@@ -36,11 +50,22 @@ impl Default for BaseAnimationData {
             offsets: [0.0, 0.0],
             looped: false,
             flip: [false, false],
+            flip_x: None,
+            flip_y: None,
             frame_rate: 24.0,
             frame_indices: Vec::new(),
             anim_type: "framelabel".to_string(),
             render_type: String::new(),
         }
+    }
+}
+
+impl BaseAnimationData {
+    pub fn resolved_flip(&self) -> [bool; 2] {
+        [
+            self.flip_x.unwrap_or(self.flip[0]),
+            self.flip_y.unwrap_or(self.flip[1]),
+        ]
     }
 }
 
@@ -73,7 +98,7 @@ pub fn add_sparrow_animation(
     let fps = if anim.frame_rate > 0.0 { anim.frame_rate } else { 24.0 };
     controller.add_anim_frames(&anim.name, frames, offsets, rotated, fps, anim.looped);
     controller.set_offset(&anim.name, anim.offsets);
-    controller.set_flip(&anim.name, anim.flip);
+    controller.set_flip(&anim.name, anim.resolved_flip());
     true
 }
 
@@ -148,7 +173,7 @@ pub fn add_animate_atlas_animations(
         };
         controller.add_anim_frames(&anim.name, frames, offsets, rotated, fps, anim.looped);
         controller.set_offset(&anim.name, anim.offsets);
-        controller.set_flip(&anim.name, anim.flip);
+        controller.set_flip(&anim.name, anim.resolved_flip());
     }
 }
 

@@ -8,11 +8,14 @@ use bevy::prelude::*;
 
 use crate::mods::{ModRegistry, ModStore};
 use crate::play::characters::loader::LoadedCharacter;
+use crate::play::characters::schema::CharacterData;
 use crate::play::characters::{
-    CharacterActor, CharacterRole, CharacterSyncState, CharactersResource, load_single_character,
-    spawn_single_character,
+    CharacterActor, CharacterRole, CharacterSyncState, CharactersResource,
+    char_rel_candidates_for_watch, load_characters_resource, load_single_character,
+    spawn_characters, spawn_single_character,
 };
 use crate::play::hud::countdown::{CountdownAssets, load_countdown_assets};
+use crate::play::hud::health_icon::{HealthIcon, spawn_health_icons};
 use crate::play::hud::healthbar::HealthBarBgVisual;
 use crate::play::hud::popups::{PopupAssets, load_popup_assets};
 use crate::play::notes::effects::{HoldCoverVisual, NoteSplashVisual, spawn_effect_pools};
@@ -26,16 +29,21 @@ use crate::play::plugin::setup::load_and_init_scripts;
 use crate::play::plugin::{PendingEcsScriptCommands, PlaySfxAssets};
 use crate::play::scene::PlayState;
 use crate::play::shaders::systems::StageShaderRuntime;
-use crate::play::song::song_asset_path_in;
-use crate::play::stage::paths::{resolve_atlas_dir_in, resolve_stage_image_in};
+use crate::play::song::{load_song_chart_in, song_asset_path_in};
+use crate::play::stage::paths::{
+    resolve_atlas_dir_in, resolve_stage_image_in, stage_rel_candidates_for_watch,
+};
+use crate::play::stage::schema::{StageCharacterSlot, parse_stage_json};
 use crate::play::stage::{
     DynamicScriptProp, StageCompositePiece, StagePropVisual, StageResource, StageSyncState,
     load_stage_resource, spawn_stage_props,
 };
 use crate::scripting::ScriptHost;
+use crate::utils::conductor::SongTimeChange;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH, STAGES_ASSET_PATH};
 
 const HMR_POLL_INTERVAL_S: f32 = 0.25;
+const MAX_SPRITEMAP_WATCH: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileStamp {
@@ -175,6 +183,28 @@ impl DomainWatch {
             DomainDiff::Unchanged
         }
     }
+
+    /// Collects Bevy asset server paths that are new or changed relative to `old`,
+    /// ensuring newly re-targeted paths in edited JSON files are reloaded from disk.
+    fn collect_changed_or_new_server_paths(&self, old: &DomainWatch) -> Vec<String> {
+        let mut out = Vec::new();
+        for (path, (new_stamp, server_opt)) in &self.asset_files {
+            if !new_stamp.exists {
+                continue;
+            }
+            let Some(sp) = server_opt else {
+                continue;
+            };
+            let needs_reload = match old.asset_files.get(path) {
+                Some((old_stamp, _)) => !old_stamp.exists || old_stamp != new_stamp,
+                None => true,
+            };
+            if needs_reload {
+                out.push(sp.clone());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Resource, Default)]
@@ -183,6 +213,7 @@ pub struct HotReloadState {
     initialized: bool,
     mods_dir_stamp: Option<DirStamp>,
     mod_manifest_stamps: BTreeMap<PathBuf, FileStamp>,
+    chart_watch: DomainWatch,
     stage_watch: DomainWatch,
     char_watches: BTreeMap<String, DomainWatch>,
     skin_watch: DomainWatch,
@@ -218,6 +249,7 @@ pub(crate) struct HotReloadQueries<'w, 's> {
     stage_pieces: Query<'w, 's, Entity, With<StageCompositePiece>>,
     dyn_props: Query<'w, 's, Entity, With<DynamicScriptProp>>,
     actors: Query<'w, 's, (Entity, &'static mut CharacterActor)>,
+    health_icons: Query<'w, 's, Entity, With<HealthIcon>>,
     #[allow(clippy::type_complexity)]
     skin_entities: Query<
         'w,
@@ -260,79 +292,99 @@ pub(crate) fn hot_reload_assets_system(
         info!("[HMR] Refreshed mod registry ({} active mods)", res.mods.mods.len());
     }
 
-    let stage_diff = if !res.state.is_minimal_mode {
-        hmr.stage_watch.diff()
-    } else {
-        DomainDiff::Unchanged
-    };
-
+    let mut force_stage = mods_changed;
+    let mut force_chars = mods_changed;
+    let mut force_skin = mods_changed;
+    let mut force_audio = mods_changed;
     let mut reload_scripts = matches!(hmr.script_watch.diff(), DomainDiff::Full(_)) || mods_changed;
 
-    match stage_diff {
-        DomainDiff::Unchanged => {}
-        DomainDiff::InPlaceAssets(paths) => {
-            reload_asset_paths(&res.asset_server, &paths);
-            info!("[HMR] Reloaded {} stage texture(s)", paths.len());
-            hmr.stage_watch = build_stage_watch(
-                &res.mods,
-                &res.state.chart.stage_id,
-                res.stage_res.as_deref(),
-            );
-        }
-        DomainDiff::Full(paths) => {
-            reload_asset_paths(&res.asset_server, &paths);
-            let old_scripts_flag = res.stage_res.as_ref().is_some_and(|s| s.scripts);
-            if reload_stage_domain(&mut commands, &mut res, &mut q) {
-                let new_scripts_flag = res.stage_res.as_ref().is_some_and(|s| s.scripts);
-                if old_scripts_flag != new_scripts_flag || new_scripts_flag {
-                    reload_scripts = true;
-                }
-            }
-            hmr.stage_watch = build_stage_watch(
-                &res.mods,
-                &res.state.chart.stage_id,
-                res.stage_res.as_deref(),
-            );
-        }
+    if !matches!(hmr.chart_watch.diff(), DomainDiff::Unchanged) {
+        let delta = reload_chart_domain(&mut res);
+        force_stage |= delta.stage_changed;
+        force_chars |= delta.chars_changed;
+        force_skin |= delta.skin_changed;
+        force_audio |= delta.audio_changed;
+        reload_scripts |= delta.stage_changed || delta.chars_changed;
+        hmr.chart_watch = build_chart_watch(&res.mods, &res.state);
     }
 
     if !res.state.is_minimal_mode {
-        let char_ids: Vec<String> = hmr.char_watches.keys().cloned().collect();
-        for char_id in char_ids {
-            let Some(watch) = hmr.char_watches.get(&char_id) else {
-                continue;
-            };
-            match watch.diff() {
-                DomainDiff::Unchanged => {}
-                DomainDiff::InPlaceAssets(paths) => {
-                    reload_asset_paths(&res.asset_server, &paths);
-                    info!("[HMR] Reloaded image(s) for character '{char_id}'");
-                    if let Some(loaded) = res
-                        .chars_res
-                        .as_ref()
-                        .and_then(|cr| cr.characters.iter().find(|c| c.id == char_id))
-                    {
-                        let w = build_character_watch(&res.mods, loaded);
-                        hmr.char_watches.insert(char_id, w);
+        let stage_diff = if force_stage {
+            DomainDiff::Full(Vec::new())
+        } else {
+            hmr.stage_watch.diff()
+        };
+        match stage_diff {
+            DomainDiff::Unchanged => {}
+            DomainDiff::InPlaceAssets(paths) => {
+                reload_asset_paths(&res.asset_server, &paths);
+                let _ = reload_stage_domain(&mut commands, &mut res, &mut q);
+                info!("[HMR] Reloaded {} stage texture(s)", paths.len());
+                hmr.stage_watch = build_stage_watch(
+                    &res.mods,
+                    &res.state.chart.stage_id,
+                    res.stage_res.as_deref(),
+                );
+            }
+            DomainDiff::Full(paths) => {
+                reload_asset_paths(&res.asset_server, &paths);
+                let old_scripts_flag = res.stage_res.as_ref().is_some_and(|s| s.scripts);
+                if reload_stage_domain(&mut commands, &mut res, &mut q) {
+                    let new_scripts_flag = res.stage_res.as_ref().is_some_and(|s| s.scripts);
+                    if old_scripts_flag != new_scripts_flag || new_scripts_flag {
+                        reload_scripts = true;
                     }
                 }
-                DomainDiff::Full(paths) => {
-                    reload_asset_paths(&res.asset_server, &paths);
-                    reload_single_character_domain(&mut commands, &mut res, &mut q, &char_id);
-                    if let Some(loaded) = res
-                        .chars_res
-                        .as_ref()
-                        .and_then(|cr| cr.characters.iter().find(|c| c.id == char_id))
-                    {
-                        let w = build_character_watch(&res.mods, loaded);
-                        hmr.char_watches.insert(char_id, w);
+                let new_watch = build_stage_watch(
+                    &res.mods,
+                    &res.state.chart.stage_id,
+                    res.stage_res.as_deref(),
+                );
+                let extra_paths = new_watch.collect_changed_or_new_server_paths(&hmr.stage_watch);
+                reload_asset_paths(&res.asset_server, &extra_paths);
+                hmr.stage_watch = new_watch;
+            }
+        }
+
+        if force_chars {
+            reload_all_characters_domain(&mut commands, &mut res, &mut q);
+            rebuild_character_watches(&mut hmr, &res);
+        } else {
+            let char_ids: Vec<String> = hmr.char_watches.keys().cloned().collect();
+            for char_id in char_ids {
+                let Some(old_watch) = hmr.char_watches.get(&char_id).cloned() else {
+                    continue;
+                };
+                match old_watch.diff() {
+                    DomainDiff::Unchanged => {}
+                    DomainDiff::InPlaceAssets(paths) => {
+                        reload_asset_paths(&res.asset_server, &paths);
+                        reload_single_character_domain(&mut commands, &mut res, &mut q, &char_id);
+                        info!("[HMR] Reloaded image(s) for character '{char_id}'");
+                        let loaded = find_loaded_char(res.chars_res.as_deref(), &char_id);
+                        hmr.char_watches
+                            .insert(char_id.clone(), build_character_watch(&res.mods, &char_id, loaded));
+                    }
+                    DomainDiff::Full(paths) => {
+                        reload_asset_paths(&res.asset_server, &paths);
+                        reload_single_character_domain(&mut commands, &mut res, &mut q, &char_id);
+                        let loaded = find_loaded_char(res.chars_res.as_deref(), &char_id);
+                        let new_watch = build_character_watch(&res.mods, &char_id, loaded);
+                        let extra_paths = new_watch.collect_changed_or_new_server_paths(&old_watch);
+                        reload_asset_paths(&res.asset_server, &extra_paths);
+                        hmr.char_watches.insert(char_id, new_watch);
                     }
                 }
             }
         }
     }
 
-    match hmr.skin_watch.diff() {
+    let skin_diff = if force_skin {
+        DomainDiff::Full(Vec::new())
+    } else {
+        hmr.skin_watch.diff()
+    };
+    match skin_diff {
         DomainDiff::Unchanged => {}
         DomainDiff::InPlaceAssets(paths) => {
             reload_asset_paths(&res.asset_server, &paths);
@@ -342,18 +394,29 @@ pub(crate) fn hot_reload_assets_system(
         DomainDiff::Full(paths) => {
             reload_asset_paths(&res.asset_server, &paths);
             reload_skin_domain(&mut commands, &mut res, &mut q);
-            hmr.skin_watch = build_skin_watch(&res.mods, &res.state.player_strumline.note_style);
+            let new_watch = build_skin_watch(&res.mods, &res.state.player_strumline.note_style);
+            let extra_paths = new_watch.collect_changed_or_new_server_paths(&hmr.skin_watch);
+            reload_asset_paths(&res.asset_server, &extra_paths);
+            hmr.skin_watch = new_watch;
         }
     }
 
-    match hmr.audio_watch.diff() {
+    let audio_diff = if force_audio {
+        DomainDiff::Full(Vec::new())
+    } else {
+        hmr.audio_watch.diff()
+    };
+    match audio_diff {
         DomainDiff::Unchanged => {}
         DomainDiff::InPlaceAssets(paths) | DomainDiff::Full(paths) => {
             if !paths.is_empty() {
                 reload_asset_paths(&res.asset_server, &paths);
                 info!("[HMR] Reloaded {} audio track(s)", paths.len());
             }
-            hmr.audio_watch = build_audio_watch(&res.mods, &res.state);
+            let new_watch = build_audio_watch(&res.mods, &res.state);
+            let extra_paths = new_watch.collect_changed_or_new_server_paths(&hmr.audio_watch);
+            reload_asset_paths(&res.asset_server, &extra_paths);
+            hmr.audio_watch = new_watch;
         }
     }
 
@@ -364,10 +427,17 @@ pub(crate) fn hot_reload_assets_system(
     }
 }
 
+fn find_loaded_char<'a>(
+    chars: Option<&'a CharactersResource>,
+    char_id: &str,
+) -> Option<&'a LoadedCharacter> {
+    chars.and_then(|cr| cr.characters.iter().find(|c| c.id == char_id))
+}
+
 fn reload_asset_paths(asset_server: &AssetServer, server_paths: &[String]) {
     let mut seen = BTreeSet::new();
     for path in server_paths {
-        if seen.insert(path.as_str()) {
+        if !path.is_empty() && seen.insert(path.as_str()) {
             asset_server.reload(path.clone());
         }
     }
@@ -400,18 +470,13 @@ fn refresh_mods_watch(hmr: &mut HotReloadState, mods: &ModRegistry) {
 
 fn refresh_all_watches(hmr: &mut HotReloadState, res: &HotReloadRes) {
     refresh_mods_watch(hmr, &res.mods);
+    hmr.chart_watch = build_chart_watch(&res.mods, &res.state);
     hmr.stage_watch = build_stage_watch(
         &res.mods,
         &res.state.chart.stage_id,
         res.stage_res.as_deref(),
     );
-    hmr.char_watches.clear();
-    if let Some(chars) = &res.chars_res {
-        for c in &chars.characters {
-            hmr.char_watches
-                .insert(c.id.clone(), build_character_watch(&res.mods, c));
-        }
-    }
+    rebuild_character_watches(hmr, res);
     hmr.skin_watch = build_skin_watch(&res.mods, &res.state.player_strumline.note_style);
     hmr.script_watch = build_script_watch(
         &res.mods,
@@ -420,6 +485,34 @@ fn refresh_all_watches(hmr: &mut HotReloadState, res: &HotReloadRes) {
         &res.script_host,
     );
     hmr.audio_watch = build_audio_watch(&res.mods, &res.state);
+}
+
+fn rebuild_character_watches(hmr: &mut HotReloadState, res: &HotReloadRes) {
+    hmr.char_watches.clear();
+    let mut ids = BTreeSet::new();
+    for id in res
+        .state
+        .chart
+        .characters
+        .spectator
+        .iter()
+        .chain(res.state.chart.characters.opponents.iter())
+        .chain(res.state.chart.characters.players.iter())
+    {
+        if !id.trim().is_empty() {
+            ids.insert(id.clone());
+        }
+    }
+    if let Some(chars) = &res.chars_res {
+        for c in &chars.characters {
+            ids.insert(c.id.clone());
+        }
+    }
+    for char_id in ids {
+        let loaded = find_loaded_char(res.chars_res.as_deref(), &char_id);
+        hmr.char_watches
+            .insert(char_id.clone(), build_character_watch(&res.mods, &char_id, loaded));
+    }
 }
 
 fn track_vfs_file_across_layers(watch: &mut DomainWatch, mods: &ModRegistry, rel: &str, is_json: bool) {
@@ -445,6 +538,20 @@ fn track_vfs_file_across_layers(watch: &mut DomainWatch, mods: &ModRegistry, rel
     }
 }
 
+fn track_vfs_asset_across_layers(watch: &mut DomainWatch, mods: &ModRegistry, rel: &str) {
+    let Ok(norm) = ModRegistry::normalize_rel_path(rel) else {
+        return;
+    };
+    if !mods.assets_dir.as_os_str().is_empty() {
+        let p = mods.assets_dir.join(&norm);
+        watch.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
+    }
+    for loaded_mod in &mods.mods {
+        let p = loaded_mod.root.join(&norm);
+        watch.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
+    }
+}
+
 fn track_vfs_dir_across_layers(watch: &mut DomainWatch, mods: &ModRegistry, rel_dir: &str) {
     let Ok(norm) = ModRegistry::normalize_rel_path(rel_dir) else {
         return;
@@ -455,6 +562,76 @@ fn track_vfs_dir_across_layers(watch: &mut DomainWatch, mods: &ModRegistry, rel_
     for loaded_mod in &mods.mods {
         watch.track_dir(loaded_mod.root.join(&norm));
     }
+}
+
+fn track_rel_stem_candidates(
+    watch: &mut DomainWatch,
+    mods: &ModRegistry,
+    candidates: &[String],
+    meta_exts: &[&str],
+    include_animate_atlas: bool,
+) {
+    for base in candidates {
+        let Ok(norm) = ModRegistry::normalize_rel_path(base) else {
+            continue;
+        };
+        let norm_str = norm.to_string_lossy().replace('\\', "/");
+        if let Some(parent) = Path::new(&norm_str).parent().and_then(|p| p.to_str())
+            && !parent.is_empty()
+        {
+            track_vfs_dir_across_layers(watch, mods, parent);
+        }
+
+        if include_animate_atlas {
+            let dir_rel = Path::new(&norm_str)
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            track_vfs_dir_across_layers(watch, mods, &dir_rel);
+            track_vfs_file_across_layers(watch, mods, &format!("{dir_rel}/Animation.json"), false);
+            for i in 1..=MAX_SPRITEMAP_WATCH {
+                track_vfs_file_across_layers(watch, mods, &format!("{dir_rel}/spritemap{i}.json"), false);
+                track_vfs_asset_across_layers(watch, mods, &format!("{dir_rel}/spritemap{i}.png"));
+            }
+        }
+
+        for ext in ["png", "jpg", "jpeg", "webp"] {
+            let probe = ensure_ext_rel(&norm_str, ext);
+            track_vfs_asset_across_layers(watch, mods, &probe);
+        }
+        for meta_ext in meta_exts {
+            let probe = ensure_ext_rel(&norm_str, meta_ext);
+            track_vfs_file_across_layers(watch, mods, &probe, false);
+        }
+    }
+}
+
+fn ensure_ext_rel(rel: &str, ext: &str) -> String {
+    let path = Path::new(rel);
+    if path.extension().is_some() {
+        path.with_extension(ext).to_string_lossy().replace('\\', "/")
+    } else {
+        format!("{rel}.{ext}")
+    }
+}
+
+fn build_chart_watch(mods: &ModRegistry, state: &PlayState) -> DomainWatch {
+    let mut w = DomainWatch::default();
+    let song_id = state.chart.song_id.trim();
+    if song_id.is_empty() {
+        return w;
+    }
+    for dir_rel in [
+        format!("gameplay/songs/{song_id}/chart"),
+        format!("songs/{song_id}/chart"),
+        format!("songs/{song_id}"),
+    ] {
+        track_vfs_dir_across_layers(&mut w, mods, &dir_rel);
+        for file in ["meta.json", "notes.json", "events.json"] {
+            track_vfs_file_across_layers(&mut w, mods, &format!("{dir_rel}/{file}"), true);
+        }
+    }
+    w
 }
 
 fn build_stage_watch(
@@ -471,129 +648,107 @@ fn build_stage_watch(
     track_vfs_dir_across_layers(&mut w, mods, &format!("{STAGES_ASSET_PATH}/{stage_id}"));
     track_vfs_dir_across_layers(&mut w, mods, &format!("stages/{stage_id}"));
 
+    let mut prop_files: BTreeSet<String> = BTreeSet::new();
     if let Some(stage) = stage_opt {
         for resolved in &stage.props {
-            let file = resolved.data.file.trim();
-            if file.is_empty() || file.starts_with('#') || file.starts_with("0x") {
-                continue;
+            prop_files.insert(resolved.data.file.clone());
+        }
+    }
+    // Parse disk JSON directly so unresolved/new/re-targeted prop files are also watched.
+    let json_path = mods
+        .resolve_file(&format!("{STAGES_ASSET_PATH}/{stage_id}/{stage_id}.json"))
+        .or_else(|| mods.resolve_file(&format!("stages/{stage_id}/{stage_id}.json")));
+    if let Some(path) = json_path
+        && let Ok(raw) = fs::read_to_string(&path)
+        && let Ok(parsed) = parse_stage_json(stage_id, &raw)
+    {
+        for prop in parsed.props {
+            prop_files.insert(prop.file);
+        }
+    }
+
+    for raw_file in prop_files {
+        let file = raw_file.trim();
+        if file.is_empty() || file.starts_with('#') || file.starts_with("0x") {
+            continue;
+        }
+        let cands = stage_rel_candidates_for_watch(stage_id, file);
+        track_rel_stem_candidates(&mut w, mods, &cands, &["xml"], true);
+
+        if let Some(atlas_dir) = resolve_atlas_dir_in(mods, stage_id, file) {
+            w.track_dir(atlas_dir.clone());
+            w.track_meta(atlas_dir.join("Animation.json"));
+            for i in 1..=MAX_SPRITEMAP_WATCH {
+                w.track_meta(atlas_dir.join(format!("spritemap{i}.json")));
+                let spr = atlas_dir.join(format!("spritemap{i}.png"));
+                w.track_asset(spr.clone(), Some(mods.to_asset_server_path(&spr)));
             }
-            if let Some(atlas_dir) = resolve_atlas_dir_in(mods, stage_id, file) {
-                w.track_dir(atlas_dir.clone());
-                w.track_meta(atlas_dir.join("Animation.json"));
-                w.track_meta(atlas_dir.join("spritemap1.json"));
-                let spr = atlas_dir.join("spritemap1.png");
-                if spr.is_file() {
-                    w.track_asset(spr.clone(), Some(mods.to_asset_server_path(&spr)));
-                }
+        }
+        if let Some(img_path) = resolve_stage_image_in(mods, stage_id, file) {
+            if let Some(parent) = img_path.parent() {
+                w.track_dir(parent.to_path_buf());
             }
-            if let Some(img_path) = resolve_stage_image_in(mods, stage_id, file) {
-                if let Some(parent) = img_path.parent() {
-                    w.track_dir(parent.to_path_buf());
-                }
-                w.track_asset(img_path.clone(), Some(mods.to_asset_server_path(&img_path)));
-                let xml = img_path.with_extension("xml");
-                if xml.is_file() {
-                    w.track_meta(xml);
-                }
-            }
+            w.track_asset(img_path.clone(), Some(mods.to_asset_server_path(&img_path)));
+            w.track_meta(img_path.with_extension("xml"));
         }
     }
     w
 }
 
-fn track_char_raw_asset(watch: &mut DomainWatch, mods: &ModRegistry, char_id: &str, raw: &str) {
-    let cleaned = raw.trim().replace('\\', "/");
-    let cleaned = cleaned.trim_start_matches("./").trim_start_matches('/');
-    let cands = if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
-        vec![cleaned.to_string(), format!("gameplay/characters/{char_id}/{cleaned}")]
-    } else {
-        vec![
-            format!("gameplay/characters/{char_id}/{cleaned}"),
-            format!("gameplay/characters/{cleaned}"),
-            format!("characters/{char_id}/{cleaned}"),
-            format!("characters/{cleaned}"),
-        ]
-    };
-
-    for base in cands {
-        if let Some(dir) = mods.resolve_dir(&base) {
-            watch.track_dir(dir.clone());
-            let anim_json = dir.join("Animation.json");
-            if anim_json.is_file() {
-                watch.track_meta(anim_json);
-                let map_json = dir.join("spritemap1.json");
-                if map_json.is_file() {
-                    watch.track_meta(map_json);
-                }
-                let spr = dir.join("spritemap1.png");
-                if spr.is_file() {
-                    watch.track_asset(spr.clone(), Some(mods.to_asset_server_path(&spr)));
-                }
-            }
-        }
-        for ext in ["png", "jpg", "jpeg", "webp"] {
-            let probe = if Path::new(&base).extension().is_some() {
-                Path::new(&base)
-                    .with_extension(ext)
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            } else {
-                format!("{base}.{ext}")
-            };
-            if let Some(img) = mods.resolve_file(&probe) {
-                if let Some(parent) = img.parent() {
-                    watch.track_dir(parent.to_path_buf());
-                }
-                watch.track_asset(img.clone(), Some(mods.to_asset_server_path(&img)));
-            }
-        }
-        for meta_ext in ["xml", "txt"] {
-            let probe = if Path::new(&base).extension().is_some() {
-                Path::new(&base)
-                    .with_extension(meta_ext)
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            } else {
-                format!("{base}.{meta_ext}")
-            };
-            if let Some(meta) = mods.resolve_file(&probe) {
-                watch.track_meta(meta);
-            }
-        }
-    }
+fn read_char_json_data(mods: &ModRegistry, char_id: &str) -> Option<CharacterData> {
+    let json_path = mods
+        .resolve_file(&format!("gameplay/characters/{char_id}/{char_id}.json"))
+        .or_else(|| mods.resolve_file(&format!("characters/{char_id}/{char_id}.json")))?;
+    let raw = fs::read_to_string(json_path).ok()?;
+    serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()
 }
 
-fn build_character_watch(mods: &ModRegistry, loaded: &LoadedCharacter) -> DomainWatch {
+fn build_character_watch(
+    mods: &ModRegistry,
+    char_id: &str,
+    loaded_opt: Option<&LoadedCharacter>,
+) -> DomainWatch {
     let mut w = DomainWatch::default();
-    let char_id = &loaded.id;
     track_vfs_file_across_layers(&mut w, mods, &format!("gameplay/characters/{char_id}/{char_id}.json"), true);
     track_vfs_file_across_layers(&mut w, mods, &format!("characters/{char_id}/{char_id}.json"), true);
     track_vfs_dir_across_layers(&mut w, mods, &format!("gameplay/characters/{char_id}"));
     track_vfs_dir_across_layers(&mut w, mods, &format!("characters/{char_id}"));
 
-    if let Some(base_asset) = &loaded.data.asset_path {
-        track_char_raw_asset(&mut w, mods, char_id, base_asset);
+    let disk_data = read_char_json_data(mods, char_id);
+    let data_ref = disk_data.as_ref().or_else(|| loaded_opt.map(|l| &l.data));
+
+    let mut raw_assets: BTreeSet<String> = BTreeSet::new();
+    if let Some(data) = data_ref {
+        if let Some(base_asset) = &data.asset_path {
+            raw_assets.insert(base_asset.clone());
+        } else {
+            raw_assets.insert(char_id.to_string());
+        }
+        for anim in &data.animations {
+            if let Some(sub) = &anim.asset_path {
+                raw_assets.insert(sub.clone());
+            }
+        }
     } else {
-        track_char_raw_asset(&mut w, mods, char_id, char_id);
+        raw_assets.insert(char_id.to_string());
     }
-    for anim in &loaded.data.animations {
-        if let Some(sub) = &anim.asset_path {
-            track_char_raw_asset(&mut w, mods, char_id, sub);
-        }
+
+    for raw in raw_assets {
+        let cands = char_rel_candidates_for_watch(char_id, &raw);
+        track_rel_stem_candidates(&mut w, mods, &cands, &["xml", "txt"], true);
     }
-    let icon_id = loaded
-        .data
-        .health_icon
-        .as_ref()
+
+    let icon_id = data_ref
+        .and_then(|d| d.health_icon.as_ref())
         .and_then(|hi| hi.id.as_deref())
-        .unwrap_or(char_id.as_str());
+        .unwrap_or(char_id);
     for icon_rel in [
-        format!("gameplay/characters/{char_id}/icon-{icon_id}.png"),
-        format!("images/icons/icon-{icon_id}.png"),
+        format!("gameplay/characters/{char_id}/icon-{icon_id}"),
+        format!("gameplay/characters/{icon_id}/icon-{icon_id}"),
+        format!("images/icons/icon-{icon_id}"),
     ] {
-        if let Some(icon_path) = mods.resolve_file(&icon_rel) {
-            w.track_asset(icon_path.clone(), Some(mods.to_asset_server_path(&icon_path)));
-        }
+        track_vfs_asset_across_layers(&mut w, mods, &format!("{icon_rel}.png"));
+        track_vfs_file_across_layers(&mut w, mods, &format!("{icon_rel}.xml"), false);
     }
     w
 }
@@ -606,29 +761,18 @@ fn track_skin_rel(
     has_xml: bool,
     default_ext: &str,
 ) {
-    let cleaned = rel.trim().replace('\\', "/");
-    let cleaned = cleaned.trim_start_matches("./").trim_start_matches('/');
-    for base in [
-        format!("gameplay/noteskins/{}/{cleaned}", style.id),
-        format!("noteskins/{}/{cleaned}", style.id),
-        cleaned.to_string(),
-    ] {
-        let asset_rel = if Path::new(&base).extension().is_some() {
-            base.clone()
-        } else {
-            format!("{base}.{default_ext}")
-        };
-        if let Some(p) = mods.resolve_file(&asset_rel) {
-            if let Some(parent) = p.parent() {
-                watch.track_dir(parent.to_path_buf());
-            }
-            watch.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
+    let cands = style.skin_rel_candidates_for_watch(rel);
+    for base in cands {
+        if let Some(parent) = Path::new(&base).parent().and_then(|p| p.to_str())
+            && !parent.is_empty()
+        {
+            track_vfs_dir_across_layers(watch, mods, parent);
         }
-    }
-    if has_xml {
-        let xml = style.disk_xml_in(mods, rel);
-        if xml.is_file() {
-            watch.track_meta(xml);
+        let asset_rel = ensure_ext_rel(&base, default_ext);
+        track_vfs_asset_across_layers(watch, mods, &asset_rel);
+        if has_xml {
+            let xml_rel = ensure_ext_rel(&base, "xml");
+            track_vfs_file_across_layers(watch, mods, &xml_rel, false);
         }
     }
 }
@@ -668,6 +812,34 @@ fn build_skin_watch(mods: &ModRegistry, style: &NoteStyle) -> DomainWatch {
     w
 }
 
+fn is_script_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "rhai" | "lua" | "hxc"))
+}
+
+fn track_script_dir_tree(watch: &mut DomainWatch, dir: &Path, depth: u8) {
+    watch.track_dir(dir.to_path_buf());
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let hidden = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with('.'));
+        if hidden {
+            continue;
+        }
+        if p.is_dir() && depth > 0 {
+            track_script_dir_tree(watch, &p, depth - 1);
+        } else if p.is_file() && is_script_file(&p) {
+            watch.track_meta(p);
+        }
+    }
+}
+
 fn build_script_watch(
     mods: &ModRegistry,
     state: &PlayState,
@@ -676,25 +848,42 @@ fn build_script_watch(
 ) -> DomainWatch {
     let mut w = DomainWatch::default();
     for path in script_host.watched_script_paths() {
+        if let Some(parent) = path.parent() {
+            w.track_dir(parent.to_path_buf());
+        }
         w.track_meta(path);
     }
     if let Some(st) = stage {
-        let sidecar = st.json_path.with_extension("rhai");
-        w.track_meta(sidecar);
+        for ext in ["rhai", "lua", "hxc"] {
+            w.track_meta(st.json_path.with_extension(ext));
+        }
         if let Some(parent) = st.json_path.parent() {
-            w.track_dir(parent.to_path_buf());
+            track_script_dir_tree(&mut w, parent, 2);
         }
     }
     let stage_id = &state.chart.stage_id;
     let song_id = &state.chart.song_id;
-    for loaded_mod in &mods.mods {
-        w.track_dir(loaded_mod.root.join("scripts"));
+
+    if !mods.assets_dir.as_os_str().is_empty() {
+        track_script_dir_tree(&mut w, &mods.assets_dir.join("scripts"), 4);
+        track_script_dir_tree(&mut w, &mods.assets_dir.join("gameplay").join("scripts"), 4);
         if !stage_id.is_empty() {
-            w.track_dir(loaded_mod.root.join("stages").join(stage_id));
-            w.track_dir(loaded_mod.root.join(STAGES_ASSET_PATH).join(stage_id));
+            track_script_dir_tree(&mut w, &mods.assets_dir.join(STAGES_ASSET_PATH).join(stage_id), 2);
         }
         if !song_id.is_empty() {
-            w.track_dir(loaded_mod.root.join("songs").join(song_id));
+            track_script_dir_tree(&mut w, &mods.assets_dir.join("gameplay").join("songs").join(song_id), 2);
+        }
+    }
+    for loaded_mod in &mods.mods {
+        track_script_dir_tree(&mut w, &loaded_mod.root.join("scripts"), 4);
+        track_script_dir_tree(&mut w, &loaded_mod.root.join("gameplay").join("scripts"), 4);
+        if !stage_id.is_empty() {
+            track_script_dir_tree(&mut w, &loaded_mod.root.join("stages").join(stage_id), 2);
+            track_script_dir_tree(&mut w, &loaded_mod.root.join(STAGES_ASSET_PATH).join(stage_id), 2);
+        }
+        if !song_id.is_empty() {
+            track_script_dir_tree(&mut w, &loaded_mod.root.join("songs").join(song_id), 2);
+            track_script_dir_tree(&mut w, &loaded_mod.root.join("gameplay").join("songs").join(song_id), 2);
         }
     }
     w
@@ -712,14 +901,10 @@ fn build_audio_watch(mods: &ModRegistry, state: &PlayState) -> DomainWatch {
         format!("songs/{song_id}/Inst.ogg"),
         song_asset_path_in(mods, song_id, "Inst.ogg"),
     ] {
-        if let Some(p) = mods.resolve_file(&rel) {
-            w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
-        }
+        track_vfs_asset_across_layers(&mut w, mods, &rel);
     }
     for track in state.chart.audio.instrumental.values() {
-        if let Some(p) = mods.resolve_file(&song_asset_path_in(mods, song_id, &track.file)) {
-            w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
-        }
+        track_vfs_asset_across_layers(&mut w, mods, &song_asset_path_in(mods, song_id, &track.file));
     }
     for vocal in state
         .chart
@@ -729,20 +914,61 @@ fn build_audio_watch(mods: &ModRegistry, state: &PlayState) -> DomainWatch {
         .chain(state.chart.audio.opponent_vocal.iter())
         .chain(state.chart.audio.spectator_vocal.iter())
     {
-        if let Some(p) = mods.resolve_file(&song_asset_path_in(mods, song_id, &vocal.file)) {
-            w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
-        }
+        track_vfs_asset_across_layers(&mut w, mods, &song_asset_path_in(mods, song_id, &vocal.file));
     }
-    if !state.chart.audio.shared_vocal_file.trim().is_empty()
-        && let Some(p) = mods.resolve_file(&song_asset_path_in(
+    if !state.chart.audio.shared_vocal_file.trim().is_empty() {
+        track_vfs_asset_across_layers(
+            &mut w,
             mods,
-            song_id,
-            &state.chart.audio.shared_vocal_file,
-        ))
-    {
-        w.track_asset(p.clone(), Some(mods.to_asset_server_path(&p)));
+            &song_asset_path_in(mods, song_id, &state.chart.audio.shared_vocal_file),
+        );
     }
     w
+}
+
+#[derive(Default)]
+struct ChartReloadDelta {
+    stage_changed: bool,
+    chars_changed: bool,
+    skin_changed: bool,
+    audio_changed: bool,
+}
+
+fn reload_chart_domain(res: &mut HotReloadRes) -> ChartReloadDelta {
+    let song_id = res.state.chart.song_id.clone();
+    let diff = res.state.current_difficulty.clone();
+    let var = res.state.current_variation.clone();
+    let new_chart = match load_song_chart_in(&res.mods, &song_id, &diff, &var) {
+        Ok(c) => c,
+        Err(err) => {
+            warn!("[HMR] Failed to reload chart '{song_id}': {err}");
+            res.state.status_message = format!("HMR chart error: {err}");
+            return ChartReloadDelta::default();
+        }
+    };
+
+    let stage_changed = new_chart.stage_id != res.state.chart.stage_id;
+    let chars_changed = new_chart.characters.players != res.state.chart.characters.players
+        || new_chart.characters.opponents != res.state.chart.characters.opponents
+        || new_chart.characters.spectator != res.state.chart.characters.spectator;
+    let skin_changed = new_chart.skins.hud != res.state.chart.skins.hud;
+    let audio_changed = new_chart.audio.shared_vocal_file != res.state.chart.audio.shared_vocal_file
+        || new_chart.audio.instrumental.len() != res.state.chart.audio.instrumental.len();
+
+    if (new_chart.bpm - res.state.chart.bpm).abs() > 1e-4 {
+        res.state
+            .conductor
+            .map_time_changes(vec![SongTimeChange::new(0.0, new_chart.bpm)]);
+    }
+    res.state.song_events = new_chart.events.clone();
+    res.state.chart = new_chart;
+    info!("[HMR] Reloaded chart '{song_id}'");
+    ChartReloadDelta {
+        stage_changed,
+        chars_changed,
+        skin_changed,
+        audio_changed,
+    }
 }
 
 fn reload_stage_domain(
@@ -825,29 +1051,106 @@ fn reload_stage_domain(
     true
 }
 
+fn despawn_health_icons(commands: &mut Commands, q: &HotReloadQueries) {
+    for entity in &q.health_icons {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn reload_all_characters_domain(
+    commands: &mut Commands,
+    res: &mut HotReloadRes,
+    q: &mut HotReloadQueries,
+) {
+    for (ent, actor) in &q.actors {
+        commands.entity(actor.sheet_entity).despawn();
+        for &piece in &actor.piece_entities {
+            commands.entity(piece).despawn();
+        }
+        commands.entity(ent).despawn();
+    }
+    let new_chars = load_characters_resource(
+        &res.mods,
+        &res.state.chart.characters,
+        res.stage_res.as_deref(),
+        &res.asset_server,
+        &mut res.mut_layouts,
+    );
+    spawn_characters(commands, &new_chars);
+    if let Some(ref mut chars_res) = res.chars_res {
+        **chars_res = new_chars;
+    } else {
+        commands.insert_resource(new_chars);
+    }
+    despawn_health_icons(commands, q);
+    spawn_health_icons(
+        &res.mods,
+        commands,
+        res.chars_res.as_deref(),
+        &res.asset_server,
+        &mut res.mut_layouts,
+    );
+    res.char_sync.last_step = None;
+    if let Some(ref mut shaders) = res.shader_runtime {
+        shaders.attached = false;
+    }
+    info!("[HMR] Reloaded all characters");
+}
+
 fn reload_single_character_domain(
     commands: &mut Commands,
     res: &mut HotReloadRes,
     q: &mut HotReloadQueries,
     char_id: &str,
 ) {
-    let mut targets: Vec<(Entity, CharacterRole, crate::play::stage::schema::StageCharacterSlot)> =
-        Vec::new();
+    let mut existing_entities: Vec<Entity> = Vec::new();
+    let mut targets: Vec<(CharacterRole, StageCharacterSlot)> = Vec::new();
     for (ent, actor) in &q.actors {
         if actor.id == char_id {
-            commands.entity(actor.sheet_entity).despawn();
-            for &piece in &actor.piece_entities {
-                commands.entity(piece).despawn();
+            existing_entities.push(ent);
+            existing_entities.push(actor.sheet_entity);
+            existing_entities.extend_from_slice(&actor.piece_entities);
+            targets.push((actor.role, actor.slot.clone()));
+        }
+    }
+    if targets.is_empty() {
+        let slots = res.stage_res.as_ref().map(|s| &s.characters);
+        let role_lists = [
+            (
+                &res.state.chart.characters.spectator,
+                CharacterRole::Spectator,
+                slots
+                    .map(|s| s.spectator.clone())
+                    .unwrap_or_else(StageCharacterSlot::default_for_spectator),
+            ),
+            (
+                &res.state.chart.characters.opponents,
+                CharacterRole::Opponent,
+                slots
+                    .map(|s| s.opponent.clone())
+                    .unwrap_or_else(StageCharacterSlot::default_for_opponent),
+            ),
+            (
+                &res.state.chart.characters.players,
+                CharacterRole::Player,
+                slots
+                    .map(|s| s.player.clone())
+                    .unwrap_or_else(StageCharacterSlot::default_for_player),
+            ),
+        ];
+        for (ids, role, slot) in role_lists {
+            if ids.iter().any(|id| id == char_id) {
+                targets.push((role, slot));
             }
-            commands.entity(ent).despawn();
-            targets.push((ent, actor.role, actor.slot.clone()));
         }
     }
     if targets.is_empty() {
         return;
     }
 
-    for (_, role, slot) in targets {
+    // Load and validate before despawning so transient JSON/path errors keep the existing actor visible.
+    let mut loaded_batch: Vec<LoadedCharacter> = Vec::with_capacity(targets.len());
+    for (role, slot) in targets {
         match load_single_character(
             &res.mods,
             char_id,
@@ -856,26 +1159,47 @@ fn reload_single_character_domain(
             &res.asset_server,
             &mut res.mut_layouts,
         ) {
-            Ok(loaded) => {
-                spawn_single_character(commands, &loaded);
-                if let Some(ref mut chars_res) = res.chars_res {
-                    if let Some(existing) = chars_res
-                        .characters
-                        .iter_mut()
-                        .find(|c| c.id == char_id && c.role == role)
-                    {
-                        *existing = loaded;
-                    } else {
-                        chars_res.characters.push(loaded);
-                    }
-                }
-            }
+            Ok(loaded) => loaded_batch.push(loaded),
             Err(err) => {
                 warn!("[HMR] Failed to reload character '{char_id}': {err}");
                 res.state.status_message = format!("HMR char error: {err}");
                 return;
             }
         }
+    }
+
+    for ent in existing_entities {
+        commands.entity(ent).despawn();
+    }
+
+    let mut touches_icon = false;
+    for loaded in loaded_batch {
+        if loaded.role != CharacterRole::Spectator {
+            touches_icon = true;
+        }
+        spawn_single_character(commands, &loaded);
+        if let Some(ref mut chars_res) = res.chars_res {
+            if let Some(existing) = chars_res
+                .characters
+                .iter_mut()
+                .find(|c| c.id == char_id && c.role == loaded.role)
+            {
+                *existing = loaded;
+            } else {
+                chars_res.characters.push(loaded);
+            }
+        }
+    }
+
+    if touches_icon {
+        despawn_health_icons(commands, q);
+        spawn_health_icons(
+            &res.mods,
+            commands,
+            res.chars_res.as_deref(),
+            &res.asset_server,
+            &mut res.mut_layouts,
+        );
     }
 
     res.char_sync.last_step = None;

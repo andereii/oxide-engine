@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 
-use crate::animations::BaseAnimationData;
+use crate::animations::{AtlasSettings, BaseAnimationData};
 
 use super::schema::{
     StageAnimKind, StageCharacterSlot, StageCharacters, StageCoordMode, StageData, StagePropData,
@@ -95,7 +95,7 @@ struct StagePropRaw {
     scale: [f32; 2],
     #[serde(alias = "assetPath", alias = "namePath")]
     file: String,
-    #[serde(default, deserialize_with = "de_opt_opt_string")]
+    #[serde(alias = "renderType", default, deserialize_with = "de_opt_opt_string")]
     animation: Option<Option<String>>,
     #[serde(rename = "animType", default, deserialize_with = "de_opt_opt_string")]
     anim_type: Option<Option<String>>,
@@ -115,6 +115,8 @@ struct StagePropRaw {
     #[serde(rename = "startingAnimation")]
     starting_animation: Option<String>,
     animations: Vec<BaseAnimationData>,
+    #[serde(rename = "atlasSettings")]
+    atlas_settings: AtlasSettings,
 }
 
 impl Default for StagePropRaw {
@@ -137,17 +139,25 @@ impl Default for StagePropRaw {
             dance_every: 0.0,
             starting_animation: None,
             animations: Vec::new(),
+            atlas_settings: AtlasSettings::default(),
         }
     }
 }
 
 impl StagePropRaw {
     fn into_prop(self) -> StagePropData {
-        let explicit_anim = self.animation.or(self.anim_type);
-        let anim_kind = match explicit_anim {
-            Some(None) => None,
-            Some(Some(kind)) => parse_anim_kind(&kind),
-            None => (!self.animations.is_empty()).then_some(StageAnimKind::Sparrow),
+        let has_explicit_null =
+            matches!(self.animation, Some(None)) || matches!(self.anim_type, Some(None));
+        let explicit_kind = self
+            .animation
+            .flatten()
+            .or_else(|| self.anim_type.flatten());
+        let anim_kind = if let Some(kind) = explicit_kind {
+            parse_anim_kind(&kind)
+        } else if has_explicit_null {
+            None
+        } else {
+            (!self.animations.is_empty()).then_some(StageAnimKind::Sparrow)
         };
         StagePropData {
             name: self.name,
@@ -166,6 +176,7 @@ impl StagePropRaw {
             dance_every: self.dance_every,
             starting_animation: self.starting_animation,
             animations: self.animations,
+            atlas_settings: self.atlas_settings,
         }
     }
 }

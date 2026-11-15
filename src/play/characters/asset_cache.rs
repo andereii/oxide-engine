@@ -4,9 +4,9 @@ use std::path::Path;
 use bevy::prelude::*;
 
 use crate::animations::animate_atlas::AnimateAtlas;
-use crate::animations::atlas_composite::{build_composite_clip, compute_atlas_whole_bounds};
+use crate::animations::atlas_composite::build_composite_clip;
 use crate::animations::base::BaseAnimationData;
-use crate::animations::{AnimationController, PackerAtlas, SparrowAtlas};
+use crate::animations::{AnimationController, AtlasSettings, PackerAtlas, SparrowAtlas};
 use crate::mods::ModRegistry;
 
 use super::behavior::{ClipVisual, SheetSource};
@@ -50,6 +50,7 @@ pub(super) fn get_or_load_sparrow(
     sources.push(SheetSource {
         texture,
         layout: layout_handle,
+        extra_layers: Vec::new(),
         frame_sizes,
     });
     let sp_idx = sparrow_data.len();
@@ -58,7 +59,7 @@ pub(super) fn get_or_load_sparrow(
     Some((src_idx, sp_idx))
 }
 
-pub(super) type CachedAnimateAtlas = (usize, AnimateAtlas, HashMap<String, usize>, [f32; 2], [f32; 2]);
+pub(super) type CachedAnimateAtlas = (usize, AnimateAtlas, HashMap<String, usize>);
 
 pub(super) fn get_or_load_animate(
     mods: &ModRegistry,
@@ -72,25 +73,33 @@ pub(super) fn get_or_load_animate(
     if let Some(hit) = atlas_cache.get(raw_path) {
         return Some(hit.clone());
     }
-    let (dir, png) = char_rel_candidates(char_id, raw_path)
+    let dir = char_rel_candidates(char_id, raw_path)
         .into_iter()
         .find_map(|rel_dir| {
             let dir = mods.resolve_dir(&rel_dir)?;
-            let png = dir.join("spritemap1.png");
-            (dir.join("Animation.json").is_file() && png.is_file()).then_some((dir, png))
+            (dir.join("Animation.json").is_file() && dir.join("spritemap1.png").is_file())
+                .then_some(dir)
         })?;
     let atlas = AnimateAtlas::from_dir(&dir).ok()?;
-    let (layout, indices) = atlas.build_layout();
-    let (bounds_min, bounds_size) = compute_atlas_whole_bounds(&atlas, &indices);
-    let texture = asset_server.load(mods.to_asset_server_path(&png));
-    let layout_handle = layouts.add(layout);
+    let (atlas_layouts, indices) = atlas.build_layouts();
+    let mut iter = atlas_layouts.into_iter().enumerate();
+    let (_, first_layout) = iter.next()?;
+    let texture = asset_server.load(mods.to_asset_server_path(&dir.join("spritemap1.png")));
+    let layout_handle = layouts.add(first_layout);
+    let extra_layers = iter
+        .map(|(i, layout)| {
+            let img_rel = mods.to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
+            (asset_server.load(img_rel), layouts.add(layout))
+        })
+        .collect();
     let src_idx = sources.len();
     sources.push(SheetSource {
         texture,
         layout: layout_handle,
+        extra_layers,
         frame_sizes: HashMap::new(),
     });
-    let val = (src_idx, atlas, indices, bounds_min, bounds_size);
+    let val = (src_idx, atlas, indices);
     atlas_cache.insert(raw_path.to_string(), val.clone());
     Some(val)
 }
@@ -127,6 +136,7 @@ pub(super) fn load_packer_source(
         SheetSource {
             texture,
             layout: layout_handle,
+            extra_layers: Vec::new(),
             frame_sizes,
         },
         atlas,
@@ -134,22 +144,47 @@ pub(super) fn load_packer_source(
     ))
 }
 
+fn push_unique_char_norm(out: &mut Vec<String>, raw_rel: &str) {
+    if let Ok(norm) = ModRegistry::normalize_rel_path(raw_rel)
+        && !norm.is_empty()
+        && !out.iter().any(|existing| existing == &norm)
+    {
+        out.push(norm);
+    }
+}
+
 fn char_rel_candidates(char_id: &str, raw: &str) -> Vec<String> {
     let normalized = raw.trim().replace('\\', "/");
-    let cleaned = normalized.trim_start_matches("./").trim_start_matches('/');
-    if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
-        vec![
-            cleaned.to_string(),
-            format!("gameplay/characters/{char_id}/{cleaned}"),
-        ]
-    } else {
-        vec![
-            format!("gameplay/characters/{char_id}/{cleaned}"),
-            format!("gameplay/characters/{cleaned}"),
-            format!("characters/{char_id}/{cleaned}"),
-            format!("characters/{cleaned}"),
-        ]
+    let mut cleaned = normalized.as_str();
+    loop {
+        let next = cleaned.trim_start_matches("./").trim_start_matches('/');
+        if next.len() == cleaned.len() {
+            break;
+        }
+        cleaned = next;
     }
+    if let Some(rest) = cleaned.strip_prefix("assets/") {
+        cleaned = rest;
+    }
+    if cleaned.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
+        push_unique_char_norm(&mut out, cleaned);
+        push_unique_char_norm(&mut out, &format!("gameplay/characters/{char_id}/{cleaned}"));
+    } else {
+        push_unique_char_norm(&mut out, &format!("gameplay/characters/{char_id}/{cleaned}"));
+        push_unique_char_norm(&mut out, &format!("gameplay/characters/{cleaned}"));
+        push_unique_char_norm(&mut out, &format!("characters/{char_id}/{cleaned}"));
+        push_unique_char_norm(&mut out, &format!("characters/{cleaned}"));
+        push_unique_char_norm(&mut out, cleaned);
+    }
+    out
+}
+
+pub(crate) fn char_rel_candidates_for_watch(char_id: &str, raw: &str) -> Vec<String> {
+    char_rel_candidates(char_id, raw)
 }
 
 fn ensure_ext_str(rel: &str, ext: &str) -> String {
@@ -183,7 +218,7 @@ pub(super) fn load_composite_anim(
     controller: &mut AnimationController,
     clips: &mut HashMap<String, ClipVisual>,
 ) {
-    let Some((src_i, atlas, indices, bounds_min, bounds_size)) =
+    let Some((src_i, atlas, indices)) =
         get_or_load_animate(mods, char_id, rel_path, asset_server, layouts, sources, atlas_cache)
     else {
         return;
@@ -195,11 +230,19 @@ pub(super) fn load_composite_anim(
     controller.add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
     controller.set_offset(&anim.name, clip.offset);
     controller.set_flip(&anim.name, clip.flip);
-    clips.insert(anim.name.clone(), ClipVisual::Composite { source_idx: src_i, clip, bounds_min, bounds_size });
+    clips.insert(
+        anim.name.clone(),
+        ClipVisual::Composite {
+            source_idx: src_i,
+            clip,
+            stage_matrix: atlas.stage_matrix,
+        },
+    );
 }
 
 pub(super) fn resolve_idle_size(
     starting_anim: &str,
+    atlas_settings: AtlasSettings,
     controller: &AnimationController,
     sources: &[SheetSource],
     clips: &HashMap<String, ClipVisual>,
@@ -207,7 +250,19 @@ pub(super) fn resolve_idle_size(
     for key in [starting_anim, "idle", "danceRight", "danceLeft"] {
         let Some(vis) = clips.get(key) else { continue };
         match vis {
-            ClipVisual::Composite { bounds_size, .. } => return *bounds_size,
+            ClipVisual::Composite { clip, stage_matrix, .. } => {
+                let mut sz = clip.bounds_size;
+                if atlas_settings.apply_stage_matrix
+                    && !atlas_settings.post_stage_matrix_apply
+                    && let Some(sm) = stage_matrix
+                {
+                    sz = [
+                        sz[0] * sm[0].abs().max(0.01),
+                        sz[1] * sm[3].abs().max(0.01),
+                    ];
+                }
+                return sz;
+            }
             ClipVisual::Sheet { source_idx } => {
                 if let Some(def) = controller.animations.get(key)
                     && let Some(&first_id) = def.frames.first()

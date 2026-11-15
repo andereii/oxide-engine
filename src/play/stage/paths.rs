@@ -7,22 +7,52 @@ use bevy::prelude::Color;
 use crate::mods::ModRegistry;
 use crate::utils::constants::STAGES_ASSET_PATH;
 
-fn stage_rel_candidates(stage_id: &str, raw: &str) -> Vec<String> {
+fn clean_rel_input(raw: &str) -> String {
     let normalized = raw.trim().replace('\\', "/");
-    let cleaned = normalized.trim_start_matches("./").trim_start_matches('/');
-    if cleaned.starts_with("gameplay/") {
-        vec![
-            cleaned.to_string(),
-            format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"),
-        ]
-    } else {
-        vec![
-            format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"),
-            format!("{STAGES_ASSET_PATH}/{cleaned}"),
-            format!("stages/{stage_id}/{cleaned}"),
-            format!("stages/{cleaned}"),
-        ]
+    let mut cleaned = normalized.as_str();
+    loop {
+        let next = cleaned.trim_start_matches("./").trim_start_matches('/');
+        if next.len() == cleaned.len() {
+            break;
+        }
+        cleaned = next;
     }
+    if let Some(rest) = cleaned.strip_prefix("assets/") {
+        cleaned = rest;
+    }
+    cleaned.to_string()
+}
+
+fn push_unique_norm(out: &mut Vec<String>, raw_rel: &str) {
+    if let Ok(norm) = ModRegistry::normalize_rel_path(raw_rel)
+        && !norm.is_empty()
+        && !out.iter().any(|existing| existing == &norm)
+    {
+        out.push(norm);
+    }
+}
+
+fn stage_rel_candidates(stage_id: &str, raw: &str) -> Vec<String> {
+    let cleaned = clean_rel_input(raw);
+    if cleaned.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
+        push_unique_norm(&mut out, &cleaned);
+        push_unique_norm(&mut out, &format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"));
+    } else {
+        push_unique_norm(&mut out, &format!("{STAGES_ASSET_PATH}/{stage_id}/{cleaned}"));
+        push_unique_norm(&mut out, &format!("{STAGES_ASSET_PATH}/{cleaned}"));
+        push_unique_norm(&mut out, &format!("stages/{stage_id}/{cleaned}"));
+        push_unique_norm(&mut out, &format!("stages/{cleaned}"));
+        push_unique_norm(&mut out, &cleaned);
+    }
+    out
+}
+
+pub fn stage_rel_candidates_for_watch(stage_id: &str, raw: &str) -> Vec<String> {
+    stage_rel_candidates(stage_id, raw)
 }
 
 pub fn resolve_atlas_dir_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Option<PathBuf> {
@@ -59,8 +89,10 @@ pub fn resolve_stage_image_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> 
 }
 
 fn stage_path_candidates(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Vec<PathBuf> {
-    let normalized = raw.trim().replace('\\', "/");
-    let cleaned = normalized.trim_start_matches("./").trim_start_matches('/');
+    let cleaned = clean_rel_input(raw);
+    if cleaned.is_empty() {
+        return Vec::new();
+    }
     let mut raw_rels = Vec::new();
     if let Ok(stage_rel) = stage_dir.strip_prefix(assets_dir) {
         let stage_rel_str = stage_rel.to_string_lossy().replace('\\', "/");
@@ -68,16 +100,20 @@ fn stage_path_candidates(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Vec<
             raw_rels.push(format!("{stage_rel_str}/{cleaned}"));
         }
     }
-    if cleaned.starts_with("gameplay/") {
-        raw_rels.push(cleaned.to_string());
+    if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
+        raw_rels.push(cleaned.clone());
     } else {
         raw_rels.push(format!("{STAGES_ASSET_PATH}/{cleaned}"));
+        raw_rels.push(cleaned);
     }
 
     let mut out = Vec::new();
     for rel in raw_rels {
         if let Ok(safe) = ModRegistry::normalize_rel_path(&rel) {
-            out.push(assets_dir.join(safe));
+            let p = assets_dir.join(safe);
+            if !out.contains(&p) {
+                out.push(p);
+            }
         }
     }
     out

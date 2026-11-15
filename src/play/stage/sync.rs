@@ -3,8 +3,11 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
 
-use crate::animations::atlas_composite::{CompositeClip, CompositePiece, upright_size};
-use crate::animations::{AnimationController, Bopper};
+use crate::animations::atlas_composite::{
+    CompositeClip, CompositePiece, FlxAnimateTransformParams, compose_flx_piece_bevy_affine,
+    modulate_color,
+};
+use crate::animations::{AnimationController, AtlasSettings, Bopper};
 use crate::play::characters::spawn::CompositeAffine2d;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
@@ -30,11 +33,12 @@ pub struct StageCompositePiece;
 
 #[derive(Component)]
 pub struct StageCompositeProp {
-    pub texture: Handle<Image>,
-    pub layout: Handle<TextureAtlasLayout>,
+    pub textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
     pub clips: HashMap<String, CompositeClip>,
     pub bounds_min: [f32; 2],
     pub bounds_size: [f32; 2],
+    pub atlas_settings: AtlasSettings,
+    pub stage_matrix: Option<[f32; 6]>,
     pub piece_entities: Vec<Entity>,
 }
 
@@ -153,22 +157,26 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                 }
             }
             StagePropKind::CompositeAtlas {
-                texture,
-                layout,
+                textures,
                 controller,
                 clips,
                 bounds_min,
                 bounds_size,
+                atlas_settings,
+                stage_matrix,
                 max_pieces,
             } => {
+                let Some((base_tex, base_layout)) = textures.first() else {
+                    continue;
+                };
                 let mut piece_entities = Vec::with_capacity(*max_pieces);
                 for i in 0..*max_pieces {
                     let piece_ent = commands
                         .spawn((
                             Sprite::from_atlas_image(
-                                texture.clone(),
+                                base_tex.clone(),
                                 TextureAtlas {
-                                    layout: layout.clone(),
+                                    layout: base_layout.clone(),
                                     index: 0,
                                 },
                             ),
@@ -196,11 +204,12 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     *bounds_size,
                 );
                 let composite = StageCompositeProp {
-                    texture: texture.clone(),
-                    layout: layout.clone(),
+                    textures: textures.clone(),
                     clips: clips.clone(),
                     bounds_min: *bounds_min,
                     bounds_size: *bounds_size,
+                    atlas_settings: *atlas_settings,
+                    stage_matrix: *stage_matrix,
                     piece_entities,
                 };
                 if d.dance_every != 0.0 || !d.animations.is_empty() {
@@ -281,7 +290,7 @@ pub fn sync_stage_props(
 
         if let Some(composite) = composite_opt {
             set_visibility(&mut visibility, Visibility::Hidden);
-            let (anim_off, anim_flip, cur_pieces): ([f32; 2], [bool; 2], &[CompositePiece]) =
+            let (anim_off, anim_flip, clip_bounds_min, clip_bounds_size, cur_pieces) =
                 match (anim_opt, bopper_opt) {
                     (Some(mut anim), Some(mut bopper)) => {
                         bopper.sync_finished(&anim);
@@ -290,14 +299,14 @@ pub fn sync_stage_props(
                                 bopper.on_step_hit(step, &mut anim);
                             }
                         }
-                        let frame_pieces = composite_frame_pieces(composite, &anim);
-                        (anim.current_offset(), anim.current_flip(), frame_pieces)
+                        let (bmin, bsize, frame_pieces) = composite_frame_info(composite, &anim);
+                        (anim.current_offset(), anim.current_flip(), bmin, bsize, frame_pieces)
                     }
                     (Some(anim), None) => {
-                        let frame_pieces = composite_frame_pieces(composite, &anim);
-                        (anim.current_offset(), anim.current_flip(), frame_pieces)
+                        let (bmin, bsize, frame_pieces) = composite_frame_info(composite, &anim);
+                        (anim.current_offset(), anim.current_flip(), bmin, bsize, frame_pieces)
                     }
-                    _ => ([0.0, 0.0], [false, false], &[]),
+                    _ => ([0.0, 0.0], [false, false], composite.bounds_min, composite.bounds_size, &[][..]),
                 };
 
             if is_hidden {
@@ -309,6 +318,8 @@ pub fn sync_stage_props(
                 vis,
                 composite,
                 cur_pieces,
+                clip_bounds_min,
+                clip_bounds_size,
                 anim_off,
                 anim_flip,
                 sprite.color,
@@ -395,18 +406,19 @@ type StagePiecesQuery<'w, 's> = Query<
     (With<StageCompositePiece>, Without<StagePropVisual>),
 >;
 
-fn composite_frame_pieces<'a>(
+fn composite_frame_info<'a>(
     composite: &'a StageCompositeProp,
     anim: &AnimationController,
-) -> &'a [CompositePiece] {
+) -> ([f32; 2], [f32; 2], &'a [CompositePiece]) {
     let Some(name) = anim.current.as_deref() else {
-        return &[];
+        return (composite.bounds_min, composite.bounds_size, &[]);
     };
     let Some(clip) = composite.clips.get(name) else {
-        return &[];
+        return (composite.bounds_min, composite.bounds_size, &[]);
     };
     let frame_idx = anim.current_atlas_index().unwrap_or(0);
-    clip.frames.get(frame_idx).map_or(&[], Vec::as_slice)
+    let pieces = clip.frames.get(frame_idx).map_or(&[][..], Vec::as_slice);
+    (clip.bounds_min, clip.bounds_size, pieces)
 }
 
 fn hide_composite_pieces(entities: &[Entity], pieces: &mut StagePiecesQuery) {
@@ -423,6 +435,8 @@ fn sync_composite_prop_pieces(
     vis: &StagePropVisual,
     composite: &StageCompositeProp,
     frame_pieces: &[CompositePiece],
+    clip_bounds_min: [f32; 2],
+    clip_bounds_size: [f32; 2],
     anim_off: [f32; 2],
     anim_flip: [bool; 2],
     tint: Color,
@@ -431,31 +445,29 @@ fn sync_composite_prop_pieces(
     prop_zoom: f32,
     pieces_query: &mut StagePiecesQuery,
 ) {
-    let (mut world_cx, mut world_cy) = match vis.coord_mode {
-        StageCoordMode::Center => (vis.base_position[0], vis.base_position[1]),
-        StageCoordMode::TopLeft => (
-            vis.base_position[0] + composite.bounds_size[0] * vis.base_scale[0] * 0.5,
-            vis.base_position[1] + composite.bounds_size[1] * vis.base_scale[1] * 0.5,
+    let (mut top_left_x, mut top_left_y) = match vis.coord_mode {
+        StageCoordMode::TopLeft => (vis.base_position[0], vis.base_position[1]),
+        StageCoordMode::Center => (
+            vis.base_position[0] - vis.raw_size[0] * vis.base_scale[0] * 0.5,
+            vis.base_position[1] - vis.raw_size[1] * vis.base_scale[1] * 0.5,
         ),
     };
-    world_cx -= anim_off[0] * vis.base_scale[0];
-    world_cy -= anim_off[1] * vis.base_scale[1];
+    top_left_x -= anim_off[0] * vis.base_scale[0] + eff_scroll_x;
+    top_left_y -= anim_off[1] * vis.base_scale[1] + eff_scroll_y;
 
-    let screen_cx = world_cx - eff_scroll_x;
-    let screen_cy = world_cy - eff_scroll_y;
-    let bevy_cx = (screen_cx - SCREEN_WIDTH * 0.5) * prop_zoom;
-    let bevy_cy = (SCREEN_HEIGHT * 0.5 - screen_cy) * prop_zoom;
-
-    let anchor_x = composite.bounds_min[0] + composite.bounds_size[0] * 0.5;
-    let anchor_y = composite.bounds_min[1] + composite.bounds_size[1] * 0.5;
-
-    let eff_flip_x = vis.base_flip[0] ^ anim_flip[0];
-    let eff_flip_y = vis.base_flip[1] ^ anim_flip[1];
-    let flip_sx = if eff_flip_x { -1.0 } else { 1.0 };
-    let flip_sy = if eff_flip_y { -1.0 } else { 1.0 };
-    let sx = flip_sx * vis.base_scale[0] * prop_zoom;
-    let sy = flip_sy * vis.base_scale[1] * prop_zoom;
-    let (sin_r, cos_r) = (-vis.base_angle_deg.to_radians()).sin_cos();
+    let params = FlxAnimateTransformParams {
+        bounds_min: clip_bounds_min,
+        bounds_size: clip_bounds_size,
+        top_left: [top_left_x, top_left_y],
+        scale: vis.base_scale,
+        angle_deg: vis.base_angle_deg,
+        flip: [vis.base_flip[0] ^ anim_flip[0], vis.base_flip[1] ^ anim_flip[1]],
+        stage_matrix: composite.stage_matrix,
+        apply_stage_matrix: composite.atlas_settings.apply_stage_matrix,
+        post_stage_matrix_apply: composite.atlas_settings.post_stage_matrix_apply,
+        screen_size: [SCREEN_WIDTH, SCREEN_HEIGHT],
+        zoom: prop_zoom,
+    };
 
     for (i, &ent) in composite.piece_entities.iter().enumerate() {
         let Ok((mut sprite, mut tf, mut p_vis, mut aff)) = pieces_query.get_mut(ent) else {
@@ -466,38 +478,24 @@ fn sync_composite_prop_pieces(
             set_visibility(&mut p_vis, Visibility::Hidden);
             continue;
         };
-
-        let (w, h) = upright_size(piece);
-        let m = piece.matrix;
-        let fcx = m[0] * (w * 0.5) + m[2] * (h * 0.5) + m[4];
-        let fcy = m[1] * (w * 0.5) + m[3] * (h * 0.5) + m[5];
-        let lx = (fcx - anchor_x) * sx;
-        let ly = -(fcy - anchor_y) * sy;
-
-        let [mut m00, mut m01, mut m10, mut m11] = if piece.rotated {
-            [-m[2], -m[0], m[3], m[1]]
-        } else {
-            [m[0], -m[2], -m[1], m[3]]
+        let Some((tex, layout)) = composite
+            .textures
+            .get(piece.spritemap_idx)
+            .or_else(|| composite.textures.first())
+        else {
+            aff.active = false;
+            set_visibility(&mut p_vis, Visibility::Hidden);
+            continue;
         };
-        m00 *= sx;
-        m01 *= sx;
-        m10 *= sy;
-        m11 *= sy;
 
-        let rx = lx * cos_r - ly * sin_r;
-        let ry = lx * sin_r + ly * cos_r;
-        let c0x = m00 * cos_r - m10 * sin_r;
-        let c0y = m00 * sin_r + m10 * cos_r;
-        let c1x = m01 * cos_r - m11 * sin_r;
-        let c1y = m01 * sin_r + m11 * cos_r;
-
-        let pos = Vec3::new(bevy_cx + rx, bevy_cy + ry, vis.z_layer + (i as f32) * 1e-6);
-        set_sprite_atlas(&mut sprite, &composite.texture, &composite.layout, piece.sprite_index);
-        set_sprite_color(&mut sprite, tint);
+        let ([bx, by], cols) = compose_flx_piece_bevy_affine(piece, &params);
+        let pos = Vec3::new(bx, by, vis.z_layer + (i as f32) * 1e-6);
+        set_sprite_atlas(&mut sprite, tex, layout, piece.sprite_index);
+        set_sprite_color(&mut sprite, modulate_color(tint, piece.color));
         set_sprite_flip(&mut sprite, false, false);
         set_transform_full(&mut tf, pos, Vec3::ONE, Quat::IDENTITY);
         aff.active = true;
-        aff.cols = [c0x, c0y, c1x, c1y];
+        aff.cols = cols;
         aff.translation = pos;
         set_visibility(&mut p_vis, Visibility::Visible);
     }

@@ -1,4 +1,4 @@
-use crate::animations::BaseAnimationData;
+use crate::animations::{AtlasSettings, BaseAnimationData};
 
 use super::raw::parse_stage_raw;
 
@@ -110,6 +110,7 @@ pub struct StagePropData {
     pub dance_every: f32,
     pub starting_animation: Option<String>,
     pub animations: Vec<BaseAnimationData>,
+    pub atlas_settings: AtlasSettings,
 }
 
 impl Default for StagePropData {
@@ -131,6 +132,7 @@ impl Default for StagePropData {
             dance_every: 0.0,
             starting_animation: None,
             animations: Vec::new(),
+            atlas_settings: AtlasSettings::default(),
         }
     }
 }

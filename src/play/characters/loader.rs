@@ -145,17 +145,30 @@ pub fn load_single_character(
                 }
             }
             if clips.is_empty()
-                && let Some((src_i, atlas, indices, bounds_min, bounds_size)) = get_or_load_animate(mods, char_id, &default_asset, asset_server, layouts, &mut sources, &mut atlas_cache)
+                && let Some((src_i, atlas, indices)) = get_or_load_animate(mods, char_id, &default_asset, asset_server, layouts, &mut sources, &mut atlas_cache)
                 && let Some(clip) = sample_default_composite_clip(&atlas, &indices)
             {
                 let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
                 controller.add_anim("idle", frame_ids, clip.fps, true);
-                clips.insert("idle".to_string(), ClipVisual::Composite { source_idx: src_i, clip, bounds_min, bounds_size });
+                clips.insert(
+                    "idle".to_string(),
+                    ClipVisual::Composite {
+                        source_idx: src_i,
+                        clip,
+                        stage_matrix: atlas.stage_matrix,
+                    },
+                );
             }
         }
     }
 
-    let idle_size = resolve_idle_size(&data.starting_animation, &controller, &sources, &clips);
+    let idle_size = resolve_idle_size(
+        &data.starting_animation,
+        data.effective_atlas_settings(),
+        &controller,
+        &sources,
+        &clips,
+    );
     let max_composite_pieces = clips
         .values()
         .filter_map(|c| match c {

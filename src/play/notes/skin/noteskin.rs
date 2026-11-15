@@ -217,9 +217,22 @@ impl NoteStyle {
     }
 
     fn skin_rel_candidates(&self, rel: &str) -> Vec<String> {
-        let cleaned = rel.trim().replace('\\', "/");
-        let cleaned = cleaned.trim_start_matches("./").trim_start_matches('/');
-        if cleaned.starts_with("gameplay/") || cleaned.starts_with("noteskins/") {
+        let normalized = rel.trim().replace('\\', "/");
+        let mut cleaned = normalized.as_str();
+        loop {
+            let next = cleaned.trim_start_matches("./").trim_start_matches('/');
+            if next.len() == cleaned.len() {
+                break;
+            }
+            cleaned = next;
+        }
+        if let Some(rest) = cleaned.strip_prefix("assets/") {
+            cleaned = rest;
+        }
+        if cleaned.is_empty() {
+            return Vec::new();
+        }
+        let raw_cands = if cleaned.starts_with("gameplay/") || cleaned.starts_with("noteskins/") {
             vec![
                 cleaned.to_string(),
                 format!("gameplay/noteskins/{}/{cleaned}", self.id),
@@ -229,8 +242,23 @@ impl NoteStyle {
             vec![
                 format!("gameplay/noteskins/{}/{cleaned}", self.id),
                 format!("noteskins/{}/{cleaned}", self.id),
+                cleaned.to_string(),
             ]
+        };
+        let mut out = Vec::new();
+        for c in raw_cands {
+            if let Ok(norm) = ModRegistry::normalize_rel_path(&c)
+                && !norm.is_empty()
+                && !out.iter().any(|existing| existing == &norm)
+            {
+                out.push(norm);
+            }
         }
+        out
+    }
+
+    pub(crate) fn skin_rel_candidates_for_watch(&self, rel: &str) -> Vec<String> {
+        self.skin_rel_candidates(rel)
     }
 
     pub fn asset_path(&self, rel: &str) -> String {

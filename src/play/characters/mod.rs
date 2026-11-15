@@ -5,6 +5,7 @@ pub mod schema;
 pub mod spawn;
 pub mod sync;
 
+pub use asset_cache::char_rel_candidates_for_watch;
 pub use behavior::CharacterActor;
 pub use loader::{CharactersResource, load_characters_resource, load_single_character};
 pub use schema::CharacterRole;
