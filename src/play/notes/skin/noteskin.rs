@@ -247,11 +247,11 @@ impl NoteStyle {
         };
         let mut out = Vec::new();
         for c in raw_cands {
-            if let Ok(norm) = ModRegistry::normalize_rel_path(&c)
-                && !norm.is_empty()
-                && !out.iter().any(|existing| existing == &norm)
-            {
-                out.push(norm);
+            if let Ok(norm) = ModRegistry::normalize_rel_path(&c) {
+                let norm_str = norm.to_string_lossy().replace('\\', "/");
+                if !norm_str.is_empty() && !out.iter().any(|existing| existing == &norm_str) {
+                    out.push(norm_str);
+                }
             }
         }
         out

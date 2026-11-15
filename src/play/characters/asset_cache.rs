@@ -145,11 +145,11 @@ pub(super) fn load_packer_source(
 }
 
 fn push_unique_char_norm(out: &mut Vec<String>, raw_rel: &str) {
-    if let Ok(norm) = ModRegistry::normalize_rel_path(raw_rel)
-        && !norm.is_empty()
-        && !out.iter().any(|existing| existing == &norm)
-    {
-        out.push(norm);
+    if let Ok(norm) = ModRegistry::normalize_rel_path(raw_rel) {
+        let norm_str = norm.to_string_lossy().replace('\\', "/");
+        if !norm_str.is_empty() && !out.iter().any(|existing| existing == &norm_str) {
+            out.push(norm_str);
+        }
     }
 }
 
@@ -183,7 +183,7 @@ fn char_rel_candidates(char_id: &str, raw: &str) -> Vec<String> {
     out
 }
 
-pub(crate) fn char_rel_candidates_for_watch(char_id: &str, raw: &str) -> Vec<String> {
+pub fn char_rel_candidates_for_watch(char_id: &str, raw: &str) -> Vec<String> {
     char_rel_candidates(char_id, raw)
 }
 

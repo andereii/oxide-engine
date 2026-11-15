@@ -24,11 +24,11 @@ fn clean_rel_input(raw: &str) -> String {
 }
 
 fn push_unique_norm(out: &mut Vec<String>, raw_rel: &str) {
-    if let Ok(norm) = ModRegistry::normalize_rel_path(raw_rel)
-        && !norm.is_empty()
-        && !out.iter().any(|existing| existing == &norm)
-    {
-        out.push(norm);
+    if let Ok(norm) = ModRegistry::normalize_rel_path(raw_rel) {
+        let norm_str = norm.to_string_lossy().replace('\\', "/");
+        if !norm_str.is_empty() && !out.iter().any(|existing| existing == &norm_str) {
+            out.push(norm_str);
+        }
     }
 }
 
