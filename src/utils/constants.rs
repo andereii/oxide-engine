@@ -15,6 +15,20 @@ pub const HEALTH_MAX: f64 = 2.0;
 pub const HEALTH_STARTING: f64 = 1.0;
 pub const HEALTH_LERP_FACTOR: f64 = 0.15;
 
+pub const COLOR_HEALTH_BAR_RED: [u8; 3] = [0xFF, 0x00, 0x00];
+pub const COLOR_HEALTH_BAR_GREEN: [u8; 3] = [0x66, 0xFF, 0x33];
+pub const DEFAULT_HEALTH_ICON: &str = "face";
+pub const HEALTH_ICON_SIZE: f32 = 150.0;
+pub const PIXEL_ICON_SIZE: f32 = 32.0;
+pub const HEALTH_ICON_BOP_SCALE: f32 = 0.2;
+pub const HEALTH_ICON_POSITION_OFFSET: f32 = 26.0;
+pub const HEALTH_ICON_WINNING_THRESHOLD: f64 = 0.8 * HEALTH_MAX;
+pub const HEALTH_ICON_LOSING_THRESHOLD: f64 = 0.2 * HEALTH_MAX;
+pub const HEALTH_ICON_ANGLE_HALF_LIFE: f64 = 0.512;
+pub const HEALTH_BAR_Y_RATIO_UPSCROLL: f32 = 0.9;
+pub const HEALTH_BAR_Y_RATIO_DOWNSCROLL: f32 = 0.1;
+pub const HEALTH_BAR_BORDER_PX: f32 = 4.0;
+
 pub const HEALTH_KILLER_BONUS: f64 = 0.04;
 pub const HEALTH_SICK_BONUS: f64 = 0.03;
 pub const HEALTH_GOOD_BONUS: f64 = 0.015;

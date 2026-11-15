@@ -5,7 +5,7 @@ use crate::utils::constants::{
     SCORE_HOLD_BONUS_PER_SECOND, SCORE_HOLD_DROP_PENALTY_PER_SECOND, SUSTAIN_MIN_REMAINING_MS,
 };
 
-use crate::play::judgement::{Judgement, miss_score};
+use crate::play::hud::judgement::{Judgement, miss_score};
 use crate::play::notes::data::{ActiveHold, NoteDirection, process_note_window};
 use crate::play::notes::strum::{CharNoteSignal, HoldCoverCmd};
 use crate::play::scene::PlayState;
@@ -204,7 +204,7 @@ impl PlayState {
         self.health = (self.health + health_change).clamp(HEALTH_MIN, HEALTH_MAX);
         if is_combo_break {
             if self.tallies.combo >= 10 && matches!(judgement, Judgement::Miss) {
-                self.pending_popups.push(crate::play::popups::PopupEvent {
+                self.pending_popups.push(crate::play::hud::popups::PopupEvent {
                     judgement: None,
                     combo: Some(0),
                 });

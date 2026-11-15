@@ -194,13 +194,13 @@ impl PlayState {
             self.camera.zoom_tween = (!tween.finished()).then_some(tween);
         }
 
+        let decay_factor = crate::utils::constants::CAMERA_DECAY_RATE.powf(elapsed_s * 60.0);
         if self.camera.zoom_rate > 0.0 {
-            let decay_factor = crate::utils::constants::CAMERA_DECAY_RATE.powf(elapsed_s * 60.0);
             self.camera.bop_multiplier =
                 1.0 + (self.camera.bop_multiplier - 1.0) * decay_factor;
-            self.camera.hud_zoom = self.camera.default_hud_zoom
-                + (self.camera.hud_zoom - self.camera.default_hud_zoom) * decay_factor;
         }
+        self.camera.hud_zoom = self.camera.default_hud_zoom
+            + (self.camera.hud_zoom - self.camera.default_hud_zoom) * decay_factor;
 
         if !self.scroll_speed_tweens.is_empty() {
             let mut idx = 0;

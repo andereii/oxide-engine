@@ -4,6 +4,7 @@ use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 use crate::utils::constants::{HIT_WINDOW_MS, KEY_COUNT};
 
+use crate::play::hud::camera::hud_render_layer;
 use crate::play::notes::strum::Strumline;
 use super::visuals::{NoteVisual, NoteskinAssets, ReceptorVisual, SustainBodyVisual, SustainEndVisual};
 
@@ -58,7 +59,7 @@ pub fn spawn_strumline_and_pools(
                 assets.notes_texture.clone(),
                 TextureAtlas {
                     layout: assets.notes_layout.clone(),
-                    index: assets.note_indices[0],
+                    index: assets.note_frames[0].0,
                 },
             );
             sprite.color = Color::srgba(1.0, 1.0, 1.0, style.notes_alpha);
@@ -66,6 +67,7 @@ pub fn spawn_strumline_and_pools(
                 sprite,
                 Transform::from_xyz(0.0, -900.0, 2.0).with_scale(Vec3::splat(style.notes_scale)),
                 Visibility::Hidden,
+                hud_render_layer(),
                 NoteVisual { is_player, lane: 0, assigned_idx: None, assigned_id: 0 },
             ));
         }
@@ -81,6 +83,7 @@ pub fn spawn_strumline_and_pools(
                     body_sprite,
                     Transform::from_xyz(0.0, -900.0, 1.0).with_scale(Vec3::splat(style.sustains_scale)),
                     Visibility::Hidden,
+                    hud_render_layer(),
                     SustainBodyVisual {
                         is_player, lane: 0, assigned_idx: None, assigned_id: 0,
                         raw_width_px: body_raw_w, end_raw_h,
@@ -96,6 +99,7 @@ pub fn spawn_strumline_and_pools(
                     end_sprite,
                     Transform::from_xyz(0.0, -900.0, 1.0).with_scale(Vec3::splat(style.sustains_scale)),
                     Visibility::Hidden,
+                    hud_render_layer(),
                     SustainEndVisual {
                         is_player, lane: 0, assigned_idx: None, assigned_id: 0,
                         end_raw_w: body_raw_w, end_raw_h,
@@ -116,12 +120,12 @@ fn spawn_receptors(
     let rec_y = strum.receptor_y();
     for lane in 0..KEY_COUNT {
         let (st, pr, cf, ch) = &assets.strum_frames[lane];
-        let static_idx = st.first().copied().unwrap_or(0);
+        let static_idx = st.indices.first().copied().unwrap_or(0);
         let mut anim = AnimationController::default();
-        anim.add_anim("static", st.clone(), 24.0, true);
-        anim.add_anim("press", pr.clone(), 24.0, false);
-        anim.add_anim("confirm", cf.clone(), 24.0, false);
-        anim.add_anim("confirm-hold", ch.clone(), 24.0, true);
+        anim.add_anim_frames("static", st.indices.clone(), st.offsets.clone(), st.rotated.clone(), 24.0, true);
+        anim.add_anim_frames("press", pr.indices.clone(), pr.offsets.clone(), pr.rotated.clone(), 24.0, false);
+        anim.add_anim_frames("confirm", cf.indices.clone(), cf.offsets.clone(), cf.rotated.clone(), 24.0, false);
+        anim.add_anim_frames("confirm-hold", ch.indices.clone(), ch.offsets.clone(), ch.rotated.clone(), 24.0, true);
         anim.play("static", true, false, 0);
 
         let mut sprite = Sprite::from_atlas_image(
@@ -134,6 +138,7 @@ fn spawn_receptors(
             Transform::from_xyz(strum.lane_x(lane), rec_y, 0.0)
                 .with_scale(Vec3::splat(style.strum_scale * strum.strumline_scale)),
             anim,
+            hud_render_layer(),
             ReceptorVisual {
                 lane,
                 is_player,

@@ -4,9 +4,9 @@ use crate::utils::constants::KEY_COUNT;
 use crate::utils::ecs::{set_sprite_color, set_visibility};
 
 use super::judgement::Judgement;
-use super::notes::NoteStyle;
-use super::scene::PlayState;
-use super::types::PlayPhase;
+use crate::play::notes::NoteStyle;
+use crate::play::scene::PlayState;
+use crate::play::types::PlayPhase;
 
 #[derive(Debug, Clone, Copy)]
 pub struct PopupEvent {

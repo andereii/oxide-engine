@@ -2,12 +2,12 @@ use bevy::prelude::KeyCode;
 
 use crate::utils::constants::HEALTH_MISS_BONUS;
 
-use crate::play::judgement::{Judgement, judge_note, score_note};
+use crate::play::hud::judgement::{Judgement, judge_note, score_note};
 use crate::play::notes::data::{
     ActiveHold, NoteDirection, NoteSprite, ScrollVelocityTimeline, process_note_window,
 };
 use crate::play::notes::strum::CharNoteSignal;
-use crate::play::popups::PopupEvent;
+use crate::play::hud::popups::PopupEvent;
 use crate::play::scene::PlayState;
 use crate::play::types::PreciseInputEvent;
 

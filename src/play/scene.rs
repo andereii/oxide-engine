@@ -9,10 +9,10 @@ use crate::utils::constants::{
     MUSIC_EASE_RATIO, STEPS_PER_BEAT,
 };
 
-use super::judgement::Tallies;
+use super::hud::judgement::Tallies;
+use super::hud::popups::PopupEvent;
 use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
-use super::popups::PopupEvent;
 use super::types::{CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent, SongChart, SongEventData};
 
 #[derive(Resource)]
@@ -149,7 +149,10 @@ impl PlayState {
         self.is_in_countdown = false;
         self.last_raw_audio_ms = None;
         self.phase = PlayPhase::Playing;
-        self.conductor.update(self.start_timestamp_ms);
+        let tick = self.conductor.update(self.start_timestamp_ms);
+        if tick.step_changed {
+            self.step_hit();
+        }
         self.status_message = format!("Playing: {} [{}]", self.chart.song_name, self.current_difficulty);
     }
 
@@ -284,7 +287,7 @@ impl PlayState {
             let step_period = (self.camera.zoom_rate * f64::from(STEPS_PER_BEAT)).round() as i32;
             let step_offset = (self.camera.zoom_rate_offset * f64::from(STEPS_PER_BEAT)).round() as i32;
             if step_period > 0 && (self.conductor.current_step + step_offset).rem_euclid(step_period) == 0 {
-                self.camera.bop_multiplier = self.camera.bop_intensity;
+                self.camera.bop_multiplier += self.camera.bop_intensity - 1.0;
                 self.camera.hud_zoom += self.camera.hud_zoom_intensity * self.camera.default_hud_zoom;
             }
         }

@@ -6,11 +6,13 @@ use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::characters::{CharacterSyncState, apply_composite_affine_transforms, load_characters_resource, spawn_characters, sync_characters};
+use super::hud::camera::{spawn_hud_camera, sync_hud_camera};
+use super::hud::healthbar::{spawn_health_bar, sync_health_bar};
+use super::hud::popups::{load_popup_assets, sync_popups};
 use super::notes::NoteStyle;
 use super::notes::effects::{spawn_effect_pools, sync_note_effects};
 use super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools, sync_arrow_visuals};
 use super::playlist::PlayStatePlaylist;
-use super::popups::{load_popup_assets, sync_popups};
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart};
 use super::stage::{StageSyncState, load_stage_resource, spawn_stage_props, sync_stage_props};
@@ -80,7 +82,8 @@ impl Plugin for PlayPlugin {
             })
             .insert_resource(state)
             .add_systems(Startup, setup_play_scene)
-            .add_systems(Update, (handle_play_input, tick_play_state, sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_popups, sync_hud_text).chain().before(crate::animations::sprite::step_animations))
+            .add_systems(Update, (handle_play_input, tick_play_state).chain().before(crate::animations::sprite::step_animations))
+            .add_systems(Update, (sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
     }
 }
@@ -106,6 +109,8 @@ fn setup_play_scene(
             .as_ref()
             .map(|p| asset_server.load(style.asset_path(p)));
     }
+
+    spawn_hud_camera(&mut commands);
 
     if !state.critical_failure {
         if !state.is_minimal_mode {
@@ -135,6 +140,7 @@ fn setup_play_scene(
                 &mut layouts,
             );
             spawn_characters(&mut commands, &chars);
+            spawn_health_bar(&mut commands, Some(&chars), &asset_server, &mut layouts);
             commands.insert_resource(chars);
             if let Some(stage) = loaded_stage {
                 commands.insert_resource(stage);

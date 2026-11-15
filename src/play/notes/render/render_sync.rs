@@ -5,8 +5,7 @@ use bevy::prelude::*;
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
 use crate::utils::ecs::{
-    set_atlas_index, set_sprite_color, set_sprite_flip, set_transform_full, set_transform_pos_scale,
-    set_visibility,
+    set_atlas_index, set_sprite_color, set_sprite_flip, set_transform_full, set_visibility,
 };
 
 use crate::play::notes::data::NoteSprite;
@@ -77,10 +76,10 @@ pub fn sync_arrow_visuals(
         fallback_style = state.player_strumline.note_style.clone();
         &fallback_style
     };
-    let note_indices = skin_assets
+    let note_frames = skin_assets
         .as_ref()
-        .map(|s| s.note_indices)
-        .unwrap_or([0; 4]);
+        .map(|s| s.note_frames)
+        .unwrap_or([(0, [0.0, 0.0], false); 4]);
     let sustain_indices = skin_assets
         .as_ref()
         .map(|s| s.sustain_indices)
@@ -92,7 +91,7 @@ pub fn sync_arrow_visuals(
             strumline(&state, is_player),
             is_player,
             style,
-            note_indices,
+            note_frames,
             &mut scratch,
             &mut notes,
         );
@@ -178,7 +177,7 @@ fn sync_note_pool(
     strum: &Strumline,
     is_player: bool,
     style: &NoteStyle,
-    note_indices: [usize; 4],
+    note_frames: [(usize, [f32; 2], bool); 4],
     scratch: &mut PoolSyncScratch,
     notes: &mut Query<
         (Entity, &mut NoteVisual, &mut Sprite, &mut Transform, &mut Visibility),
@@ -208,7 +207,8 @@ fn sync_note_pool(
             continue;
         };
         scratch.assigned_indices.push(idx);
-        apply_note_transform(strum, style, vis_pos, note, &mut sprite, &mut transform, &mut visibility);
+        let (_, f_off, rotated) = note_frames[vis.lane];
+        apply_note_transform(strum, style, vis_pos, note, f_off, rotated, &mut sprite, &mut transform, &mut visibility);
     }
 
     for idx in start..end {
@@ -223,17 +223,21 @@ fn sync_note_pool(
             vis.assigned_idx = Some(idx);
             vis.assigned_id = note.data.id;
             vis.lane = note.lane.index();
-            set_atlas_index(&mut sprite, note_indices[vis.lane]);
-            apply_note_transform(strum, style, vis_pos, note, &mut sprite, &mut transform, &mut visibility);
+            let (tex_idx, f_off, rotated) = note_frames[vis.lane];
+            set_atlas_index(&mut sprite, tex_idx);
+            apply_note_transform(strum, style, vis_pos, note, f_off, rotated, &mut sprite, &mut transform, &mut visibility);
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_note_transform(
     strum: &Strumline,
     style: &NoteStyle,
     vis_pos: f64,
     note: &NoteSprite,
+    frame_offset: [f32; 2],
+    rotated: bool,
     sprite: &mut Mut<'_, Sprite>,
     transform: &mut Mut<'_, Transform>,
     visibility: &mut Mut<'_, Visibility>,
@@ -245,10 +249,17 @@ fn apply_note_transform(
     }
     set_visibility(visibility, Visibility::Visible);
     let z = { let t: &Mut<'_, Transform> = &*transform; t.translation.z };
-    set_transform_pos_scale(
+    let scale = style.notes_scale * strum.strumline_scale;
+    let rot = if rotated { Quat::from_rotation_z(FRAC_PI_2) } else { Quat::IDENTITY };
+    set_transform_full(
         transform,
-        Vec3::new(strum.lane_x(note.lane.index()) + style.notes_offset[0], y, z),
-        Vec3::splat(style.notes_scale * strum.strumline_scale),
+        Vec3::new(
+            strum.lane_x(note.lane.index()) + style.notes_offset[0] + frame_offset[0] * scale,
+            y + frame_offset[1] * scale,
+            z,
+        ),
+        Vec3::splat(scale),
+        rot,
     );
     let tint = if note.desaturated { 0.65 } else { 1.0 };
     set_sprite_color(sprite, Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha));

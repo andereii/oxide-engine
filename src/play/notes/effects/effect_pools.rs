@@ -6,6 +6,7 @@ use crate::animations::AnimationController;
 use crate::utils::constants::{KEY_COUNT, NOTE_SPLASH_CAP};
 
 use super::effects::{HoldCoverPhase, HoldCoverVisual, NoteSplashVisual};
+use crate::play::hud::camera::hud_render_layer;
 use crate::play::notes::render::{AnimClipFrames, NoteskinAssets};
 
 const SPLASH_KEYS: [[&str; 4]; KEY_COUNT] = [
@@ -70,6 +71,7 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
                 Transform::from_xyz(0.0, -900.0, 3.0).with_scale(Vec3::splat(style.splash_scale)),
                 Visibility::Hidden,
                 anim,
+                hud_render_layer(),
                 NoteSplashVisual {
                     is_player: true,
                     lane: 0,
@@ -114,6 +116,7 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
                     .with_scale(Vec3::splat(style.hold_cover_scale)),
                 Visibility::Hidden,
                 anim,
+                hud_render_layer(),
                 HoldCoverVisual {
                     is_player,
                     lane,

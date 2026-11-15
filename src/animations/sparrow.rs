@@ -185,10 +185,16 @@ fn collapse_spaces(input: &str) -> String {
 }
 
 fn extract_attr(tag: &str, key: &str) -> Option<String> {
-    let pattern = format!("{key}=\"");
-    let start = tag.find(&pattern)? + pattern.len();
-    let rest = &tag[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    for quote in ['"', '\''] {
+        let pattern = format!("{key}={quote}");
+        if let Some(idx) = tag.find(&pattern) {
+            let start = idx + pattern.len();
+            let rest = &tag[start..];
+            if let Some(end) = rest.find(quote) {
+                return Some(rest[..end].to_string());
+            }
+        }
+    }
+    None
 }
 

@@ -68,10 +68,10 @@ pub struct NoteskinAssets {
     pub style: NoteStyle,
     pub strum_texture: Handle<Image>,
     pub strum_layout: Handle<TextureAtlasLayout>,
-    pub strum_frames: [(Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>); 4],
+    pub strum_frames: [(AnimClipFrames, AnimClipFrames, AnimClipFrames, AnimClipFrames); 4],
     pub notes_texture: Handle<Image>,
     pub notes_layout: Handle<TextureAtlasLayout>,
-    pub note_indices: [usize; 4],
+    pub note_frames: [(usize, [f32; 2], bool); 4],
     pub sustain_texture: Option<Handle<Image>>,
     pub sustain_layout: Option<Handle<TextureAtlasLayout>>,
     pub sustain_indices: [(usize, usize, f32, f32); 4],
@@ -93,23 +93,25 @@ pub fn load_noteskin_assets(
     let strum_layout = layouts.add(strum_layout_data);
     let strum_texture = asset_server.load(style.asset_path(&style.strum_path));
 
-    let mut strum_frames: [(Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>); 4] = Default::default();
+    let mut strum_frames: [(AnimClipFrames, AnimClipFrames, AnimClipFrames, AnimClipFrames); 4] = Default::default();
     for i in 0..KEY_COUNT {
         let a = &style.strum_anims[i];
-        let mut st = strum_xml.find_prefix_indices(&strum_map, &a.static_anim);
-        if st.is_empty() {
-            st.push(0);
+        let mut st = AnimClipFrames::from_sparrow(strum_xml.find_prefix_frames(&strum_map, &a.static_anim));
+        if st.indices.is_empty() {
+            st.indices.push(0);
+            st.offsets.push([0.0, 0.0]);
+            st.rotated.push(false);
         }
-        let mut pr = strum_xml.find_prefix_indices(&strum_map, &a.press_anim);
-        if pr.is_empty() {
+        let mut pr = AnimClipFrames::from_sparrow(strum_xml.find_prefix_frames(&strum_map, &a.press_anim));
+        if pr.indices.is_empty() {
             pr = st.clone();
         }
-        let mut cf = strum_xml.find_prefix_indices(&strum_map, &a.confirm_anim);
-        if cf.is_empty() {
+        let mut cf = AnimClipFrames::from_sparrow(strum_xml.find_prefix_frames(&strum_map, &a.confirm_anim));
+        if cf.indices.is_empty() {
             cf = st.clone();
         }
-        let mut ch = strum_xml.find_prefix_indices(&strum_map, &a.confirm_hold_anim);
-        if ch.is_empty() {
+        let mut ch = AnimClipFrames::from_sparrow(strum_xml.find_prefix_frames(&strum_map, &a.confirm_hold_anim));
+        if ch.indices.is_empty() {
             ch = cf.clone();
         }
         strum_frames[i] = (st, pr, cf, ch);
@@ -120,13 +122,14 @@ pub fn load_noteskin_assets(
     let notes_layout = layouts.add(notes_layout_data);
     let notes_texture = asset_server.load(style.asset_path(&style.notes_path));
 
-    let mut note_indices = [0usize; 4];
+    let mut note_frames = [(0usize, [0.0f32, 0.0f32], false); 4];
     for i in 0..KEY_COUNT {
-        note_indices[i] = notes_xml
-            .find_prefix_indices(&notes_map, &style.note_anims[i])
-            .first()
-            .copied()
-            .unwrap_or(0);
+        let (indices, offsets, rotated) = notes_xml.find_prefix_frames(&notes_map, &style.note_anims[i]);
+        note_frames[i] = (
+            indices.first().copied().unwrap_or(0),
+            offsets.first().copied().unwrap_or([0.0, 0.0]),
+            rotated.first().copied().unwrap_or(false),
+        );
     }
 
     let (sustain_texture, sustain_layout, sustain_indices) =
@@ -143,7 +146,7 @@ pub fn load_noteskin_assets(
         strum_frames,
         notes_texture,
         notes_layout,
-        note_indices,
+        note_frames,
         sustain_texture,
         sustain_layout,
         sustain_indices,
