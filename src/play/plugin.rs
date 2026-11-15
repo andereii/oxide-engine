@@ -30,8 +30,8 @@ use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart_in};
 use super::stage::schema::StageCoordMode;
 use super::stage::{
-    DynamicScriptProp, StagePropVisual, StageSyncState, load_stage_resource, spawn_stage_props,
-    sync_stage_props,
+    DynamicScriptProp, StagePropVisual, StageResource, StageSyncState, append_stage_sidecar_scripts,
+    load_stage_resource, spawn_stage_props, sync_stage_props,
 };
 use super::types::{PauseMode, PlayPhase, PlayStateParams, SongChart};
 
@@ -184,6 +184,7 @@ fn setup_play_scene(
     spawn_hud_camera(&mut commands);
 
     if !state.critical_failure {
+        let mut stage_script_source: Option<(String, std::path::PathBuf)> = None;
         if !state.is_minimal_mode {
             let stage_id = state.chart.stage_id.clone();
             let loaded_stage = match load_stage_resource(&mods, &stage_id, &asset_server, &mut layouts) {
@@ -250,6 +251,9 @@ fn setup_play_scene(
             );
             commands.insert_resource(chars);
             if let Some(stage) = loaded_stage {
+                if stage.scripts {
+                    stage_script_source = Some((stage.stage_id.clone(), stage.json_path.clone()));
+                }
                 commands.insert_resource(stage);
             }
         }
@@ -292,6 +296,7 @@ fn setup_play_scene(
             &mut script_host,
             &mut state,
             &mut playlist,
+            stage_script_source.as_ref(),
         );
         pending_ecs.0.extend(cmds);
     }
@@ -312,6 +317,7 @@ fn load_and_init_scripts(
     script_host: &mut ScriptHost,
     state: &mut PlayState,
     playlist: &mut PlayStatePlaylist,
+    stage_script_source: Option<&(String, std::path::PathBuf)>,
 ) -> Vec<ScriptCommand> {
     let mut char_ids: Vec<&str> = Vec::new();
     for id in &state.chart.characters.players {
@@ -352,13 +358,17 @@ fn load_and_init_scripts(
         let _ = mod_store.load_namespace(mod_id);
     }
 
-    let discovered = mods.scripts_for_context(
+    let mut discovered = mods.scripts_for_context(
         &state.chart.song_id,
         (!state.chart.stage_id.is_empty()).then_some(state.chart.stage_id.as_str()),
         &char_ids,
         &note_kind_vec,
         &event_vec,
     );
+    if let Some((stage_id, json_path)) = stage_script_source {
+        let supported = script_host.supported_extensions();
+        append_stage_sidecar_scripts(mods, stage_id, json_path, &supported, &mut discovered);
+    }
     script_host.load_discovered(&discovered);
     for err in &script_host.compile_errors {
         warn!("Script compile error: {err}");
@@ -403,6 +413,7 @@ fn handle_play_input(
     mut pending_ecs: ResMut<PendingEcsScriptCommands>,
     mut state: ResMut<PlayState>,
     mut playlist: ResMut<PlayStatePlaylist>,
+    stage_res: Option<Res<StageResource>>,
     dyn_props: Query<Entity, With<DynamicScriptProp>>,
 ) {
     if controls.just_pressed(&keys, Action::ReloadMods) {
@@ -428,12 +439,17 @@ fn handle_play_input(
         for (_, err) in &mods.disabled_mods {
             warn!("Disabled mod during reload: {err}");
         }
+        let stage_script_source = stage_res
+            .as_deref()
+            .filter(|s| s.scripts)
+            .map(|s| (s.stage_id.clone(), s.json_path.clone()));
         let cmds = load_and_init_scripts(
             &mods,
             &mut mod_store,
             &mut script_host,
             &mut state,
             &mut playlist,
+            stage_script_source.as_ref(),
         );
         pending_ecs.0.extend(cmds);
         state.status_message = format!(

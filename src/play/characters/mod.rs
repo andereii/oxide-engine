@@ -4,8 +4,6 @@ pub mod loader;
 pub mod schema;
 pub mod spawn;
 pub mod sync;
-#[cfg(test)]
-mod tests;
 
 pub use behavior::CharacterActor;
 pub use loader::load_characters_resource;

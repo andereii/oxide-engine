@@ -21,6 +21,7 @@ pub struct StageData {
     pub name: String,
     pub camera_zoom: f32,
     pub coord_mode: StageCoordMode,
+    pub scripts: bool,
     pub characters: StageCharacters,
     pub props: Vec<StagePropData>,
 }
