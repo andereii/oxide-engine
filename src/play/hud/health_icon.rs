@@ -6,7 +6,7 @@ use oxin_app::resolve_assets_dir;
 
 use crate::animations::{AnimationController, SparrowAtlas};
 use crate::play::characters::schema::{CharacterRole, HealthIconData};
-use crate::play::characters::CharactersResource;
+use crate::play::characters::loader::CharactersResource;
 use crate::utils::constants::{
     DEFAULT_HEALTH_ICON, HEALTH_ICON_ANGLE_HALF_LIFE, HEALTH_ICON_BOP_SCALE,
     HEALTH_ICON_LOSING_THRESHOLD, HEALTH_ICON_POSITION_OFFSET, HEALTH_ICON_SIZE,

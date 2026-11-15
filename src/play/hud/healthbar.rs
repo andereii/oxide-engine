@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
-use crate::play::characters::CharactersResource;
+use crate::play::characters::loader::CharactersResource;
 use crate::play::scene::PlayState;
 use crate::utils::constants::{
     COLOR_HEALTH_BAR_GREEN, COLOR_HEALTH_BAR_RED, HEALTH_BAR_BORDER_PX,

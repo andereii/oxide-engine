@@ -13,7 +13,7 @@ pub fn hud_render_layer() -> RenderLayers {
 #[derive(Component)]
 pub struct HudCamera;
 
-pub fn spawn_hud_camera(mut commands: Commands) {
+pub fn spawn_hud_camera(commands: &mut Commands) {
     commands.spawn((
         Camera2d,
         Camera {
