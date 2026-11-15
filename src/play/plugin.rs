@@ -147,13 +147,7 @@ fn setup_play_scene(
                 &mut layouts,
             );
             spawn_characters(&mut commands, &chars);
-            spawn_health_bar(
-                &mut commands,
-                Some(&chars),
-                &state.player_strumline.note_style,
-                &asset_server,
-                &mut layouts,
-            );
+            spawn_health_bar(&mut commands, Some(&chars), &state.player_strumline.note_style, &asset_server, &mut layouts);
             commands.insert_resource(chars);
             if let Some(stage) = loaded_stage {
                 commands.insert_resource(stage);
@@ -202,6 +196,7 @@ fn handle_play_input(
         return;
     }
 
+    if state.is_bot_play_mode { return; }
     let pos_ms = state.conductor.song_position_ms;
     precise.poll_keyboard(&keys, pos_ms);
 

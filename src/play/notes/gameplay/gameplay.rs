@@ -103,7 +103,7 @@ impl PlayState {
         if self.input_press_queue.is_empty() && self.input_release_queue.is_empty() {
             return;
         }
-        if self.is_in_cutscene || self.disable_keys {
+        if self.is_in_cutscene || self.disable_keys || self.is_bot_play_mode {
             self.input_press_queue.clear();
             self.input_release_queue.clear();
             return;
