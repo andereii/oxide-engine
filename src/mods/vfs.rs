@@ -13,6 +13,9 @@ use super::loader::{
 };
 use super::manifest::{ModError, ModManifest, load_manifest_for_dir};
 
+const POLYMOD_APPEND_DIR: &str = "_append";
+const POLYMOD_MERGE_DIR: &str = "_merge";
+
 #[derive(Debug, Clone)]
 pub struct LoadedMod {
     pub manifest: ModManifest,
@@ -157,20 +160,26 @@ impl ModRegistry {
         Ok(out)
     }
 
-    /// Searches mods from highest precedence (end of list) to lowest, falling back to `assets_dir`.
-    pub fn resolve_file(&self, rel: &str) -> Option<PathBuf> {
-        let normalized = Self::normalize_rel_path(rel).ok()?;
+    fn resolve_file_normalized(&self, normalized: &Path) -> Option<PathBuf> {
         for loaded_mod in self.mods.iter().rev() {
-            let candidate = loaded_mod.root.join(&normalized);
+            let candidate = loaded_mod.root.join(normalized);
             if candidate.is_file() {
                 return Some(candidate);
             }
         }
-        let base_candidate = self.assets_dir.join(&normalized);
-        if base_candidate.is_file() {
-            return Some(base_candidate);
+        if !self.assets_dir.as_os_str().is_empty() {
+            let base_candidate = self.assets_dir.join(normalized);
+            if base_candidate.is_file() {
+                return Some(base_candidate);
+            }
         }
         None
+    }
+
+    /// Searches mods from highest precedence (end of list) to lowest, falling back to `assets_dir`.
+    pub fn resolve_file(&self, rel: &str) -> Option<PathBuf> {
+        let normalized = Self::normalize_rel_path(rel).ok()?;
+        self.resolve_file_normalized(&normalized)
     }
 
     pub fn resolve_dir(&self, rel: &str) -> Option<PathBuf> {
@@ -224,11 +233,164 @@ impl ModRegistry {
         None
     }
 
+    fn read_file_string(path: &Path) -> Result<String, ModError> {
+        fs::read_to_string(path).map_err(|source| ModError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
+
+    fn is_json_path(path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+    }
+
+    fn merge_json_value(target: &mut serde_json::Value, overlay: serde_json::Value) {
+        match (target, overlay) {
+            (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
+                for (key, value) in overlay_map {
+                    match base_map.get_mut(&key) {
+                        Some(existing) => Self::merge_json_value(existing, value),
+                        None => {
+                            base_map.insert(key, value);
+                        }
+                    }
+                }
+            }
+            (serde_json::Value::Array(base_arr), serde_json::Value::Array(overlay_arr)) => {
+                base_arr.extend(overlay_arr);
+            }
+            (slot, value) => {
+                *slot = value;
+            }
+        }
+    }
+
+    fn append_text_fragment(base: &mut String, raw_fragment: &str) {
+        let fragment = raw_fragment.trim_start_matches('\u{feff}');
+        if fragment.trim().is_empty() {
+            return;
+        }
+        if base.is_empty() {
+            base.push_str(fragment);
+            return;
+        }
+        if !base.ends_with('\n') && !fragment.starts_with('\n') && !fragment.starts_with("\r\n") {
+            base.push('\n');
+        }
+        base.push_str(fragment);
+    }
+
+    fn append_text_lines(base: &mut String, raw_fragment: &str) {
+        let fragment = raw_fragment.trim_start_matches('\u{feff}');
+        let lines: Vec<&str> = fragment
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        if lines.is_empty() {
+            return;
+        }
+        let preserve_trailing_newline = base.ends_with('\n') || fragment.ends_with('\n');
+        if !base.is_empty() && !base.ends_with('\n') {
+            base.push('\n');
+        }
+        base.push_str(&lines.join("\n"));
+        if preserve_trailing_newline {
+            base.push('\n');
+        }
+    }
+
     pub fn read_to_string(&self, rel: &str) -> Result<String, ModError> {
         let path = self
             .resolve_file(rel)
             .ok_or_else(|| ModError::NotFound(rel.to_string()))?;
-        fs::read_to_string(&path).map_err(|source| ModError::Io { path, source })
+        Self::read_file_string(&path)
+    }
+
+    fn apply_json_merges(
+        &self,
+        base_path: &Path,
+        normalized: &Path,
+        content: &mut String,
+    ) -> Result<(), ModError> {
+        let mut merged_json: Option<serde_json::Value> = None;
+        for loaded_mod in &self.mods {
+            let merge_path = loaded_mod.root.join(POLYMOD_MERGE_DIR).join(normalized);
+            if !merge_path.is_file() {
+                continue;
+            }
+            let raw_overlay = Self::read_file_string(&merge_path)?;
+            let trimmed_overlay = raw_overlay.trim_start_matches('\u{feff}');
+            if trimmed_overlay.trim().is_empty() {
+                continue;
+            }
+            let target = match &mut merged_json {
+                Some(existing) => existing,
+                None => {
+                    let base_val: serde_json::Value =
+                        serde_json::from_str(content.trim_start_matches('\u{feff}')).map_err(
+                            |source| ModError::InvalidJson {
+                                path: base_path.to_path_buf(),
+                                source,
+                            },
+                        )?;
+                    merged_json.insert(base_val)
+                }
+            };
+            let overlay_val: serde_json::Value =
+                serde_json::from_str(trimmed_overlay).map_err(|source| ModError::InvalidJson {
+                    path: merge_path,
+                    source,
+                })?;
+            Self::merge_json_value(target, overlay_val);
+        }
+        if let Some(final_json) = merged_json {
+            *content = serde_json::to_string_pretty(&final_json).map_err(|source| {
+                ModError::InvalidJson {
+                    path: base_path.to_path_buf(),
+                    source,
+                }
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Reads the highest-priority base/override file for `rel`, then applies Polymod-style
+    /// `_merge/<rel>` and non-empty `_append/<rel>` overlays across active mods in priority order.
+    pub fn read_to_string_merged(&self, rel: &str) -> Result<String, ModError> {
+        let normalized = Self::normalize_rel_path(rel)?;
+        let base_path = self
+            .resolve_file_normalized(&normalized)
+            .ok_or_else(|| ModError::NotFound(rel.to_string()))?;
+        let mut content = Self::read_file_string(&base_path)?;
+
+        if Self::is_json_path(&normalized) {
+            self.apply_json_merges(&base_path, &normalized, &mut content)?;
+            for loaded_mod in &self.mods {
+                let append_path = loaded_mod.root.join(POLYMOD_APPEND_DIR).join(&normalized);
+                if append_path.is_file() {
+                    let fragment = Self::read_file_string(&append_path)?;
+                    Self::append_text_fragment(&mut content, &fragment);
+                }
+            }
+            return Ok(content);
+        }
+
+        for loaded_mod in &self.mods {
+            let merge_path = loaded_mod.root.join(POLYMOD_MERGE_DIR).join(&normalized);
+            if merge_path.is_file() {
+                let fragment = Self::read_file_string(&merge_path)?;
+                Self::append_text_lines(&mut content, &fragment);
+            }
+            let append_path = loaded_mod.root.join(POLYMOD_APPEND_DIR).join(&normalized);
+            if append_path.is_file() {
+                let fragment = Self::read_file_string(&append_path)?;
+                Self::append_text_fragment(&mut content, &fragment);
+            }
+        }
+
+        Ok(content)
     }
 
     pub fn file_exists(&self, rel: &str) -> bool {
@@ -289,6 +451,59 @@ impl ModRegistry {
         names.into_iter().collect()
     }
 
+    fn collect_files_recursive(dir: &Path, rel_prefix: &str, out: &mut BTreeSet<String>) {
+        if !dir.is_dir() {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            let rel_path = format!("{rel_prefix}/{name}");
+            if path.is_dir() {
+                Self::collect_files_recursive(&path, &rel_path, out);
+            } else if path.is_file() {
+                out.insert(rel_path);
+            }
+        }
+    }
+
+    /// Returns deduplicated, sorted, normalized relative file paths under `rel_dir`
+    /// across `assets_dir` and all active mods, returning empty on invalid/traversal paths.
+    pub fn list_mod_files_in(&self, rel_dir: &str) -> Vec<String> {
+        let Ok(normalized) = Self::normalize_rel_path(rel_dir) else {
+            return Vec::new();
+        };
+        let rel_prefix = normalized.to_string_lossy().replace('\\', "/");
+        let mut files = BTreeSet::new();
+
+        if !self.assets_dir.as_os_str().is_empty() {
+            Self::collect_files_recursive(
+                &self.assets_dir.join(&normalized),
+                &rel_prefix,
+                &mut files,
+            );
+        }
+        for loaded_mod in &self.mods {
+            if !loaded_mod.root.as_os_str().is_empty() {
+                Self::collect_files_recursive(
+                    &loaded_mod.root.join(&normalized),
+                    &rel_prefix,
+                    &mut files,
+                );
+            }
+        }
+
+        files.into_iter().collect()
+    }
+
     pub fn list_songs(&self) -> Vec<String> {
         let mut songs = BTreeSet::new();
         let collect_songs = |dir: PathBuf, out: &mut BTreeSet<String>| {
@@ -332,12 +547,10 @@ impl ModRegistry {
                         character_ids.iter().any(|c| c.eq_ignore_ascii_case(target))
                     }
                     ScriptScope::NoteKind(target) => {
-                        note_kinds.is_empty()
-                            || note_kinds.iter().any(|k| k.eq_ignore_ascii_case(target))
+                        note_kinds.iter().any(|k| k.eq_ignore_ascii_case(target))
                     }
                     ScriptScope::Event(target) => {
-                        event_names.is_empty()
-                            || event_names.iter().any(|e| e.eq_ignore_ascii_case(target))
+                        event_names.iter().any(|e| e.eq_ignore_ascii_case(target))
                     }
                 };
                 if matches {

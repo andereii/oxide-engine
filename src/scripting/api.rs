@@ -6,6 +6,11 @@ use crate::mods::{ModRegistry, ModStore};
 use crate::utils::constants::{DEFAULT_BPM, DEFAULT_CAMERA_ZOOM, DEFAULT_DIFFICULTY, DEFAULT_VARIATION, HEALTH_STARTING, MS_PER_SEC, STEPS_PER_BEAT};
 use crate::utils::easing::EaseKind;
 
+use super::value::ScriptValue;
+
+/// Maximum nested recursion depth allowed when scripts trigger custom hooks via `emit(...)`.
+pub const MAX_CUSTOM_HOOK_DEPTH: usize = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TweenProp {
     X,
@@ -190,6 +195,36 @@ impl Default for ScriptStateSnapshot {
             prop_angles: BTreeMap::new(),
             prop_alphas: BTreeMap::new(),
         }
+    }
+}
+
+impl ScriptStateSnapshot {
+    /// Continuous floating-point beat position (`song_position_ms / beat_length_ms`).
+    pub fn beat_f(&self) -> f64 {
+        if self.beat_length_ms > 0.0 {
+            self.song_position_ms / self.beat_length_ms
+        } else {
+            0.0
+        }
+    }
+
+    /// Continuous floating-point step position (`song_position_ms / step_length_ms`).
+    pub fn step_f(&self) -> f64 {
+        if self.step_length_ms > 0.0 {
+            self.song_position_ms / self.step_length_ms
+        } else {
+            self.beat_f() * f64::from(STEPS_PER_BEAT)
+        }
+    }
+
+    /// Beat-synced sine wave `amp * sin(beat_f() * mult * TAU)`, where `mult` is cycles per beat.
+    pub fn sin_beat(&self, mult: f64, amp: f64) -> f64 {
+        (self.beat_f() * mult * std::f64::consts::TAU).sin() * amp
+    }
+
+    /// Beat-synced cosine wave `amp * cos(beat_f() * mult * TAU)`, where `mult` is cycles per beat.
+    pub fn cos_beat(&self, mult: f64, amp: f64) -> f64 {
+        (self.beat_f() * mult * std::f64::consts::TAU).cos() * amp
     }
 }
 
@@ -394,6 +429,15 @@ pub struct NewTimerRequest {
     pub repeats_left: Option<u32>,
 }
 
+/// Cross-script custom hook request queued by a script calling `emit(name[, val])`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CustomHookRequest {
+    pub name: String,
+    pub data: ScriptValue,
+    pub sender_script_id: String,
+    pub sender_mod_id: String,
+}
+
 /// Self-contained execution context handed to every scripting backend during hook execution.
 /// Future backends (Lua, Wasm) bind directly against this struct without needing Rhai types.
 pub struct ScriptContext {
@@ -406,6 +450,7 @@ pub struct ScriptContext {
     pub cancel_tween_targets: Vec<TweenTarget>,
     pub new_timers: Vec<NewTimerRequest>,
     pub cancel_timers_for_fn: Vec<(String, String)>,
+    pub pending_custom_hooks: Vec<CustomHookRequest>,
     pub registry: ModRegistry,
     pub store: ModStore,
     pub rng_state: u64,
@@ -429,10 +474,21 @@ impl ScriptContext {
             cancel_tween_targets: Vec::new(),
             new_timers: Vec::new(),
             cancel_timers_for_fn: Vec::new(),
+            pending_custom_hooks: Vec::new(),
             registry,
             store,
             rng_state: if rng_state == 0 { 0x9E37_79B9_7F4A_7C15 } else { rng_state },
         }
+    }
+
+    /// Queues a `HookKind::Custom(name)` dispatch to run after the current hook completes.
+    pub fn emit_custom_hook(&mut self, name: impl Into<String>, data: ScriptValue) {
+        self.pending_custom_hooks.push(CustomHookRequest {
+            name: name.into(),
+            data,
+            sender_script_id: self.current_script_id.clone(),
+            sender_mod_id: self.current_mod_id.clone(),
+        });
     }
 
     pub fn next_rand_u64(&mut self) -> u64 {
@@ -564,6 +620,29 @@ pub fn parse_hex_rgba(raw: &str) -> [f32; 4] {
     }
 }
 
+/// Linear interpolation `a + (b - a) * t` shared across scripting backends.
+pub fn script_lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
+/// Clamps `v` into `[min(lo, hi), max(lo, hi)]` without panicking on swapped bounds or `NaN`.
+pub fn script_clamp(v: f64, lo: f64, hi: f64) -> f64 {
+    if v.is_nan() || lo.is_nan() || hi.is_nan() {
+        return v;
+    }
+    v.clamp(lo.min(hi), lo.max(hi))
+}
+
+/// Remaps `v` from `[in_lo, in_hi]` onto `[out_lo, out_hi]`, returning `out_lo` on zero-width spans.
+pub fn script_remap(v: f64, in_lo: f64, in_hi: f64, out_lo: f64, out_hi: f64) -> f64 {
+    let span = in_hi - in_lo;
+    if span.abs() < f64::EPSILON {
+        return out_lo;
+    }
+    let t = (v - in_lo) / span;
+    script_lerp(out_lo, out_hi, t)
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct ScriptApiDoc {
     pub name: &'static str,
@@ -571,6 +650,9 @@ pub struct ScriptApiDoc {
     pub category: &'static str,
     pub summary: &'static str,
 }
+
+/// Cross-backend catalog entry type alias used for ABI documentation and verification.
+pub type ScriptApiCatalogEntry = ScriptApiDoc;
 
 /// Authoritative API catalog shared across backends (Rhai today; Lua/Wasm in the future).
 pub const SCRIPT_API_CATALOG: &[ScriptApiDoc] = &[
@@ -581,6 +663,9 @@ pub const SCRIPT_API_CATALOG: &[ScriptApiDoc] = &[
     ScriptApiDoc { name: "time", signature: "time() -> f64", category: "song", summary: "Song position in ms" },
     ScriptApiDoc { name: "step", signature: "step() -> i64", category: "song", summary: "Current step" },
     ScriptApiDoc { name: "beat", signature: "beat() -> i64", category: "song", summary: "Current beat" },
+    ScriptApiDoc { name: "beat_f", signature: "beat_f() -> f64", category: "song", summary: "Continuous floating-point beat (song_position_ms / beat_length_ms)" },
+    ScriptApiDoc { name: "step_f", signature: "step_f() -> f64", category: "song", summary: "Continuous floating-point step (song_position_ms / step_length_ms)" },
+    ScriptApiDoc { name: "emit", signature: "emit(name) / emit(name, val)", category: "events", summary: "Dispatch HookKind::Custom(name) across loaded scripts" },
     ScriptApiDoc { name: "hp", signature: "hp() / set_hp(v) / add_hp(d)", category: "gameplay", summary: "Health control" },
     ScriptApiDoc { name: "score", signature: "score() / set_score(v) / add_score(d)", category: "gameplay", summary: "Score control" },
     ScriptApiDoc { name: "cam_zoom", signature: "cam_zoom() / set_zoom(z) / zoom(z, s, ease)", category: "camera", summary: "Camera zoom and tweens" },
@@ -593,4 +678,9 @@ pub const SCRIPT_API_CATALOG: &[ScriptApiDoc] = &[
     ScriptApiDoc { name: "tween", signature: "tween(target, prop, to, secs, ease)", category: "tween", summary: "Unified property tween" },
     ScriptApiDoc { name: "after", signature: "after(secs, fn_name) / every(secs, fn_name, count)", category: "timer", summary: "Scheduled script callbacks" },
     ScriptApiDoc { name: "save_get", signature: "save_get(k) / save_set(k, v) / save_flush()", category: "store", summary: "Mod-scoped persistent storage" },
+    ScriptApiDoc { name: "lerp", signature: "lerp(a, b, t) -> f64", category: "math", summary: "Linear interpolation a + (b - a) * t" },
+    ScriptApiDoc { name: "clamp", signature: "clamp(v, lo, hi) -> f64", category: "math", summary: "Clamp value v between lo and hi" },
+    ScriptApiDoc { name: "remap", signature: "remap(v, in_lo, in_hi, out_lo, out_hi) -> f64", category: "math", summary: "Remap v from [in_lo, in_hi] to [out_lo, out_hi]" },
+    ScriptApiDoc { name: "sin_beat", signature: "sin_beat(mult, amp) -> f64", category: "math", summary: "Beat-synced sine wave amp * sin(beat_f() * mult * TAU)" },
+    ScriptApiDoc { name: "cos_beat", signature: "cos_beat(mult, amp) -> f64", category: "math", summary: "Beat-synced cosine wave amp * cos(beat_f() * mult * TAU)" },
 ];

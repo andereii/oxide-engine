@@ -5,8 +5,8 @@ use bevy::prelude::Resource;
 use crate::mods::{DiscoveredScript, ModRegistry, ModStore};
 
 use super::api::{
-    LogLevel, PropertyTween, ScriptCommand, ScriptContext, ScriptStateSnapshot, ScriptTimer,
-    TweenProp, TweenTarget,
+    LogLevel, MAX_CUSTOM_HOOK_DEPTH, PropertyTween, ScriptCommand, ScriptContext,
+    ScriptStateSnapshot, ScriptTimer, TweenProp, TweenTarget,
 };
 use super::backend::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
 use super::events::{HookKind, ScriptEvent};
@@ -133,6 +133,16 @@ impl ScriptHost {
         event: &mut ScriptEvent,
         ctx: &mut ScriptContext,
     ) {
+        self.dispatch_at_depth(hook, event, ctx, 0);
+    }
+
+    fn dispatch_at_depth(
+        &mut self,
+        hook: &HookKind,
+        event: &mut ScriptEvent,
+        ctx: &mut ScriptContext,
+        depth: usize,
+    ) {
         let is_create = matches!(hook, HookKind::Create);
         for inst in &mut self.instances {
             if event.propagation_stopped {
@@ -151,7 +161,7 @@ impl ScriptHost {
                 });
             }
         }
-        self.absorb_context_requests(ctx);
+        self.absorb_context_requests(ctx, depth);
     }
 
     pub fn tick_timers_and_tweens(&mut self, dt_s: f64, ctx: &mut ScriptContext) {
@@ -193,7 +203,7 @@ impl ScriptHost {
                 });
             }
         }
-        self.absorb_context_requests(ctx);
+        self.absorb_context_requests(ctx, 0);
     }
 
     pub fn call_fn_on_script(
@@ -217,7 +227,7 @@ impl ScriptHost {
                 None
             }
         };
-        self.absorb_context_requests(ctx);
+        self.absorb_context_requests(ctx, 0);
         out
     }
 
@@ -236,7 +246,7 @@ impl ScriptHost {
         ctx
     }
 
-    fn absorb_context_requests(&mut self, ctx: &mut ScriptContext) {
+    fn absorb_context_requests(&mut self, ctx: &mut ScriptContext, depth: usize) {
         if !ctx.cancel_tween_targets.is_empty() {
             let targets = std::mem::take(&mut ctx.cancel_tween_targets);
             self.tweens.retain(|t| !targets.contains(&t.target));
@@ -269,6 +279,44 @@ impl ScriptHost {
                 remaining_s: req.interval_s,
                 repeats_left: req.repeats_left,
             });
+        }
+
+        self.flush_pending_custom_hooks(ctx, depth);
+    }
+
+    fn flush_pending_custom_hooks(&mut self, ctx: &mut ScriptContext, depth: usize) {
+        let queued = std::mem::take(&mut ctx.pending_custom_hooks);
+        if queued.is_empty() {
+            return;
+        }
+        // Bound nested custom-hook cascades so cyclic/self-triggering `emit(...)` calls cannot hang.
+        if depth >= MAX_CUSTOM_HOOK_DEPTH {
+            for req in queued {
+                let msg = format!(
+                    "custom hook '{}' exceeded max dispatch depth ({MAX_CUSTOM_HOOK_DEPTH})",
+                    req.name
+                );
+                self.runtime_errors.push(msg.clone());
+                ctx.commands.push(ScriptCommand::Log {
+                    level: LogLevel::Error,
+                    mod_id: req.sender_mod_id,
+                    message: msg,
+                });
+            }
+            return;
+        }
+        for req in queued {
+            let hook_name = req.name.trim();
+            if hook_name.is_empty() {
+                continue;
+            }
+            let hook = HookKind::Custom(hook_name.to_string());
+            let mut ev = ScriptEvent::new(hook.clone())
+                .with_field("name", hook_name)
+                .with_field("value", req.data.clone())
+                .with_field("data", req.data)
+                .with_field("source", req.sender_script_id);
+            self.dispatch_at_depth(&hook, &mut ev, ctx, depth + 1);
         }
     }
 }

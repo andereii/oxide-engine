@@ -13,7 +13,7 @@ use crate::utils::constants::{
 
 use super::api::{
     LogLevel, NewTimerRequest, ScriptCommand, ScriptContext, TweenProp, TweenTarget,
-    parse_hex_rgba,
+    parse_hex_rgba, script_clamp, script_lerp, script_remap,
 };
 use super::backend::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
 use super::events::{HookKind, ScriptEvent};
@@ -143,8 +143,15 @@ impl RhaiEvent {
 
     pub fn get(&mut self, key: &str) -> Dynamic {
         self.with_inner(|e| {
+            let alias = match key {
+                "note_kind" => Some("kind"),
+                "hold_len" => Some("length"),
+                "lane" => Some("dir"),
+                _ => None,
+            };
             e.data
                 .get(key)
+                .or_else(|| alias.and_then(|k| e.data.get(k)))
                 .cloned()
                 .map(ScriptValue::into_rhai)
                 .unwrap_or(Dynamic::UNIT)
@@ -173,8 +180,9 @@ fn register_event_type(engine: &mut Engine) {
     engine.register_indexer_set(|ev: &mut RhaiEvent, key: &str, val: Dynamic| ev.set(key, val));
 
     for prop in [
-        "dir", "note_kind", "score", "hp", "step", "beat", "measure", "dt", "name", "value",
-        "judgement", "lane", "char_id", "time", "hold_len", "count", "is_player",
+        "id", "dir", "note_kind", "length", "hold_len", "combo", "is_hold", "remaining_ms",
+        "health_change", "score_change", "score", "hp", "step", "beat", "measure", "dt", "name",
+        "value", "data", "source", "judgement", "lane", "char_id", "time", "count", "is_player",
     ] {
         engine.register_get(prop, move |ev: &mut RhaiEvent| -> Dynamic { ev.get(prop) });
         engine.register_set(prop, move |ev: &mut RhaiEvent, val: Dynamic| ev.set(prop, val));
@@ -216,7 +224,25 @@ fn register_core_and_song_api(engine: &mut Engine) {
     engine.register_fn("measure", || with_ctx(|c| i64::from(c.snapshot.measure)));
     engine.register_fn("step_ms", || with_ctx(|c| c.snapshot.step_length_ms));
     engine.register_fn("beat_ms", || with_ctx(|c| c.snapshot.beat_length_ms));
+    engine.register_fn("beat_f", || with_ctx(|c| c.snapshot.beat_f()));
+    engine.register_fn("step_f", || with_ctx(|c| c.snapshot.step_f()));
     engine.register_fn("dt", || with_ctx(|c| c.snapshot.dt_s));
+
+    engine.register_fn("emit", |name: &str| -> Result<(), Box<EvalAltResult>> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(runtime_err("custom hook name cannot be empty"));
+        }
+        with_ctx(|c| c.emit_custom_hook(trimmed, ScriptValue::Null))
+    });
+    engine.register_fn("emit", |name: &str, val: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(runtime_err("custom hook name cannot be empty"));
+        }
+        let data = ScriptValue::from_rhai(&val);
+        with_ctx(|c| c.emit_custom_hook(trimmed, data))
+    });
 
     engine.register_fn("mods", || {
         with_ctx(|c| {
@@ -886,6 +912,31 @@ fn register_props_tweens_timers_and_store_api(engine: &mut Engine) {
         let p = TweenProp::parse(prop)
             .ok_or_else(|| runtime_err(format!("unknown prop field '{prop}'")))?;
         with_ctx(|c| {
+            match p {
+                TweenProp::X => {
+                    let y = c.snapshot.prop_positions.get(id).map_or(0.0, |pos| pos[1]);
+                    c.snapshot.prop_positions.insert(id.to_string(), [v, y]);
+                }
+                TweenProp::Y => {
+                    let x = c.snapshot.prop_positions.get(id).map_or(0.0, |pos| pos[0]);
+                    c.snapshot.prop_positions.insert(id.to_string(), [x, v]);
+                }
+                TweenProp::ScaleX => {
+                    let sy = c.snapshot.prop_scales.get(id).map_or(1.0, |s| s[1]);
+                    c.snapshot.prop_scales.insert(id.to_string(), [v, sy]);
+                }
+                TweenProp::ScaleY => {
+                    let sx = c.snapshot.prop_scales.get(id).map_or(1.0, |s| s[0]);
+                    c.snapshot.prop_scales.insert(id.to_string(), [sx, v]);
+                }
+                TweenProp::Angle => {
+                    c.snapshot.prop_angles.insert(id.to_string(), v);
+                }
+                TweenProp::Alpha => {
+                    c.snapshot.prop_alphas.insert(id.to_string(), v.clamp(0.0, 1.0));
+                }
+                _ => {}
+            }
             c.commands.push(ScriptCommand::SetPropNumber {
                 id: id.to_string(),
                 prop: p,
@@ -1066,13 +1117,13 @@ fn register_math_and_rng_api(engine: &mut Engine) {
         let a = dyn_to_f64(&a)?;
         let b = dyn_to_f64(&b)?;
         let t = dyn_to_f64(&t)?;
-        Ok(a + (b - a) * t)
+        Ok(script_lerp(a, b, t))
     });
     engine.register_fn("clamp", |v: Dynamic, lo: Dynamic, hi: Dynamic| -> Result<f64, Box<EvalAltResult>> {
         let v = dyn_to_f64(&v)?;
         let lo = dyn_to_f64(&lo)?;
         let hi = dyn_to_f64(&hi)?;
-        Ok(v.clamp(lo.min(hi), lo.max(hi)))
+        Ok(script_clamp(v, lo, hi))
     });
     engine.register_fn(
         "remap",
@@ -1082,14 +1133,19 @@ fn register_math_and_rng_api(engine: &mut Engine) {
             let in1 = dyn_to_f64(&in1)?;
             let out0 = dyn_to_f64(&out0)?;
             let out1 = dyn_to_f64(&out1)?;
-            let span = in1 - in0;
-            if span.abs() < f64::EPSILON {
-                return Ok(out0);
-            }
-            let t = (v - in0) / span;
-            Ok(out0 + (out1 - out0) * t)
+            Ok(script_remap(v, in0, in1, out0, out1))
         },
     );
+    engine.register_fn("sin_beat", |mult: Dynamic, amp: Dynamic| -> Result<f64, Box<EvalAltResult>> {
+        let mult = dyn_to_f64(&mult)?;
+        let amp = dyn_to_f64(&amp)?;
+        with_ctx(|c| c.snapshot.sin_beat(mult, amp))
+    });
+    engine.register_fn("cos_beat", |mult: Dynamic, amp: Dynamic| -> Result<f64, Box<EvalAltResult>> {
+        let mult = dyn_to_f64(&mult)?;
+        let amp = dyn_to_f64(&amp)?;
+        with_ctx(|c| c.snapshot.cos_beat(mult, amp))
+    });
     engine.register_fn("rand", || with_ctx(|c| c.next_rand_f64()));
     engine.register_fn("rand_range", |lo: Dynamic, hi: Dynamic| -> Result<f64, Box<EvalAltResult>> {
         let lo = dyn_to_f64(&lo)?;

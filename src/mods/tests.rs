@@ -9,7 +9,7 @@ use crate::utils::constants::{
     SCRIPT_EXT_RHAI,
 };
 
-use super::{ModRegistry, ModStore, ScriptScope};
+use super::{ModError, ModRegistry, ModStore, ScriptScope};
 
 struct TempWorkspace {
     root: PathBuf,
@@ -47,6 +47,13 @@ fn write_text(path: &Path, content: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, content).unwrap();
+}
+
+fn write_mod_manifest(mods_dir: &Path, mod_id: &str, priority: i32, enabled: bool) {
+    write_text(
+        &mods_dir.join(mod_id).join(MOD_MANIFEST_TOML),
+        &format!("id = \"{mod_id}\"\npriority = {priority}\nenabled = {enabled}\n"),
+    );
 }
 
 #[test]
@@ -238,4 +245,334 @@ fn scoped_script_discovery_and_store_roundtrip() {
         reloaded_store.get(mod_id, "bestCombo").and_then(|v| v.as_i64()),
         Some(42)
     );
+}
+
+#[test]
+fn polymod_append_applies_in_priority_order_on_override_and_skips_empty_or_disabled() {
+    let ws = TempWorkspace::new("polymod_append");
+    let dir_name = format!("dir_{}", std::process::id());
+    let file_rel = format!("{dir_name}/entries.txt");
+    let assets_only_rel = format!("{dir_name}/assets_entries.txt");
+    let orphan_rel = format!("{dir_name}/orphan.txt");
+
+    let base_line = format!("base_{}", ws.root.file_name().unwrap().to_string_lossy());
+    let override_line = format!("override_{}", DEFAULT_MOD_PRIORITY - 20);
+    let low_line = format!("low_{}", DEFAULT_MOD_PRIORITY - 10);
+    let high_line = format!("high_{}", DEFAULT_MOD_PRIORITY + 10);
+    let disabled_line = "disabled_fragment";
+
+    write_text(&ws.assets.join(&file_rel), &base_line);
+    write_text(&ws.assets.join(&assets_only_rel), &base_line);
+
+    let mod_override = "mod-override";
+    let mod_low = "mod-low";
+    let mod_blank = "mod-blank";
+    let mod_high = "mod-high";
+    let mod_off = "mod-off";
+
+    write_mod_manifest(&ws.mods, mod_override, DEFAULT_MOD_PRIORITY - 20, true);
+    write_text(&ws.mods.join(mod_override).join(&file_rel), &override_line);
+
+    write_mod_manifest(&ws.mods, mod_low, DEFAULT_MOD_PRIORITY - 10, true);
+    write_text(
+        &ws.mods.join(mod_low).join("_append").join(&file_rel),
+        &low_line,
+    );
+    write_text(
+        &ws.mods.join(mod_low).join("_append").join(&assets_only_rel),
+        &low_line,
+    );
+
+    write_mod_manifest(&ws.mods, mod_blank, DEFAULT_MOD_PRIORITY, true);
+    write_text(
+        &ws.mods.join(mod_blank).join("_append").join(&file_rel),
+        "   \n\t\n",
+    );
+
+    write_mod_manifest(&ws.mods, mod_high, DEFAULT_MOD_PRIORITY + 10, true);
+    write_text(
+        &ws.mods.join(mod_high).join("_append").join(&file_rel),
+        &high_line,
+    );
+    write_text(
+        &ws.mods.join(mod_high).join("_append").join(&orphan_rel),
+        &high_line,
+    );
+
+    write_mod_manifest(&ws.mods, mod_off, DEFAULT_MOD_PRIORITY + 50, false);
+    write_text(
+        &ws.mods.join(mod_off).join("_append").join(&file_rel),
+        disabled_line,
+    );
+
+    let registry = ModRegistry::discover(ws.assets.clone(), ws.mods.clone());
+    assert_eq!(registry.read_to_string(&file_rel).unwrap(), override_line);
+
+    let expected_override_merged =
+        [override_line.as_str(), low_line.as_str(), high_line.as_str()].join("\n");
+    assert_eq!(
+        registry.read_to_string_merged(&file_rel).unwrap(),
+        expected_override_merged
+    );
+
+    let expected_assets_merged = [base_line.as_str(), low_line.as_str()].join("\n");
+    assert_eq!(
+        registry.read_to_string_merged(&assets_only_rel).unwrap(),
+        expected_assets_merged
+    );
+
+    assert!(matches!(
+        registry.read_to_string_merged(&orphan_rel),
+        Err(ModError::NotFound(_))
+    ));
+    assert!(matches!(
+        registry.read_to_string_merged(&format!("../{file_rel}")),
+        Err(ModError::InvalidPath(_))
+    ));
+}
+
+#[test]
+fn polymod_merge_json_merges_objects_recursively_and_concats_arrays() {
+    let ws = TempWorkspace::new("polymod_merge_json");
+    let group = format!("cfg_{}", std::process::id());
+    let obj_rel = format!("{group}/meta.json");
+    let arr_rel = format!("{group}/list.json");
+    let bad_rel = format!("{group}/broken.json");
+
+    let base_title = format!("title_{}", DEFAULT_MOD_PRIORITY);
+    let base_artist = "base_artist";
+    let low_artist = "low_artist";
+    let base_bpm = 120;
+    let high_bpm = 165;
+    let tag_base = "tag_base";
+    let tag_low = "tag_low";
+    let tag_high = "tag_high";
+    let bom_flag = true;
+
+    let base_obj = serde_json::json!({
+        "title": base_title,
+        "details": {
+            "artist": base_artist,
+            "bpm": base_bpm
+        },
+        "tags": [tag_base]
+    });
+    let low_obj = serde_json::json!({
+        "details": {
+            "artist": low_artist,
+            "bpm": base_bpm + 10,
+            "charter": "low_charter"
+        },
+        "tags": [tag_low]
+    });
+    let high_obj = serde_json::json!({
+        "details": {
+            "bpm": high_bpm
+        },
+        "tags": [tag_high]
+    });
+    let bom_obj = serde_json::json!({
+        "bomHandled": bom_flag
+    });
+
+    write_text(&ws.assets.join(&obj_rel), &base_obj.to_string());
+    write_text(
+        &ws.assets.join(&arr_rel),
+        &serde_json::json!([tag_base]).to_string(),
+    );
+    write_text(&ws.assets.join(&bad_rel), &serde_json::json!({"ok": true}).to_string());
+
+    let mod_low = "json-low";
+    let mod_blank = "json-blank";
+    let mod_high = "json-high";
+    let mod_bom = "json-bom";
+
+    write_mod_manifest(&ws.mods, mod_low, DEFAULT_MOD_PRIORITY - 20, true);
+    write_text(
+        &ws.mods.join(mod_low).join("_merge").join(&obj_rel),
+        &low_obj.to_string(),
+    );
+    write_text(
+        &ws.mods.join(mod_low).join("_merge").join(&arr_rel),
+        &serde_json::json!([tag_low]).to_string(),
+    );
+
+    write_mod_manifest(&ws.mods, mod_blank, DEFAULT_MOD_PRIORITY - 10, true);
+    write_text(
+        &ws.mods.join(mod_blank).join("_merge").join(&obj_rel),
+        "   \n",
+    );
+
+    write_mod_manifest(&ws.mods, mod_high, DEFAULT_MOD_PRIORITY + 10, true);
+    write_text(
+        &ws.mods.join(mod_high).join("_merge").join(&obj_rel),
+        &high_obj.to_string(),
+    );
+    write_text(
+        &ws.mods.join(mod_high).join("_merge").join(&arr_rel),
+        &serde_json::json!([tag_high]).to_string(),
+    );
+    write_text(
+        &ws.mods.join(mod_high).join("_merge").join(&bad_rel),
+        "{not_valid_json",
+    );
+
+    write_mod_manifest(&ws.mods, mod_bom, DEFAULT_MOD_PRIORITY + 20, true);
+    write_text(
+        &ws.mods.join(mod_bom).join("_merge").join(&obj_rel),
+        &format!("\u{feff}{bom_obj}"),
+    );
+
+    let registry = ModRegistry::discover(ws.assets.clone(), ws.mods.clone());
+
+    let merged_obj_raw = registry.read_to_string_merged(&obj_rel).unwrap();
+    let merged_obj: serde_json::Value = serde_json::from_str(&merged_obj_raw).unwrap();
+    let expected_obj = serde_json::json!({
+        "title": base_title,
+        "details": {
+            "artist": low_artist,
+            "bpm": high_bpm,
+            "charter": "low_charter"
+        },
+        "tags": [tag_base, tag_low, tag_high],
+        "bomHandled": bom_flag
+    });
+    assert_eq!(merged_obj, expected_obj);
+
+    let merged_arr_raw = registry.read_to_string_merged(&arr_rel).unwrap();
+    let merged_arr: serde_json::Value = serde_json::from_str(&merged_arr_raw).unwrap();
+    assert_eq!(merged_arr, serde_json::json!([tag_base, tag_low, tag_high]));
+
+    assert!(matches!(
+        registry.read_to_string_merged(&bad_rel),
+        Err(ModError::InvalidJson { .. })
+    ));
+}
+
+#[test]
+fn polymod_merge_plain_text_tsv_and_mixed_overlays_respect_priority_order() {
+    let ws = TempWorkspace::new("polymod_merge_text");
+    let dir_name = format!("text_{}", std::process::id());
+    let txt_rel = format!("{dir_name}/lines.txt");
+    let tsv_rel = format!("{dir_name}/rows.tsv");
+    let plain_rel = format!("{dir_name}/notes");
+
+    let txt_base = format!("base_{}", DEFAULT_MOD_PRIORITY);
+    let txt_low_1 = "low_merge_1";
+    let txt_low_2 = "low_merge_2";
+    let txt_high = "high_append_3";
+
+    let tsv_header = "col_a\tcol_b";
+    let tsv_base_row = "r0\tv0";
+    let tsv_low_row = "r1\tv1";
+    let tsv_high_row = "r2\tv2";
+
+    let plain_base = "plain_0";
+    let plain_merge = "plain_1";
+
+    write_text(&ws.assets.join(&txt_rel), &format!("{txt_base}\n"));
+    write_text(
+        &ws.assets.join(&tsv_rel),
+        &format!("{tsv_header}\n{tsv_base_row}"),
+    );
+    write_text(&ws.assets.join(&plain_rel), plain_base);
+
+    let mod_low = "txt-low";
+    let mod_high = "txt-high";
+
+    write_mod_manifest(&ws.mods, mod_low, DEFAULT_MOD_PRIORITY - 15, true);
+    write_text(
+        &ws.mods.join(mod_low).join("_merge").join(&txt_rel),
+        &format!("\r\n{txt_low_1}\r\n\r\n{txt_low_2}\r\n"),
+    );
+    write_text(
+        &ws.mods.join(mod_low).join("_merge").join(&tsv_rel),
+        &format!("{tsv_low_row}\n"),
+    );
+    write_text(
+        &ws.mods.join(mod_low).join("_merge").join(&plain_rel),
+        plain_merge,
+    );
+
+    write_mod_manifest(&ws.mods, mod_high, DEFAULT_MOD_PRIORITY + 15, true);
+    write_text(
+        &ws.mods.join(mod_high).join("_append").join(&txt_rel),
+        txt_high,
+    );
+    write_text(
+        &ws.mods.join(mod_high).join("_merge").join(&tsv_rel),
+        &format!("\n{tsv_high_row}\n"),
+    );
+
+    let registry = ModRegistry::discover(ws.assets.clone(), ws.mods.clone());
+
+    let txt_merged = registry.read_to_string_merged(&txt_rel).unwrap();
+    let txt_lines: Vec<&str> = txt_merged.lines().collect();
+    assert_eq!(txt_lines, vec![txt_base.as_str(), txt_low_1, txt_low_2, txt_high]);
+
+    let tsv_merged = registry.read_to_string_merged(&tsv_rel).unwrap();
+    let tsv_lines: Vec<&str> = tsv_merged.lines().collect();
+    assert_eq!(
+        tsv_lines,
+        vec![tsv_header, tsv_base_row, tsv_low_row, tsv_high_row]
+    );
+
+    let plain_merged = registry.read_to_string_merged(&plain_rel).unwrap();
+    let plain_lines: Vec<&str> = plain_merged.lines().collect();
+    assert_eq!(plain_lines, vec![plain_base, plain_merge]);
+}
+
+#[test]
+fn list_mod_files_in_deduplicates_normalizes_and_rejects_traversal() {
+    let ws = TempWorkspace::new("list_files");
+    let root_seg = format!("pack_{}", std::process::id());
+    let sub_seg = "charts";
+    let nested_seg = "extra";
+    let norm_dir = format!("{root_seg}/{sub_seg}");
+    let query_dir = format!("./{root_seg}\\{sub_seg}/");
+
+    let shared_rel = format!("{norm_dir}/shared.json");
+    let asset_only_rel = format!("{norm_dir}/base.json");
+    let mod_a_nested_rel = format!("{norm_dir}/{nested_seg}/a.json");
+    let mod_b_rel = format!("{norm_dir}/b.txt");
+    let hidden_file_rel = format!("{norm_dir}/.hidden.json");
+    let hidden_dir_rel = format!("{norm_dir}/.cache/ignored.json");
+    let disabled_mod_rel = format!("{norm_dir}/disabled_only.json");
+
+    write_text(&ws.assets.join(&shared_rel), "{}");
+    write_text(&ws.assets.join(&asset_only_rel), "{}");
+
+    let mod_a = "list-a";
+    let mod_b = "list-b";
+    let mod_off = "list-off";
+
+    write_mod_manifest(&ws.mods, mod_a, DEFAULT_MOD_PRIORITY, true);
+    write_text(&ws.mods.join(mod_a).join(&shared_rel), "{\"override\":true}");
+    write_text(&ws.mods.join(mod_a).join(&mod_a_nested_rel), "{}");
+    write_text(&ws.mods.join(mod_a).join(&hidden_file_rel), "{}");
+    write_text(&ws.mods.join(mod_a).join(&hidden_dir_rel), "{}");
+    write_text(
+        &ws.mods.join(mod_a).join("_append").join(&mod_b_rel),
+        "overlay",
+    );
+
+    write_mod_manifest(&ws.mods, mod_b, DEFAULT_MOD_PRIORITY + 10, true);
+    write_text(&ws.mods.join(mod_b).join(&mod_b_rel), "data");
+
+    write_mod_manifest(&ws.mods, mod_off, DEFAULT_MOD_PRIORITY + 20, false);
+    write_text(&ws.mods.join(mod_off).join(&disabled_mod_rel), "{}");
+
+    let registry = ModRegistry::discover(ws.assets.clone(), ws.mods.clone());
+    let listed = registry.list_mod_files_in(&query_dir);
+
+    let mut expected = vec![shared_rel, asset_only_rel, mod_a_nested_rel, mod_b_rel];
+    expected.sort();
+    assert_eq!(listed, expected);
+
+    assert!(registry.list_mod_files_in("../outside").is_empty());
+    assert!(registry.list_mod_files_in(&format!("{norm_dir}/../../outside")).is_empty());
+    assert!(registry.list_mod_files_in("/etc").is_empty());
+    assert!(registry.list_mod_files_in("").is_empty());
+    assert!(registry.list_mod_files_in(".").is_empty());
+    assert!(registry.list_mod_files_in(&format!("{root_seg}/missing")).is_empty());
 }

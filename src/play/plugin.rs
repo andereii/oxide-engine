@@ -321,6 +321,11 @@ fn load_and_init_scripts(
     }
     let event_vec: Vec<&str> = event_names.into_iter().collect();
 
+    let _ = mod_store.load_namespace("global");
+    for mod_id in mods.active_mod_ids() {
+        let _ = mod_store.load_namespace(mod_id);
+    }
+
     let discovered = mods.scripts_for_context(
         &state.chart.song_id,
         (!state.chart.stage_id.is_empty()).then_some(state.chart.stage_id.as_str()),
@@ -375,6 +380,16 @@ fn handle_play_input(
     dyn_props: Query<Entity, With<DynamicScriptProp>>,
 ) {
     if controls.just_pressed(&keys, Action::ReloadMods) {
+        let destroy_cmds = state.run_script_hooks(
+            vec![(HookKind::Destroy, ScriptEvent::new(HookKind::Destroy))],
+            false,
+            0.0,
+            &mut playlist,
+            &mut script_host,
+            &mods,
+            &mut mod_store,
+        );
+        pending_ecs.0.extend(destroy_cmds);
         for entity in &dyn_props {
             commands.entity(entity).despawn();
         }
