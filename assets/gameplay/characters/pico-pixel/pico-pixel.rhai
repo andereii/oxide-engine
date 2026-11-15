@@ -1,8 +1,7 @@
 // Pico (Pixel) character script (ported from pico-pixel.hxc)
-import "gameplay/characters/pico-playable/pico-playable" as pico_base;
-import "gameplay/characters/pico-playable/CasingSprite" as casing_mod;
 
 fn onCreate() {
+    import "gameplay/characters/pico-playable/CasingSprite" as casing_mod;
     this.casing = casing_mod::new_casing_state();
     this.shader_cleared = false;
     global_set("gameover_music_suffix", "-pixel-pico");
@@ -11,6 +10,7 @@ fn onCreate() {
 }
 
 fn onSongRetry() {
+    import "gameplay/characters/pico-playable/CasingSprite" as casing_mod;
     this.casing = casing_mod::clear_casings();
     this.shader_cleared = false;
 }
@@ -30,18 +30,21 @@ fn onUpdate() {
 }
 
 fn onNoteHit(ev) {
+    import "gameplay/characters/pico-playable/pico-playable" as pico_base;
     if char_id("bf") == "pico-pixel" {
         if pico_base::handle_pico_note_hit("bf", ev) { this.casing.pending_rolls += 1; }
     }
 }
 
 fn onOpponentNoteHit(ev) {
+    import "gameplay/characters/pico-playable/pico-playable" as pico_base;
     if char_id("dad") == "pico-pixel" {
         if pico_base::handle_pico_note_hit("dad", ev) { this.casing.pending_rolls += 1; }
     }
 }
 
 fn onNoteMiss(ev) {
+    import "gameplay/characters/pico-playable/pico-playable" as pico_base;
     if char_id("bf") == "pico-pixel" {
         pico_base::handle_pico_note_miss("bf", ev);
     }

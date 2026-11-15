@@ -1,6 +1,4 @@
 // Otis (Speaker) character script (ported from otis-speaker.hxc)
-import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
-import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
 
 fn find_slot(id) {
     if char_id("gf") == id { return "gf"; }
@@ -62,6 +60,8 @@ fn load_otis_timings() {
 }
 
 fn onCreate() {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.shoot_notes = load_otis_timings();
     this.shoot_idx = 0;
     this.abot = abot_mod::new_abot_state("otis-speaker");
@@ -74,15 +74,18 @@ fn onCreate() {
 }
 
 fn onSongStart() {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.viz = viz_mod::start_viz(this.viz);
 }
 
 fn onSongRetry() {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.shoot_idx = 0;
     this.viz = viz_mod::reset_viz(this.viz);
 }
 
 fn onSongEnd() {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.viz = viz_mod::reset_viz(this.viz);
 }
 
@@ -103,5 +106,6 @@ fn onUpdate() {
 }
 
 fn onSongEvent(ev) {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
     this.abot = abot_mod::on_FocusCamera(this.abot, ev);
 }

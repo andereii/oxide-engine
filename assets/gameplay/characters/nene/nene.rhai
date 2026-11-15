@@ -1,6 +1,4 @@
 // nene character script (ported from nene.hxc)
-import "./ABotAtlasSprite" as abot_mod;
-import "./ABotVisualizer" as viz_mod;
 
 fn find_slot(id) {
     if char_id("gf") == id { return "gf"; }
@@ -92,6 +90,8 @@ fn transition_nene_state(nene_state, target) {
 }
 
 fn onCreate() {
+    import "./ABotAtlasSprite" as abot_mod;
+    import "./ABotVisualizer" as viz_mod;
     this.nene_state = "DEFAULT";
     this.blink_countdown = 3;
     this.has_danced = false;
@@ -105,10 +105,12 @@ fn onCreate() {
 }
 
 fn onSongStart() {
+    import "./ABotVisualizer" as viz_mod;
     this.viz = viz_mod::start_viz(this.viz);
 }
 
 fn onSongRetry() {
+    import "./ABotVisualizer" as viz_mod;
     this.nene_state = "DEFAULT";
     this.blink_countdown = 3;
     this.has_danced = false;
@@ -120,6 +122,7 @@ fn onSongRetry() {
 }
 
 fn onSongEnd() {
+    import "./ABotVisualizer" as viz_mod;
     this.viz = viz_mod::reset_viz(this.viz);
 }
 
@@ -157,6 +160,7 @@ fn onUpdate() {
 }
 
 fn onSongEvent(ev) {
+    import "./ABotAtlasSprite" as abot_mod;
     this.abot = abot_mod::on_FocusCamera(this.abot, ev);
 }
 

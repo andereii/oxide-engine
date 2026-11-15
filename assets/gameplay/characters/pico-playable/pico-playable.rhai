@@ -1,7 +1,4 @@
 // Pico (Playable) character script (ported from pico-playable.hxc)
-import "./CasingSprite" as casing_mod;
-import "./PicoBloodPool" as blood_mod;
-import "./PicoDopplegangerSprite" as dopple_mod;
 
 fn pick_pico_death_quote() {
     let blocked = [4, 7, 8, 9];
@@ -46,6 +43,9 @@ fn handle_pico_note_miss(target, ev) {
 }
 
 fn onCreate() {
+    import "./CasingSprite" as casing_mod;
+    import "./PicoBloodPool" as blood_mod;
+    import "./PicoDopplegangerSprite" as dopple_mod;
     this.casing = casing_mod::new_casing_state();
     this.blood_pool = blood_mod::new_blood_pool_state(0.0, 0.0);
     this.doppelganger_asset = dopple_mod::doppelganger_asset();
@@ -55,6 +55,7 @@ fn onCreate() {
 }
 
 fn onSongRetry() {
+    import "./CasingSprite" as casing_mod;
     this.casing = casing_mod::clear_casings();
     global_set("gameover_music_suffix", "-pico");
     global_set("gameover_blueball_suffix", "-pico");
@@ -62,6 +63,7 @@ fn onSongRetry() {
 }
 
 fn onUpdate() {
+    import "./PicoBloodPool" as blood_mod;
     this.blood_pool = blood_mod::update_blood_pool(this.blood_pool, dt());
 }
 

@@ -1,6 +1,4 @@
 // nene-dark character script (ported from nene-dark.hxc)
-import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
-import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
 
 fn find_slot(id) {
     if char_id("gf") == id { return "gf"; }
@@ -92,6 +90,8 @@ fn transition_nene_state(nene_state, target) {
 }
 
 fn onCreate() {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.nene_state = "DEFAULT";
     this.blink_countdown = 3;
     this.has_danced = false;
@@ -106,10 +106,12 @@ fn onCreate() {
 }
 
 fn onSongStart() {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.viz = viz_mod::start_viz(this.viz);
 }
 
 fn onSongRetry() {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.nene_state = "DEFAULT";
     this.blink_countdown = 3;
     this.has_danced = false;
@@ -121,6 +123,7 @@ fn onSongRetry() {
 }
 
 fn onSongEnd() {
+    import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.viz = viz_mod::reset_viz(this.viz);
 }
 
@@ -158,6 +161,7 @@ fn onUpdate() {
 }
 
 fn onSongEvent(ev) {
+    import "gameplay/characters/nene/ABotAtlasSprite" as abot_mod;
     this.abot = abot_mod::on_FocusCamera(this.abot, ev);
 }
 
