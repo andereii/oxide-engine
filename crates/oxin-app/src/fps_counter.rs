@@ -4,6 +4,15 @@ use bevy::time::Real;
 const FPS_REFRESH_INTERVAL_S: f64 = 0.25;
 const FPS_OVERLAY_Z_INDEX: i32 = i32::MAX - 32;
 
+pub(crate) struct FpsCounterPlugin;
+
+impl Plugin for FpsCounterPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_fps_counter)
+            .add_systems(Update, update_fps_counter);
+    }
+}
+
 #[derive(Component)]
 struct FpsCounterText;
 
@@ -14,7 +23,7 @@ struct FpsCounterState {
 }
 
 /// Spawns a top-left screen-space FPS overlay above gameplay and HUD layers.
-pub(crate) fn spawn_fps_counter(mut commands: Commands) {
+fn spawn_fps_counter(mut commands: Commands) {
     commands
         .spawn((
             Node {
@@ -54,7 +63,7 @@ fn format_fps(fps: f64) -> String {
 }
 
 /// Updates the on-screen FPS counter over fixed wall-clock windows to avoid jitter and excess UI relayout.
-pub(crate) fn update_fps_counter(
+fn update_fps_counter(
     time: Res<Time<Real>>,
     mut state: Local<FpsCounterState>,
     mut query: Query<&mut Text, With<FpsCounterText>>,

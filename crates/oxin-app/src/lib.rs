@@ -6,7 +6,7 @@ use bevy::window::PresentMode;
 use bevy::winit::WinitSettings;
 
 mod fps_counter;
-use fps_counter::{spawn_fps_counter, update_fps_counter};
+use fps_counter::FpsCounterPlugin;
 
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -96,8 +96,8 @@ pub fn build_app(config: WindowConfig) -> App {
             })
             .disable::<bevy::gilrs::GilrsPlugin>(),
     )
-    .add_systems(Startup, (spawn_main_camera, spawn_fps_counter))
-    .add_systems(Update, update_fps_counter);
+    .add_plugins(FpsCounterPlugin)
+    .add_systems(Startup, spawn_main_camera);
 
     if !config.vsync {
         // Keep the event loop running continuously even when unfocused so FPS stays uncapped.
