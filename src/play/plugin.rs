@@ -54,7 +54,10 @@ impl Plugin for PlayPlugin {
         if let Some(diff) = &self.flags.difficulty { selection.difficulty.clone_from(diff); }
         if let Some(var) = &self.flags.variation { selection.variation.clone_from(var); }
         let (chart, note_style, load_error) = match load_song_chart(&selection.song_id, &selection.difficulty, &selection.variation) {
-            Ok(chart) => (chart, NoteStyle::load(&chart.skins.hud).unwrap_or_default(), None),
+            Ok(chart) => {
+                let style = NoteStyle::load(&chart.skins.hud).unwrap_or_default();
+                (chart, style, None)
+            }
             Err(err) => (SongChart::default(), NoteStyle::default(), Some(err)),
         };
 
