@@ -2,6 +2,7 @@ use bevy::audio::{AudioPlayer, AudioSink, PlaybackMode, PlaybackSettings, Volume
 use bevy::prelude::*;
 
 use crate::audio::SongAudioPlayer;
+use crate::cli::LaunchFlags;
 use crate::input::{Action, Controls, CursorState, PreciseInputManager};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
@@ -19,7 +20,16 @@ use super::song::{SongSelection, load_song_chart};
 use super::stage::{StageSyncState, load_stage_resource, spawn_stage_props, sync_stage_props};
 use super::types::{PauseMode, PlayPhase, PlayStateParams, SongChart};
 
-pub struct PlayPlugin;
+#[derive(Default)]
+pub struct PlayPlugin {
+    pub flags: LaunchFlags,
+}
+
+impl PlayPlugin {
+    pub fn with_flags(flags: LaunchFlags) -> Self {
+        Self { flags }
+    }
+}
 
 #[derive(Component)]
 struct HudTextVisual;
@@ -39,22 +49,23 @@ struct PlaySfxAssets {
 
 impl Plugin for PlayPlugin {
     fn build(&self, app: &mut App) {
-        let selection = SongSelection::default();
-        let (chart, note_style, load_error) = match load_song_chart(
-            &selection.song_id,
-            &selection.difficulty,
-            &selection.variation,
-        ) {
-            Ok(chart) => {
-                let style = NoteStyle::load(&chart.skins.hud).unwrap_or_default();
-                (chart, style, None)
-            }
+        let mut selection = SongSelection::default();
+        if let Some(song) = &self.flags.song_id { selection.song_id.clone_from(song); }
+        if let Some(diff) = &self.flags.difficulty { selection.difficulty.clone_from(diff); }
+        if let Some(var) = &self.flags.variation { selection.variation.clone_from(var); }
+        let (chart, note_style, load_error) = match load_song_chart(&selection.song_id, &selection.difficulty, &selection.variation) {
+            Ok(chart) => (chart, NoteStyle::load(&chart.skins.hud).unwrap_or_default(), None),
             Err(err) => (SongChart::default(), NoteStyle::default(), Some(err)),
         };
 
         let mut state = PlayState::new(PlayStateParams {
             chart,
             note_style,
+            practice_mode: self.flags.practice_mode,
+            bot_play_mode: self.flags.bot_play_mode,
+            minimal_mode: self.flags.minimal_mode,
+            start_timestamp_ms: self.flags.start_timestamp_ms,
+            playback_rate: self.flags.playback_rate,
             ..default()
         });
         if let Some(err) = load_error {

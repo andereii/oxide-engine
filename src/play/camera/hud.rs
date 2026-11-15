@@ -40,3 +40,4 @@ pub fn sync_hud_camera(
         }
     }
 }
+
