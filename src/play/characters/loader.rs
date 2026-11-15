@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 
 use bevy::prelude::*;
-use oxin_app::resolve_assets_dir;
 
 use crate::animations::animate_atlas::AnimateAtlas;
 use crate::animations::atlas_composite::{compute_composite_bounds, sample_default_composite_clip};
 use crate::animations::base::add_sparrow_animation;
 use crate::animations::{AnimationController, SparrowAtlas, add_packer_animation, register_default_sparrow_idle};
+use crate::mods::ModRegistry;
 use crate::play::stage::StageResource;
 use crate::play::stage::schema::StageCharacterSlot;
 use crate::play::types::CharactersMeta;
@@ -40,12 +39,12 @@ pub struct CharactersResource {
 }
 
 pub fn load_characters_resource(
+    mods: &ModRegistry,
     meta: &CharactersMeta,
     stage: Option<&StageResource>,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> CharactersResource {
-    let assets_dir = resolve_assets_dir();
     let slots = stage.map(|s| &s.characters);
     let mut characters = Vec::new();
 
@@ -57,7 +56,7 @@ pub fn load_characters_resource(
 
     for (ids, role, slot) in entries {
         for char_id in ids {
-            if let Ok(loaded) = load_single_character(&assets_dir, char_id, role, slot.clone(), asset_server, layouts) {
+            if let Ok(loaded) = load_single_character(mods, char_id, role, slot.clone(), asset_server, layouts) {
                 characters.push(loaded);
             }
         }
@@ -66,14 +65,23 @@ pub fn load_characters_resource(
 }
 
 fn load_single_character(
-    assets_dir: &Path,
+    mods: &ModRegistry,
     char_id: &str,
     role: CharacterRole,
     slot: StageCharacterSlot,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Result<LoadedCharacter, String> {
-    let json_path = assets_dir.join("gameplay").join("characters").join(char_id).join(format!("{char_id}.json"));
+    let json_path = mods
+        .resolve_file(&format!("gameplay/characters/{char_id}/{char_id}.json"))
+        .or_else(|| mods.resolve_file(&format!("characters/{char_id}/{char_id}.json")))
+        .unwrap_or_else(|| {
+            mods.assets_dir
+                .join("gameplay")
+                .join("characters")
+                .join(char_id)
+                .join(format!("{char_id}.json"))
+        });
     let raw = fs::read_to_string(&json_path).map_err(|e| format!("failed to read {}: {e}", json_path.display()))?;
     let data: CharacterData = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
         .map_err(|e| format!("failed to parse {}: {e}", json_path.display()))?;
@@ -88,7 +96,7 @@ fn load_single_character(
 
     match data.render_type {
         CharacterRenderType::Packer => {
-            if let Some((src, packer, indices)) = load_packer_source(assets_dir, char_id, &default_asset, asset_server, layouts) {
+            if let Some((src, packer, indices)) = load_packer_source(mods, char_id, &default_asset, asset_server, layouts) {
                 sources.push(src);
                 for anim in &data.animations {
                     if add_packer_animation(&packer, &indices, &mut controller, anim) {
@@ -98,14 +106,14 @@ fn load_single_character(
             }
         }
         CharacterRenderType::Sparrow | CharacterRenderType::MultiSparrow => {
-            if let Some((idx, s_idx)) = get_or_load_sparrow(assets_dir, char_id, &default_asset, asset_server, layouts, &mut sources, &mut sheet_cache, &mut sparrow_data) {
+            if let Some((idx, s_idx)) = get_or_load_sparrow(mods, char_id, &default_asset, asset_server, layouts, &mut sources, &mut sheet_cache, &mut sparrow_data) {
                 for anim in &data.animations {
                     let sub_path = anim.asset_path.as_deref().unwrap_or(&default_asset);
                     if anim.render_type.eq_ignore_ascii_case("animateatlas") {
-                        load_composite_anim(assets_dir, char_id, sub_path, anim, asset_server, layouts, &mut sources, &mut atlas_cache, &mut controller, &mut clips);
+                        load_composite_anim(mods, char_id, sub_path, anim, asset_server, layouts, &mut sources, &mut atlas_cache, &mut controller, &mut clips);
                     } else {
                         let (src_i, sp_i) = if anim.asset_path.is_some() {
-                            get_or_load_sparrow(assets_dir, char_id, sub_path, asset_server, layouts, &mut sources, &mut sheet_cache, &mut sparrow_data).unwrap_or((idx, s_idx))
+                            get_or_load_sparrow(mods, char_id, sub_path, asset_server, layouts, &mut sources, &mut sheet_cache, &mut sparrow_data).unwrap_or((idx, s_idx))
                         } else {
                             (idx, s_idx)
                         };
@@ -127,18 +135,18 @@ fn load_single_character(
             for anim in &data.animations {
                 let sub_path = anim.asset_path.as_deref().unwrap_or(&default_asset);
                 if anim.render_type.eq_ignore_ascii_case("sparrow") {
-                    if let Some((src_i, sp_i)) = get_or_load_sparrow(assets_dir, char_id, sub_path, asset_server, layouts, &mut sources, &mut sheet_cache, &mut sparrow_data) {
+                    if let Some((src_i, sp_i)) = get_or_load_sparrow(mods, char_id, sub_path, asset_server, layouts, &mut sources, &mut sheet_cache, &mut sparrow_data) {
                         let (ref atlas, ref indices) = sparrow_data[sp_i];
                         if add_sparrow_animation(atlas, indices, &mut controller, anim) {
                             clips.insert(anim.name.clone(), ClipVisual::Sheet { source_idx: src_i });
                         }
                     }
                 } else {
-                    load_composite_anim(assets_dir, char_id, sub_path, anim, asset_server, layouts, &mut sources, &mut atlas_cache, &mut controller, &mut clips);
+                    load_composite_anim(mods, char_id, sub_path, anim, asset_server, layouts, &mut sources, &mut atlas_cache, &mut controller, &mut clips);
                 }
             }
             if clips.is_empty()
-                && let Some((src_i, atlas, indices)) = get_or_load_animate(assets_dir, char_id, &default_asset, asset_server, layouts, &mut sources, &mut atlas_cache)
+                && let Some((src_i, atlas, indices)) = get_or_load_animate(mods, char_id, &default_asset, asset_server, layouts, &mut sources, &mut atlas_cache)
                 && let Some(clip) = sample_default_composite_clip(&atlas, &indices)
             {
                 let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use bevy::asset::AssetPlugin;
+use bevy::asset::io::AssetSourceBuilder;
+use bevy::asset::{AssetApp, AssetPlugin};
 use bevy::prelude::*;
 use bevy::window::PresentMode;
 use bevy::winit::WinitSettings;
@@ -15,6 +16,7 @@ pub struct WindowConfig {
     pub height: u32,
     pub vsync: bool,
     pub assets_dir: Option<PathBuf>,
+    pub mods_dir: Option<PathBuf>,
 }
 
 impl Default for WindowConfig {
@@ -25,25 +27,26 @@ impl Default for WindowConfig {
             height: 720,
             vsync: false,
             assets_dir: None,
+            mods_dir: None,
         }
     }
 }
 
-pub fn resolve_assets_dir() -> PathBuf {
-    if let Some(env_dir) = std::env::var_os("OXIDE_ASSETS_DIR") {
+fn resolve_project_subdir(env_var: &str, subdir: &str, require_existing_dir: bool) -> PathBuf {
+    if let Some(env_dir) = std::env::var_os(env_var) {
         let path = PathBuf::from(env_dir);
-        if path.is_dir() {
+        if path.is_dir() || !require_existing_dir {
             return path.canonicalize().unwrap_or(path);
         }
     }
 
     let mut candidates = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("assets"));
+        candidates.push(cwd.join(subdir));
         if let Some(p) = cwd.parent() {
-            candidates.push(p.join("assets"));
+            candidates.push(p.join(subdir));
             if let Some(gp) = p.parent() {
-                candidates.push(gp.join("assets"));
+                candidates.push(gp.join(subdir));
             }
         }
     }
@@ -51,7 +54,7 @@ pub fn resolve_assets_dir() -> PathBuf {
         let mut dir = exe.parent();
         for _ in 0..4 {
             if let Some(d) = dir {
-                candidates.push(d.join("assets"));
+                candidates.push(d.join(subdir));
                 dir = d.parent();
             }
         }
@@ -63,7 +66,27 @@ pub fn resolve_assets_dir() -> PathBuf {
         }
     }
 
-    PathBuf::from("assets")
+    PathBuf::from(subdir)
+}
+
+pub fn resolve_assets_dir() -> PathBuf {
+    resolve_project_subdir("OXIDE_ASSETS_DIR", "assets", true)
+}
+
+pub fn resolve_mods_dir() -> PathBuf {
+    if let Some(env_dir) = std::env::var_os("OXIDE_MODS_DIR") {
+        return PathBuf::from(env_dir);
+    }
+    if std::env::var_os("OXIDE_ASSETS_DIR").is_some() {
+        let assets = resolve_assets_dir();
+        if let Some(parent) = assets.parent() {
+            let sibling = parent.join("mods");
+            if sibling.is_dir() {
+                return sibling;
+            }
+        }
+    }
+    resolve_project_subdir("OXIDE_MODS_DIR", "mods", false)
 }
 
 pub fn build_app(config: WindowConfig) -> App {
@@ -78,26 +101,30 @@ pub fn build_app(config: WindowConfig) -> App {
         .unwrap_or_else(resolve_assets_dir)
         .to_string_lossy()
         .into_owned();
+    let mods_dir = config.mods_dir.unwrap_or_else(resolve_mods_dir);
+    let _ = std::fs::create_dir_all(&mods_dir);
+    let mods_path = mods_dir.to_string_lossy().into_owned();
 
-    app.add_plugins(
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: assets_path,
-                ..default()
-            })
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: config.title,
-                    resolution: (config.width, config.height).into(),
-                    present_mode,
+    app.register_asset_source("mods", AssetSourceBuilder::platform_default(&mods_path, None))
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: assets_path,
                     ..default()
-                }),
-                ..default()
-            })
-            .disable::<bevy::gilrs::GilrsPlugin>(),
-    )
-    .add_plugins(FpsCounterPlugin)
-    .add_systems(Startup, spawn_main_camera);
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: config.title,
+                        resolution: (config.width, config.height).into(),
+                        present_mode,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .disable::<bevy::gilrs::GilrsPlugin>(),
+        )
+        .add_plugins(FpsCounterPlugin)
+        .add_systems(Startup, spawn_main_camera);
 
     if !config.vsync {
         // Keep the event loop running continuously even when unfocused so FPS stays uncapped.

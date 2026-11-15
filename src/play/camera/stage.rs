@@ -170,6 +170,35 @@ impl PlayState {
         self.camera.hud_zoom = self.camera.default_hud_zoom
             + (self.camera.hud_zoom - self.camera.default_hud_zoom) * decay_factor;
 
+        if self.camera.shake_timer_s > 0.0 {
+            self.camera.shake_timer_s = (self.camera.shake_timer_s - elapsed_s).max(0.0);
+            if self.camera.shake_timer_s == 0.0 {
+                self.camera.shake_intensity = 0.0;
+                self.camera.shake_offset = [0.0, 0.0];
+            } else {
+                let (rx, ry) = next_shake_pair(&mut self.camera.shake_seed);
+                let amp = self.camera.shake_intensity;
+                self.camera.shake_offset = [rx * amp, ry * amp];
+            }
+        }
+        if self.camera.hud_shake_timer_s > 0.0 {
+            self.camera.hud_shake_timer_s = (self.camera.hud_shake_timer_s - elapsed_s).max(0.0);
+            if self.camera.hud_shake_timer_s == 0.0 {
+                self.camera.hud_shake_intensity = 0.0;
+                self.camera.hud_shake_offset = [0.0, 0.0];
+            } else {
+                let (rx, ry) = next_shake_pair(&mut self.camera.shake_seed);
+                let amp = self.camera.hud_shake_intensity;
+                self.camera.hud_shake_offset = [rx * amp, ry * amp];
+            }
+        }
+        if self.camera.flash_timer_s > 0.0 {
+            self.camera.flash_timer_s = (self.camera.flash_timer_s - elapsed_s).max(0.0);
+        }
+        if self.camera.hud_flash_timer_s > 0.0 {
+            self.camera.hud_flash_timer_s = (self.camera.hud_flash_timer_s - elapsed_s).max(0.0);
+        }
+
         if !self.scroll_speed_tweens.is_empty() {
             let mut idx = 0;
             while idx < self.scroll_speed_tweens.len() {
@@ -190,4 +219,15 @@ impl PlayState {
             }
         }
     }
+}
+
+fn next_shake_pair(seed: &mut u64) -> (f32, f32) {
+    let mut step = || {
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        let bits = ((*seed >> 40) as f32) / ((1_u32 << 24) as f32);
+        bits * 2.0 - 1.0
+    };
+    (step(), step())
 }

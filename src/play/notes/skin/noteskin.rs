@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Color;
 use oxin_app::resolve_assets_dir;
 
+use crate::mods::ModRegistry;
 use crate::play::notes::data::NoteDirection;
 use super::defaults::fallback_funkin_style;
 pub use super::skin_schema::{
@@ -69,12 +70,23 @@ impl NoteStyle {
     }
 
     pub fn load(skin_id: &str) -> Result<Self, String> {
+        Self::load_in(&ModRegistry::from_default_dirs(), skin_id)
+    }
+
+    pub fn load_in(mods: &ModRegistry, skin_id: &str) -> Result<Self, String> {
         let id = if skin_id.trim().is_empty() { "funkin" } else { skin_id.trim() };
-        let json_path = resolve_assets_dir()
-            .join("gameplay")
-            .join("noteskins")
-            .join(id)
-            .join(format!("{id}.json"));
+        let rel = format!("gameplay/noteskins/{id}/{id}.json");
+        let alt_rel = format!("noteskins/{id}/{id}.json");
+        let json_path = mods
+            .resolve_file(&rel)
+            .or_else(|| mods.resolve_file(&alt_rel))
+            .unwrap_or_else(|| {
+                mods.assets_dir
+                    .join("gameplay")
+                    .join("noteskins")
+                    .join(id)
+                    .join(format!("{id}.json"))
+            });
         let raw = fs::read_to_string(&json_path)
             .map_err(|e| format!("failed to read {}: {e}", json_path.display()))?;
         let parsed: NoteskinFileRaw = serde_json::from_str(&raw)
@@ -208,6 +220,18 @@ impl NoteStyle {
         format!("gameplay/noteskins/{}/{rel}", self.id)
     }
 
+    pub fn asset_path_in(&self, mods: &ModRegistry, rel: &str) -> String {
+        for candidate in [
+            format!("gameplay/noteskins/{}/{rel}", self.id),
+            format!("noteskins/{}/{rel}", self.id),
+        ] {
+            if let Some(path) = mods.resolve_asset_server_path(&candidate) {
+                return path;
+            }
+        }
+        self.asset_path(rel)
+    }
+
     pub fn disk_xml(&self, rel: &str) -> PathBuf {
         let xml_rel = Path::new(rel).with_extension("xml");
         resolve_assets_dir()
@@ -217,25 +241,47 @@ impl NoteStyle {
             .join(xml_rel)
     }
 
-    pub fn miss_sound_assets(&self) -> Vec<String> {
+    pub fn disk_xml_in(&self, mods: &ModRegistry, rel: &str) -> PathBuf {
+        let xml_rel = Path::new(rel).with_extension("xml");
+        let xml_str = xml_rel.to_string_lossy().replace('\\', "/");
+        for candidate in [
+            format!("gameplay/noteskins/{}/{xml_str}", self.id),
+            format!("noteskins/{}/{xml_str}", self.id),
+        ] {
+            if let Some(found) = mods.resolve_file(&candidate) {
+                return found;
+            }
+        }
+        self.disk_xml(rel)
+    }
+
+    pub fn miss_sound_assets_in(&self, mods: &ModRegistry) -> Vec<String> {
         if self.has_custom_miss_sounds {
-            self.miss_sounds.iter().map(|rel| self.asset_path(rel)).collect()
+            self.miss_sounds
+                .iter()
+                .map(|rel| self.asset_path_in(mods, rel))
+                .collect()
         } else {
             self.miss_sounds
                 .iter()
-                .map(|rel| format!("gameplay/noteskins/funkin/{rel}"))
+                .map(|rel| {
+                    let fallback = format!("gameplay/noteskins/funkin/{rel}");
+                    mods.resolve_asset_server_path(&fallback).unwrap_or(fallback)
+                })
                 .collect()
         }
     }
 
-    pub fn health_bar_asset(&self) -> String {
+    pub fn health_bar_asset_in(&self, mods: &ModRegistry) -> String {
         if let Some(rel) = &self.health_bar.path {
             let candidate = self.asset_path(rel);
-            if resolve_assets_dir().join(&candidate).exists() {
-                return candidate;
+            if let Some(resolved) = mods.resolve_asset_server_path(&candidate) {
+                return resolved;
             }
         }
-        "gameplay/noteskins/funkin/health-bar.png".to_string()
+        let fallback = "gameplay/noteskins/funkin/health-bar.png";
+        mods.resolve_asset_server_path(fallback)
+            .unwrap_or_else(|| fallback.to_string())
     }
 
     pub fn lane_color(&self, dir: NoteDirection) -> Color {

@@ -47,6 +47,8 @@ pub struct CharacterActor {
     pub combo_counts: Vec<u32>,
     pub drop_counts: Vec<u32>,
     pub sampler_applied: bool,
+    pub mod_tint: [f32; 4],
+    pub mod_visible: bool,
     pub sheet_entity: Entity,
     pub piece_entities: Vec<Entity>,
 }

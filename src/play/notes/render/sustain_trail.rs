@@ -69,16 +69,17 @@ pub fn compute_sustain_geometry(
     let end_height_px = if body_px > 0.5 { rendered_end_px } else { total_px.min(rendered_end_px).max(1.0) };
     let sign = if strum.is_downscroll { 1.0 } else { -1.0 };
 
+    let lane_idx = note.lane.index();
     let start_y = if note.hold_hit && !note.hold_dropped {
-        strum.receptor_y() + note.y_offset
+        strum.lane_y(lane_idx) + note.y_offset
     } else if note.hold_dropped && note.hold_remaining_ms < note.data.sustain_length_ms {
         let elapsed_held_px = sustain_height_px(
             note.data.sustain_length_ms - note.hold_remaining_ms,
             strum.scroll_speed,
         );
-        strum.note_y_at(note.data.time_ms, vis_pos_ms) + note.y_offset + sign * elapsed_held_px
+        strum.note_y_at(lane_idx, note.data.time_ms, vis_pos_ms) + note.y_offset + sign * elapsed_held_px
     } else {
-        strum.note_y_at(note.data.time_ms, vis_pos_ms) + note.y_offset
+        strum.note_y_at(lane_idx, note.data.time_ms, vis_pos_ms) + note.y_offset
     };
 
     let body_y = start_y + sign * (body_px * 0.5);

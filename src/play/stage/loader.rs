@@ -1,17 +1,16 @@
 use std::fs;
-use std::path::Path;
 
 use bevy::prelude::*;
-use oxin_app::resolve_assets_dir;
 
 use crate::animations::animate_atlas::AnimateAtlas;
 use crate::animations::{
     AnimationController, SparrowAtlas, add_animate_atlas_animations, add_sparrow_animations,
     register_default_atlas_idle, register_default_sparrow_idle,
 };
+use crate::mods::ModRegistry;
 
 use super::paths::{
-    parse_hex_color, read_image_dimensions, resolve_atlas_dir, resolve_stage_image, to_asset_rel,
+    parse_hex_color, read_image_dimensions, resolve_atlas_dir_in, resolve_stage_image_in,
 };
 use super::schema::{StageAnimKind, StageCharacters, StageCoordMode, StagePropData, parse_stage_json};
 
@@ -50,13 +49,21 @@ pub struct StageResource {
 }
 
 pub fn load_stage_resource(
+    mods: &ModRegistry,
     stage_id: &str,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Result<StageResource, String> {
-    let assets_dir = resolve_assets_dir();
-    let stage_dir = assets_dir.join("gameplay").join("stages").join(stage_id);
-    let json_path = stage_dir.join(format!("{stage_id}.json"));
+    let json_path = mods
+        .resolve_file(&format!("gameplay/stages/{stage_id}/{stage_id}.json"))
+        .or_else(|| mods.resolve_file(&format!("stages/{stage_id}/{stage_id}.json")))
+        .unwrap_or_else(|| {
+            mods.assets_dir
+                .join("gameplay")
+                .join("stages")
+                .join(stage_id)
+                .join(format!("{stage_id}.json"))
+        });
 
     let raw_json = fs::read_to_string(&json_path)
         .map_err(|e| format!("failed to read {}: {e}", json_path.display()))?;
@@ -72,7 +79,7 @@ pub fn load_stage_resource(
 
     let mut props = Vec::with_capacity(indexed.len());
     for (_, _, data) in indexed {
-        if let Some(visual) = resolve_prop_visual(&assets_dir, &stage_dir, &data, asset_server, layouts) {
+        if let Some(visual) = resolve_prop_visual(mods, stage_id, &data, asset_server, layouts) {
             props.push(ResolvedStageProp { data, visual });
         }
     }
@@ -88,8 +95,8 @@ pub fn load_stage_resource(
 }
 
 fn resolve_prop_visual(
-    assets_dir: &Path,
-    stage_dir: &Path,
+    mods: &ModRegistry,
+    stage_id: &str,
     prop: &StagePropData,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
@@ -106,7 +113,7 @@ fn resolve_prop_visual(
 
     match prop.anim_kind {
         Some(StageAnimKind::Atlas) => {
-            let dir = resolve_atlas_dir(assets_dir, stage_dir, file)?;
+            let dir = resolve_atlas_dir_in(mods, stage_id, file)?;
             let atlas = AnimateAtlas::from_dir(&dir).ok()?;
             let (layout, indices) = atlas.build_layout();
             let mut controller = AnimationController::default();
@@ -123,7 +130,7 @@ fn resolve_prop_visual(
                 .first()
                 .map(|s| [s.w as f32, s.h as f32])
                 .unwrap_or([0.0, 0.0]);
-            let img_rel = to_asset_rel(assets_dir, &dir.join("spritemap1.png"));
+            let img_rel = mods.to_asset_server_path(&dir.join("spritemap1.png"));
             Some(StagePropKind::AnimatedAtlas {
                 texture: asset_server.load(img_rel),
                 layout: layouts.add(layout),
@@ -132,7 +139,7 @@ fn resolve_prop_visual(
             })
         }
         Some(StageAnimKind::Sparrow) => {
-            let img_path = resolve_stage_image(assets_dir, stage_dir, file)?;
+            let img_path = resolve_stage_image_in(mods, stage_id, file)?;
             let xml_path = img_path.with_extension("xml");
             if xml_path.is_file() {
                 if let Ok(atlas) = SparrowAtlas::from_file(&xml_path) {
@@ -152,7 +159,7 @@ fn resolve_prop_visual(
                         .map(|f| [f.frame_width.max(f.width) as f32, f.frame_height.max(f.height) as f32])
                         .unwrap_or([0.0, 0.0]);
                     return Some(StagePropKind::AnimatedAtlas {
-                        texture: asset_server.load(to_asset_rel(assets_dir, &img_path)),
+                        texture: asset_server.load(mods.to_asset_server_path(&img_path)),
                         layout: layouts.add(layout),
                         controller,
                         frame_size,
@@ -161,15 +168,15 @@ fn resolve_prop_visual(
             }
             let size = read_image_dimensions(&img_path).unwrap_or([0.0, 0.0]);
             Some(StagePropKind::StaticImage {
-                texture: asset_server.load(to_asset_rel(assets_dir, &img_path)),
+                texture: asset_server.load(mods.to_asset_server_path(&img_path)),
                 size,
             })
         }
         Some(StageAnimKind::Packer) | None => {
-            let img_path = resolve_stage_image(assets_dir, stage_dir, file)?;
+            let img_path = resolve_stage_image_in(mods, stage_id, file)?;
             let size = read_image_dimensions(&img_path).unwrap_or([0.0, 0.0]);
             Some(StagePropKind::StaticImage {
-                texture: asset_server.load(to_asset_rel(assets_dir, &img_path)),
+                texture: asset_server.load(mods.to_asset_server_path(&img_path)),
                 size,
             })
         }

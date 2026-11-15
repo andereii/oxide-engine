@@ -1,10 +1,12 @@
 use bevy::prelude::KeyCode;
 
-use crate::utils::constants::HEALTH_MISS_BONUS;
+use crate::scripting::{HookKind, ScriptEvent};
+use crate::utils::constants::{COMBO_POPUP_THRESHOLD, HEALTH_MISS_BONUS, KEY_COUNT};
 
 use crate::play::hud::judgement::{Judgement, judge_note, score_note};
 use crate::play::notes::data::{
-    ActiveHold, NoteDirection, NoteSprite, ScrollVelocityTimeline, process_note_window,
+    ActiveHold, NoteDirection, NoteSprite, ScrollVelocityTimeline, SongNoteData,
+    process_note_window,
 };
 use crate::play::notes::strum::CharNoteSignal;
 use crate::play::hud::popups::PopupEvent;
@@ -12,6 +14,51 @@ use crate::play::scene::PlayState;
 use crate::play::types::PreciseInputEvent;
 
 impl PlayState {
+    /// Dynamically injects a note into the player or opponent strumline (0..4 player, 4..8 opponent).
+    pub fn add_dynamic_note(
+        &mut self,
+        time_ms: f64,
+        dir: usize,
+        sustain_length_ms: f64,
+        kind: Option<String>,
+    ) {
+        let is_player = dir < KEY_COUNT;
+        let lane_idx = dir % KEY_COUNT;
+        let id = self.player_strumline.notes.len() + self.opponent_strumline.notes.len() + 1;
+        let kind_scoreable = self.note_kinds.is_scoreable(kind.as_deref());
+        let low_priority = self
+            .note_kinds
+            .get(kind.as_deref())
+            .is_some_and(|k| k.low_priority);
+        let data = SongNoteData {
+            id,
+            time_ms,
+            direction: lane_idx,
+            sustain_length_ms: sustain_length_ms.max(0.0),
+            kind,
+            low_priority,
+            scoreable: is_player && kind_scoreable,
+        };
+        let Some(sprite) = NoteSprite::from_data(data) else {
+            return;
+        };
+        if is_player {
+            if sprite.data.scoreable {
+                self.tallies.total_notes += 1;
+            }
+            self.player_strumline.notes.push(sprite);
+            self.player_strumline
+                .notes
+                .sort_by(|a, b| a.data.time_ms.total_cmp(&b.data.time_ms));
+            self.player_strumline.active_start_index = 0;
+        } else {
+            self.opponent_strumline.notes.push(sprite);
+            self.opponent_strumline
+                .notes
+                .sort_by(|a, b| a.data.time_ms.total_cmp(&b.data.time_ms));
+            self.opponent_strumline.active_start_index = 0;
+        }
+    }
     pub fn generate_song(&mut self) {
         self.song_events = self.chart.events.clone();
         self.song_events
@@ -117,6 +164,13 @@ impl PlayState {
             .min(self.player_strumline.notes.len());
 
         while let Some(input) = self.input_press_queue.pop_front() {
+            self.pending_hooks.push((
+                HookKind::KeyPress,
+                ScriptEvent::new(HookKind::KeyPress)
+                    .with_field("dir", input.direction.index() as i64)
+                    .with_field("time", input.song_position_ms)
+                    .with_field("latency", input.latency_ms),
+            ));
             self.player_strumline.press_key(input.direction, input.key_code);
             if self.is_bot_play_mode {
                 continue;
@@ -152,6 +206,13 @@ impl PlayState {
         }
 
         while let Some(input) = self.input_release_queue.pop_front() {
+            self.pending_hooks.push((
+                HookKind::KeyRelease,
+                ScriptEvent::new(HookKind::KeyRelease)
+                    .with_field("dir", input.direction.index() as i64)
+                    .with_field("time", input.song_position_ms)
+                    .with_field("latency", input.latency_ms),
+            ));
             self.player_strumline.release_key(input.direction, input.key_code);
             if !self.player_strumline.is_key_held(input.direction) {
                 self.player_strumline.play_static(input.direction);
@@ -196,6 +257,19 @@ impl PlayState {
                     )
                 };
                 self.player_strumline.hit_note(idx, true);
+                self.pending_hooks.push((
+                    HookKind::NoteHit,
+                    ScriptEvent::new(HookKind::NoteHit)
+                        .with_field("id", note_id as i64)
+                        .with_field("dir", lane.index() as i64)
+                        .with_field("time", strum_time_ms)
+                        .with_field("length", full_length_ms)
+                        .with_field("kind", note_kind.clone().unwrap_or_default())
+                        .with_field("judgement", Judgement::Sick.as_str())
+                        .with_field("score", 0.0_f64)
+                        .with_field("combo", self.tallies.combo as i64)
+                        .with_field("is_hold", is_hold),
+                ));
                 self.player_strumline.pending_char_events.push(CharNoteSignal::Hit {
                     direction: lane,
                     note_kind,
@@ -234,9 +308,37 @@ impl PlayState {
                 }
             };
             if should_miss {
-                let miss_dir = self.player_strumline.notes[idx].lane;
+                let (miss_id, miss_dir, miss_time, sustain_len, miss_kind) = {
+                    let note = &self.player_strumline.notes[idx];
+                    (
+                        note.data.id,
+                        note.lane,
+                        note.data.time_ms,
+                        note.data.sustain_length_ms,
+                        note.data.kind.clone(),
+                    )
+                };
                 let prev_combo = self.tallies.combo;
+                let prev_health = self.health;
+                let prev_score = self.song_score;
                 self.on_note_miss(HEALTH_MISS_BONUS);
+                if sustain_len > 0.0 {
+                    self.apply_missed_hold_head_penalty(sustain_len);
+                }
+                let health_delta = self.health - prev_health;
+                let score_delta = self.song_score - prev_score;
+                self.pending_hooks.push((
+                    HookKind::NoteMiss,
+                    ScriptEvent::new(HookKind::NoteMiss)
+                        .with_field("id", miss_id as i64)
+                        .with_field("dir", miss_dir.index() as i64)
+                        .with_field("time", miss_time)
+                        .with_field("length", sustain_len)
+                        .with_field("kind", miss_kind.unwrap_or_default())
+                        .with_field("health_change", health_delta)
+                        .with_field("score_change", score_delta)
+                        .with_field("combo_before", prev_combo as i64),
+                ));
                 self.player_strumline.pending_char_events.push(CharNoteSignal::Miss {
                     direction: miss_dir,
                     combo_before: prev_combo,
@@ -252,9 +354,6 @@ impl PlayState {
         let note_diff = (input.song_position_ms - note.data.time_ms - input.latency_ms).trunc();
         let score = f64::from(score_note(note_diff));
         let judgement = judge_note(note_diff);
-        if matches!(judgement, Judgement::Miss) {
-            return;
-        }
 
         let is_hold = note.is_hold_note();
         let strum_time_ms = note.data.time_ms;
@@ -293,14 +392,29 @@ impl PlayState {
         if scoreable {
             self.tallies.total_notes_hit += 1;
             self.apply_score(score, judgement, judgement.health_change(), is_combo_break);
-            let combo = (self.tallies.combo >= 10).then_some(self.tallies.combo);
-            self.pending_popups.push(PopupEvent { judgement: Some(judgement), combo });
+            if !matches!(judgement, Judgement::Miss) {
+                let combo = (self.tallies.combo >= COMBO_POPUP_THRESHOLD).then_some(self.tallies.combo);
+                self.pending_popups.push(PopupEvent { judgement: Some(judgement), combo });
+            }
         }
         self.player_strumline.pending_char_events.push(CharNoteSignal::Hit {
             direction: lane,
-            note_kind,
+            note_kind: note_kind.clone(),
             good_judgement: scoreable.then_some(!is_combo_break),
             combo: if is_combo_break { prev_combo } else { self.tallies.combo },
         });
+        self.pending_hooks.push((
+            HookKind::NoteHit,
+            ScriptEvent::new(HookKind::NoteHit)
+                .with_field("id", note_id as i64)
+                .with_field("dir", lane.index() as i64)
+                .with_field("time", strum_time_ms)
+                .with_field("length", full_length_ms)
+                .with_field("kind", note_kind.unwrap_or_default())
+                .with_field("judgement", judgement.as_str())
+                .with_field("score", score)
+                .with_field("combo", self.tallies.combo as i64)
+                .with_field("is_hold", is_hold),
+        ));
     }
 }

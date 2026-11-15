@@ -100,6 +100,8 @@ pub fn spawn_characters(commands: &mut Commands, res: &CharactersResource) {
             combo_counts,
             drop_counts,
             sampler_applied: false,
+            mod_tint: [1.0; 4],
+            mod_visible: true,
             sheet_entity,
             piece_entities,
         };

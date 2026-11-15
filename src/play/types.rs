@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use bevy::prelude::KeyCode;
 
-use crate::utils::constants::{DEFAULT_CAMERA_ZOOM, DEFAULT_DIFFICULTY, DEFAULT_VARIATION};
+use crate::utils::constants::{
+    DEFAULT_CAMERA_ANGLE_DEG, DEFAULT_CAMERA_ZOOM, DEFAULT_DIFFICULTY, DEFAULT_VARIATION,
+};
 use crate::utils::easing::EaseKind;
 
 use super::notes::{NoteDirection, NoteStyle, SongNoteData};
@@ -123,6 +125,7 @@ pub struct SongEventData {
     pub bop_intensity: f64,
     pub bop_rate: f64,
     pub bop_offset: f64,
+    pub raw_value: serde_json::Value,
 }
 
 impl Default for SongEventData {
@@ -151,6 +154,7 @@ impl Default for SongEventData {
             bop_intensity: 1.0,
             bop_rate: 4.0,
             bop_offset: 0.0,
+            raw_value: serde_json::Value::Null,
         }
     }
 }
@@ -274,6 +278,21 @@ pub struct CameraState {
     pub hud_zoom_intensity: f64,
     pub zoom_rate: f64,
     pub zoom_rate_offset: f64,
+    pub angle_deg: f32,
+    pub hud_angle_deg: f32,
+    pub shake_intensity: f32,
+    pub shake_timer_s: f64,
+    pub shake_offset: [f32; 2],
+    pub hud_shake_intensity: f32,
+    pub hud_shake_timer_s: f64,
+    pub hud_shake_offset: [f32; 2],
+    pub shake_seed: u64,
+    pub flash_color: [f32; 4],
+    pub flash_timer_s: f64,
+    pub flash_duration_s: f64,
+    pub hud_flash_color: [f32; 4],
+    pub hud_flash_timer_s: f64,
+    pub hud_flash_duration_s: f64,
 }
 
 impl Default for CameraState {
@@ -294,6 +313,21 @@ impl Default for CameraState {
             hud_zoom_intensity: 0.03,
             zoom_rate: 4.0,
             zoom_rate_offset: 0.0,
+            angle_deg: DEFAULT_CAMERA_ANGLE_DEG,
+            hud_angle_deg: DEFAULT_CAMERA_ANGLE_DEG,
+            shake_intensity: 0.0,
+            shake_timer_s: 0.0,
+            shake_offset: [0.0, 0.0],
+            hud_shake_intensity: 0.0,
+            hud_shake_timer_s: 0.0,
+            hud_shake_offset: [0.0, 0.0],
+            shake_seed: 0x9E37_79B9_7F4A_7C15,
+            flash_color: [1.0, 1.0, 1.0, 0.0],
+            flash_timer_s: 0.0,
+            flash_duration_s: 0.0,
+            hud_flash_color: [1.0, 1.0, 1.0, 0.0],
+            hud_flash_timer_s: 0.0,
+            hud_flash_duration_s: 0.0,
         }
     }
 }

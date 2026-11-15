@@ -5,4 +5,4 @@ pub mod schema;
 pub mod sync;
 
 pub use loader::{StageResource, load_stage_resource};
-pub use sync::{StageSyncState, spawn_stage_props, sync_stage_props};
+pub use sync::{DynamicScriptProp, StagePropVisual, StageSyncState, spawn_stage_props, sync_stage_props};

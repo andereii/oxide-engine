@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
+use crate::mods::ModRegistry;
 use crate::play::characters::loader::CharactersResource;
 use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
@@ -32,13 +33,14 @@ pub struct HealthBarStepTracker {
 }
 
 pub fn spawn_health_bar(
+    mods: &ModRegistry,
     commands: &mut Commands,
     chars: Option<&CharactersResource>,
     style: &NoteStyle,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
-    let bg_image: Handle<Image> = asset_server.load(style.health_bar_asset());
+    let bg_image: Handle<Image> = asset_server.load(style.health_bar_asset_in(mods));
     let bg_scale = style.health_bar.scale.max(0.01);
     let default_w = 601.0_f32 * bg_scale;
     let default_h = 19.0_f32 * bg_scale;
@@ -88,7 +90,7 @@ pub fn spawn_health_bar(
         HealthBarFillVisual { is_player: true },
     ));
 
-    spawn_health_icons(commands, chars, asset_server, layouts);
+    spawn_health_icons(mods, commands, chars, asset_server, layouts);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -98,13 +100,19 @@ pub fn sync_health_bar(
     images: Res<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut step_tracker: Local<HealthBarStepTracker>,
-    mut bg_query: Query<(&mut HealthBarBgVisual, &mut Transform)>,
+    mut bg_query: Query<(&mut HealthBarBgVisual, &mut Transform, &mut Visibility)>,
     mut fill_query: Query<
-        (&HealthBarFillVisual, &mut Sprite, &mut Transform),
+        (&HealthBarFillVisual, &mut Sprite, &mut Transform, &mut Visibility),
         Without<HealthBarBgVisual>,
     >,
     mut icons: Query<
-        (&mut HealthIcon, &mut AnimationController, &mut Sprite, &mut Transform),
+        (
+            &mut HealthIcon,
+            &mut AnimationController,
+            &mut Sprite,
+            &mut Transform,
+            &mut Visibility,
+        ),
         (Without<HealthBarBgVisual>, Without<HealthBarFillVisual>),
     >,
 ) {
@@ -112,12 +120,18 @@ pub fn sync_health_bar(
         return;
     }
 
+    let hud_vis = if state.hud_visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
     let dt = time.delta_secs().min(0.1);
     let cur_step = state.conductor.current_step;
     let step_hit = step_tracker.last_step != Some(cur_step);
     step_tracker.last_step = Some(cur_step);
 
-    let downscroll = false;
+    let downscroll = state.player_strumline.is_downscroll;
     let bg_y_flx = if downscroll {
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_DOWNSCROLL
     } else {
@@ -125,7 +139,10 @@ pub fn sync_health_bar(
     };
 
     let mut bg_size = [601.0_f32, 19.0_f32];
-    for (mut bg, mut tf) in &mut bg_query {
+    for (mut bg, mut tf, mut vis) in &mut bg_query {
+        if *vis != hud_vis {
+            *vis = hud_vis;
+        }
         if let Some(img) = images.get(&bg.bg_image) {
             bg.size = [img.width() as f32 * bg.scale, img.height() as f32 * bg.scale];
         }
@@ -144,7 +161,10 @@ pub fn sync_health_bar(
     let ply_w = inner_w * pct;
     let opp_w = inner_w * (1.0 - pct);
 
-    for (fill, mut sprite, mut tf) in &mut fill_query {
+    for (fill, mut sprite, mut tf, mut vis) in &mut fill_query {
+        if *vis != hud_vis {
+            *vis = hud_vis;
+        }
         let (w, bx) = if fill.is_player {
             (ply_w, inner_w * 0.5 - ply_w * 0.5)
         } else {
@@ -156,7 +176,10 @@ pub fn sync_health_bar(
 
     let split_x_flx = bar_x_flx + inner_w * (1.0 - pct);
     let step_len_ms = state.conductor.step_length_ms();
-    for (mut icon, mut anim, mut sprite, mut tf) in &mut icons {
+    for (mut icon, mut anim, mut sprite, mut tf, mut vis) in &mut icons {
+        if *vis != hud_vis {
+            *vis = hud_vis;
+        }
         if step_hit {
             icon.on_step_hit(cur_step, step_len_ms);
         }

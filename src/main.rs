@@ -1,7 +1,9 @@
 mod animations;
 mod audio;
 mod input;
+mod mods;
 mod play;
+mod scripting;
 mod utils;
 
 use animations::AnimationsPlugin;

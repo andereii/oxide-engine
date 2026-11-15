@@ -1,4 +1,6 @@
-use crate::utils::constants::{HIT_WINDOW_MS, KEY_COUNT, SCREEN_HEIGHT, VWOOSH_DURATION_S};
+use crate::utils::constants::{
+    GHOST_TAP_DELAY_S, HIT_WINDOW_MS, KEY_COUNT, SCREEN_HEIGHT, VWOOSH_DURATION_S,
+};
 use crate::utils::easing::EaseKind;
 
 use super::receptor::NoteVibrationStatus;
@@ -41,7 +43,7 @@ impl Strumline {
             self.pending_hold_covers.push(HoldCoverCmd::Start(dir));
         }
         if self.ghost_tap_enabled {
-            self.ghost_tap_timer = crate::utils::constants::GHOST_TAP_DELAY_S;
+            self.ghost_tap_timer = GHOST_TAP_DELAY_S;
         }
     }
 

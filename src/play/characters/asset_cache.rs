@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use bevy::prelude::*;
 
@@ -7,12 +7,12 @@ use crate::animations::animate_atlas::AnimateAtlas;
 use crate::animations::atlas_composite::{build_composite_clip, compute_composite_bounds};
 use crate::animations::base::BaseAnimationData;
 use crate::animations::{AnimationController, PackerAtlas, SparrowAtlas};
-use crate::play::stage::paths::to_asset_rel;
+use crate::mods::ModRegistry;
 
 use super::behavior::{ClipVisual, SheetSource};
 
 pub(super) fn get_or_load_sparrow(
-    assets_dir: &Path,
+    mods: &ModRegistry,
     char_id: &str,
     raw_path: &str,
     asset_server: &AssetServer,
@@ -25,12 +25,9 @@ pub(super) fn get_or_load_sparrow(
     if let Some(&hit) = sheet_cache.get(&key) {
         return Some(hit);
     }
-    let base = resolve_char_base(assets_dir, char_id, raw_path);
-    let png = ensure_ext(&base, "png");
-    let xml = ensure_ext(&base, "xml");
-    if !png.is_file() || !xml.is_file() {
-        return None;
-    }
+    let rel_base = resolve_char_rel(char_id, raw_path);
+    let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
+    let xml = mods.resolve_file(&ensure_ext_str(&rel_base, "xml"))?;
     let atlas = SparrowAtlas::from_file(&xml).ok()?;
     let (layout, indices) = atlas.build_layout();
     let frame_sizes = atlas
@@ -43,7 +40,7 @@ pub(super) fn get_or_load_sparrow(
                 .map(|idx| (idx, [f.frame_width as f32, f.frame_height as f32]))
         })
         .collect();
-    let texture = asset_server.load(to_asset_rel(assets_dir, &png));
+    let texture = asset_server.load(mods.to_asset_server_path(&png));
     let layout_handle = layouts.add(layout);
     let src_idx = sources.len();
     sources.push(SheetSource {
@@ -58,7 +55,7 @@ pub(super) fn get_or_load_sparrow(
 }
 
 pub(super) fn get_or_load_animate(
-    assets_dir: &Path,
+    mods: &ModRegistry,
     char_id: &str,
     raw_path: &str,
     asset_server: &AssetServer,
@@ -69,14 +66,15 @@ pub(super) fn get_or_load_animate(
     if let Some(hit) = atlas_cache.get(raw_path) {
         return Some(hit.clone());
     }
-    let dir = resolve_char_base(assets_dir, char_id, raw_path);
+    let rel_dir = resolve_char_rel(char_id, raw_path);
+    let dir = mods.resolve_dir(&rel_dir)?;
     let png = dir.join("spritemap1.png");
     if !dir.join("Animation.json").is_file() || !png.is_file() {
         return None;
     }
     let atlas = AnimateAtlas::from_dir(&dir).ok()?;
     let (layout, indices) = atlas.build_layout();
-    let texture = asset_server.load(to_asset_rel(assets_dir, &png));
+    let texture = asset_server.load(mods.to_asset_server_path(&png));
     let layout_handle = layouts.add(layout);
     let src_idx = sources.len();
     sources.push(SheetSource {
@@ -90,18 +88,15 @@ pub(super) fn get_or_load_animate(
 }
 
 pub(super) fn load_packer_source(
-    assets_dir: &Path,
+    mods: &ModRegistry,
     char_id: &str,
     raw_path: &str,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Option<(SheetSource, PackerAtlas, HashMap<String, usize>)> {
-    let base = resolve_char_base(assets_dir, char_id, raw_path);
-    let png = ensure_ext(&base, "png");
-    let txt = ensure_ext(&base, "txt");
-    if !png.is_file() || !txt.is_file() {
-        return None;
-    }
+    let rel_base = resolve_char_rel(char_id, raw_path);
+    let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
+    let txt = mods.resolve_file(&ensure_ext_str(&rel_base, "txt"))?;
     let atlas = PackerAtlas::from_file(&txt).ok()?;
     let (layout, indices) = atlas.build_layout();
     let frame_sizes = atlas
@@ -114,7 +109,7 @@ pub(super) fn load_packer_source(
                 .map(|idx| (idx, [f.w as f32, f.h as f32]))
         })
         .collect();
-    let texture = asset_server.load(to_asset_rel(assets_dir, &png));
+    let texture = asset_server.load(mods.to_asset_server_path(&png));
     let layout_handle = layouts.add(layout);
     Some((
         SheetSource {
@@ -127,20 +122,17 @@ pub(super) fn load_packer_source(
     ))
 }
 
-fn resolve_char_base(assets_dir: &Path, char_id: &str, raw: &str) -> PathBuf {
+fn resolve_char_rel(char_id: &str, raw: &str) -> String {
     let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
-    if cleaned.starts_with("gameplay/") {
-        assets_dir.join(cleaned)
+    if cleaned.starts_with("gameplay/") || cleaned.starts_with("characters/") {
+        cleaned.to_string()
     } else {
-        assets_dir
-            .join("gameplay")
-            .join("characters")
-            .join(char_id)
-            .join(cleaned)
+        format!("gameplay/characters/{char_id}/{cleaned}")
     }
 }
 
-fn ensure_ext(path: &Path, ext: &str) -> PathBuf {
+fn ensure_ext_str(rel: &str, ext: &str) -> String {
+    let path = Path::new(rel);
     let has_known = path
         .extension()
         .and_then(|e| e.to_str())
@@ -151,15 +143,15 @@ fn ensure_ext(path: &Path, ext: &str) -> PathBuf {
             )
         });
     if has_known {
-        path.with_extension(ext)
+        path.with_extension(ext).to_string_lossy().replace('\\', "/")
     } else {
-        PathBuf::from(format!("{}.{}", path.display(), ext))
+        format!("{rel}.{ext}")
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn load_composite_anim(
-    assets_dir: &Path,
+    mods: &ModRegistry,
     char_id: &str,
     rel_path: &str,
     anim: &BaseAnimationData,
@@ -171,7 +163,7 @@ pub(super) fn load_composite_anim(
     clips: &mut HashMap<String, ClipVisual>,
 ) {
     let Some((src_i, atlas, indices)) =
-        get_or_load_animate(assets_dir, char_id, rel_path, asset_server, layouts, sources, atlas_cache)
+        get_or_load_animate(mods, char_id, rel_path, asset_server, layouts, sources, atlas_cache)
     else {
         return;
     };

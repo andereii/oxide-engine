@@ -4,6 +4,68 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::Color;
 
+use crate::mods::ModRegistry;
+
+pub fn resolve_atlas_dir_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Option<PathBuf> {
+    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
+    let rels = if cleaned.starts_with("gameplay/") {
+        vec![
+            cleaned.to_string(),
+            format!("gameplay/stages/{stage_id}/{cleaned}"),
+        ]
+    } else {
+        vec![
+            format!("gameplay/stages/{stage_id}/{cleaned}"),
+            format!("stages/{stage_id}/{cleaned}"),
+        ]
+    };
+    for rel in rels {
+        if let Some(dir) = mods.resolve_dir(&rel)
+            && dir.join("Animation.json").is_file()
+        {
+            return Some(dir);
+        }
+        let stem = Path::new(&rel).with_extension("").to_string_lossy().replace('\\', "/");
+        if let Some(dir) = mods.resolve_dir(&stem)
+            && dir.join("Animation.json").is_file()
+        {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+pub fn resolve_stage_image_in(mods: &ModRegistry, stage_id: &str, raw: &str) -> Option<PathBuf> {
+    let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
+    let rels = if cleaned.starts_with("gameplay/") {
+        vec![
+            cleaned.to_string(),
+            format!("gameplay/stages/{stage_id}/{cleaned}"),
+        ]
+    } else {
+        vec![
+            format!("gameplay/stages/{stage_id}/{cleaned}"),
+            format!("stages/{stage_id}/{cleaned}"),
+        ]
+    };
+
+    for rel in &rels {
+        if let Some(found) = mods.resolve_with_extensions(rel, &["png", "jpg", "jpeg", "webp"]) {
+            return Some(found);
+        }
+    }
+
+    let stage_dirs = [
+        mods.assets_dir.join("gameplay").join("stages").join(stage_id),
+    ];
+    for stage_dir in stage_dirs {
+        if let Some(found) = resolve_stage_image(&mods.assets_dir, &stage_dir, raw) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 pub fn resolve_atlas_dir(assets_dir: &Path, stage_dir: &Path, raw: &str) -> Option<PathBuf> {
     let cleaned = raw.trim().trim_start_matches("./").trim_start_matches('/');
     let candidates = if cleaned.starts_with("gameplay/") {

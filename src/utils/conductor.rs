@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use super::constants::{DEFAULT_BPM, MS_PER_SEC, SECS_PER_MIN, STEPS_PER_BEAT};
 
 #[derive(Debug, Clone)]
@@ -253,6 +255,38 @@ impl Conductor {
 
     pub fn get_time_in_measures(&self, ms: f64) -> f64 {
         self.get_time_in_steps(ms) / f64::from(self.steps_per_measure().max(1))
+    }
+}
+
+/// Advances `last_step` to `current_step` and returns the newly crossed steps (capped to 64).
+pub fn advance_step_range(
+    last_step: &mut Option<i32>,
+    current_step: i32,
+    paused: bool,
+    reset: bool,
+) -> Option<RangeInclusive<i32>> {
+    if reset {
+        *last_step = Some(current_step);
+        return None;
+    }
+    if paused {
+        return None;
+    }
+    match *last_step {
+        None => {
+            *last_step = Some(current_step);
+            Some(current_step..=current_step)
+        }
+        Some(prev) if current_step > prev => {
+            *last_step = Some(current_step);
+            let start = (prev + 1).max(current_step - 63);
+            Some(start..=current_step)
+        }
+        Some(prev) if current_step < prev => {
+            *last_step = Some(current_step);
+            None
+        }
+        Some(_) => None,
     }
 }
 

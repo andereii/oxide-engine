@@ -5,12 +5,19 @@ use bevy::prelude::*;
 use crate::animations::{AnimationController, Bopper};
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
+use crate::utils::conductor::advance_step_range;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::ecs::{set_atlas_index, set_sprite_flip, set_transform_full, set_visibility};
 
 use super::loader::{StagePropKind, StageResource};
 use super::paths::parse_hex_color;
 use super::schema::{StageCoordMode, stage_layer_z};
+
+#[derive(Component)]
+pub struct DynamicScriptProp {
+    pub id: String,
+    pub hud: bool,
+}
 
 #[derive(Component)]
 #[allow(dead_code)]
@@ -140,6 +147,7 @@ pub fn sync_stage_props(
         &mut Visibility,
         Option<&mut AnimationController>,
         Option<&mut Bopper>,
+        Option<&DynamicScriptProp>,
     )>,
 ) {
     let paused = matches!(
@@ -147,30 +155,35 @@ pub fn sync_stage_props(
         PlayPhase::Paused(_) | PlayPhase::GameOver | PlayPhase::Ended
     );
     let current_step = state.conductor.current_step;
-    let step_changed = if state.needs_reset {
-        sync_state.last_step = None;
-        false
-    } else if !paused && sync_state.last_step != Some(current_step) {
-        sync_state.last_step = Some(current_step);
-        true
-    } else {
-        false
-    };
+    let step_range = advance_step_range(
+        &mut sync_state.last_step,
+        current_step,
+        paused,
+        state.needs_reset,
+    );
 
     let cam_scroll_x = state.camera.follow_point[0] as f32 - SCREEN_WIDTH * 0.5;
     let cam_scroll_y = state.camera.follow_point[1] as f32 - SCREEN_HEIGHT * 0.5;
     let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
 
-    for (vis, mut sprite, mut transform, mut visibility, anim_opt, bopper_opt) in &mut animated_props {
-        if !vis.visible {
+    for (vis, mut sprite, mut transform, mut visibility, anim_opt, bopper_opt, dyn_opt) in
+        &mut animated_props
+    {
+        let is_hud = dyn_opt.is_some_and(|d| d.hud);
+        if !vis.visible || (is_hud && !state.hud_visible) {
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
+        let prop_zoom = if is_hud { 1.0 } else { zoom };
+        let eff_scroll_x = if is_hud { 0.0 } else { cam_scroll_x * vis.scroll_factor[0] };
+        let eff_scroll_y = if is_hud { 0.0 } else { cam_scroll_y * vis.scroll_factor[1] };
         let (anim_off, frame_off, anim_flip, rotated) = match (anim_opt, bopper_opt) {
             (Some(mut anim), Some(mut bopper)) => {
                 bopper.sync_finished(&anim);
-                if step_changed {
-                    bopper.on_step_hit(current_step, &mut anim);
+                if let Some(steps) = step_range.clone() {
+                    for step in steps {
+                        bopper.on_step_hit(step, &mut anim);
+                    }
                 }
                 if let Some(idx) = anim.current_atlas_index() {
                     set_atlas_index(&mut sprite, idx);
@@ -201,11 +214,13 @@ pub fn sync_stage_props(
         world_cx -= anim_off[0] * vis.base_scale[0];
         world_cy -= anim_off[1] * vis.base_scale[1];
 
-        let screen_cx = world_cx - cam_scroll_x * vis.scroll_factor[0];
-        let screen_cy = world_cy - cam_scroll_y * vis.scroll_factor[1];
+        let screen_cx = world_cx - eff_scroll_x;
+        let screen_cy = world_cy - eff_scroll_y;
 
-        let bx = (screen_cx - SCREEN_WIDTH * 0.5) * zoom + frame_off[0] * vis.base_scale[0] * zoom;
-        let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * zoom + frame_off[1] * vis.base_scale[1] * zoom;
+        let bx = (screen_cx - SCREEN_WIDTH * 0.5) * prop_zoom
+            + frame_off[0] * vis.base_scale[0] * prop_zoom;
+        let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * prop_zoom
+            + frame_off[1] * vis.base_scale[1] * prop_zoom;
 
         let base_rot = -vis.base_angle_deg.to_radians();
         let eff_flip_x = vis.base_flip[0] ^ anim_flip[0];
@@ -218,7 +233,7 @@ pub fn sync_stage_props(
         set_transform_full(
             &mut transform,
             Vec3::new(bx, by, vis.z_layer),
-            Vec3::new(vis.base_scale[0] * zoom, vis.base_scale[1] * zoom, 1.0),
+            Vec3::new(vis.base_scale[0] * prop_zoom, vis.base_scale[1] * prop_zoom, 1.0),
             Quat::from_rotation_z(base_rot + rot_delta),
         );
         set_sprite_flip(&mut sprite, eff_flip_x, eff_flip_y);

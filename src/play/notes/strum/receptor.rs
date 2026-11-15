@@ -61,6 +61,10 @@ pub struct ReceptorState {
     pub y_offset: f32,
     pub alpha: f32,
     pub fade_tween: Option<ArrowFadeTween>,
+    pub mod_offset: [f32; 2],
+    pub mod_scale: [f32; 2],
+    pub mod_angle_deg: f32,
+    pub mod_alpha: f32,
 }
 
 impl ReceptorState {
@@ -74,7 +78,18 @@ impl ReceptorState {
             y_offset: 0.0,
             alpha: 1.0,
             fade_tween: None,
+            mod_offset: [0.0, 0.0],
+            mod_scale: [1.0, 1.0],
+            mod_angle_deg: 0.0,
+            mod_alpha: 1.0,
         }
+    }
+
+    pub fn reset_modchart(&mut self) {
+        self.mod_offset = [0.0, 0.0];
+        self.mod_scale = [1.0, 1.0];
+        self.mod_angle_deg = 0.0;
+        self.mod_alpha = 1.0;
     }
 
     pub fn play_static(&mut self) {

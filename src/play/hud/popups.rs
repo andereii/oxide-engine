@@ -4,6 +4,7 @@ use crate::utils::constants::KEY_COUNT;
 use crate::utils::ecs::{set_sprite_color, set_visibility};
 
 use super::judgement::Judgement;
+use crate::mods::ModRegistry;
 use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
@@ -61,13 +62,17 @@ struct PopupSpawnParams {
     is_pixel: bool,
 }
 
-pub fn load_popup_assets(style: &NoteStyle, asset_server: &AssetServer) -> PopupAssets {
+pub fn load_popup_assets(
+    mods: &ModRegistry,
+    style: &NoteStyle,
+    asset_server: &AssetServer,
+) -> PopupAssets {
     let mut ratings: [Option<(Handle<Image>, f32, f32, [f32; 2])>; 4] = Default::default();
     for i in 0..KEY_COUNT {
         let cfg = &style.popup.judgments[i];
         if let Some(rel) = &cfg.path {
             ratings[i] = Some((
-                asset_server.load(style.asset_path(rel)),
+                asset_server.load(style.asset_path_in(mods, rel)),
                 cfg.scale,
                 cfg.alpha,
                 cfg.offset,
@@ -77,7 +82,7 @@ pub fn load_popup_assets(style: &NoteStyle, asset_server: &AssetServer) -> Popup
     let digits = std::array::from_fn(|d| {
         style.popup.combo_digits[d]
             .as_ref()
-            .map(|rel| asset_server.load(style.asset_path(rel)))
+            .map(|rel| asset_server.load(style.asset_path_in(mods, rel)))
     });
     PopupAssets {
         ratings,

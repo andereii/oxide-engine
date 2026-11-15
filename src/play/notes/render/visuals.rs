@@ -84,14 +84,15 @@ pub struct NoteskinAssets {
 }
 
 pub fn load_noteskin_assets(
+    mods: &crate::mods::ModRegistry,
     style: &NoteStyle,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) -> Result<NoteskinAssets, String> {
-    let strum_xml = SparrowAtlas::from_file(style.disk_xml(&style.strum_path))?;
+    let strum_xml = SparrowAtlas::from_file(style.disk_xml_in(mods, &style.strum_path))?;
     let (strum_layout_data, strum_map) = strum_xml.build_layout();
     let strum_layout = layouts.add(strum_layout_data);
-    let strum_texture = asset_server.load(style.asset_path(&style.strum_path));
+    let strum_texture = asset_server.load(style.asset_path_in(mods, &style.strum_path));
 
     let mut strum_frames: [(AnimClipFrames, AnimClipFrames, AnimClipFrames, AnimClipFrames); 4] = Default::default();
     for i in 0..KEY_COUNT {
@@ -117,10 +118,10 @@ pub fn load_noteskin_assets(
         strum_frames[i] = (st, pr, cf, ch);
     }
 
-    let notes_xml = SparrowAtlas::from_file(style.disk_xml(&style.notes_path))?;
+    let notes_xml = SparrowAtlas::from_file(style.disk_xml_in(mods, &style.notes_path))?;
     let (notes_layout_data, notes_map) = notes_xml.build_layout();
     let notes_layout = layouts.add(notes_layout_data);
-    let notes_texture = asset_server.load(style.asset_path(&style.notes_path));
+    let notes_texture = asset_server.load(style.asset_path_in(mods, &style.notes_path));
 
     let mut note_frames = [(0usize, [0.0f32, 0.0f32], false); 4];
     for i in 0..KEY_COUNT {
@@ -133,11 +134,11 @@ pub fn load_noteskin_assets(
     }
 
     let (sustain_texture, sustain_layout, sustain_indices) =
-        load_sustains(style, asset_server, layouts);
+        load_sustains(mods, style, asset_server, layouts);
     let (splash_texture, splash_layout, splash_variants) =
-        load_splashes(style, asset_server, layouts);
+        load_splashes(mods, style, asset_server, layouts);
     let (hold_cover_textures, hold_cover_layouts, hold_cover_frames) =
-        load_hold_covers(style, asset_server, layouts);
+        load_hold_covers(mods, style, asset_server, layouts);
 
     Ok(NoteskinAssets {
         style: style.clone(),
@@ -160,6 +161,7 @@ pub fn load_noteskin_assets(
 }
 
 fn load_sustains(
+    mods: &crate::mods::ModRegistry,
     style: &NoteStyle,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
@@ -168,7 +170,7 @@ fn load_sustains(
     Option<Handle<TextureAtlasLayout>>,
     [(usize, usize, f32, f32); 4],
 ) {
-    let Ok(xml) = SparrowAtlas::from_file(style.disk_xml(&style.sustains_path)) else {
+    let Ok(xml) = SparrowAtlas::from_file(style.disk_xml_in(mods, &style.sustains_path)) else {
         return (None, None, [(0, 0, 52.0, 44.0); 4]);
     };
     let (_, map) = xml.build_layout();
@@ -179,7 +181,7 @@ fn load_sustains(
         max_y = max_y.max(f.y + f.height);
     }
     let mut trimmed_layout = TextureAtlasLayout::new_empty(UVec2::new(max_x, max_y));
-    let tex = asset_server.load(style.asset_path(&style.sustains_path));
+    let tex = asset_server.load(style.asset_path_in(mods, &style.sustains_path));
     let mut s_idx = [(0usize, 0usize, 52.0f32, 44.0f32); 4];
     for i in 0..KEY_COUNT {
         let anim = &style.sustain_anims[i];
@@ -208,6 +210,7 @@ fn load_sustains(
 }
 
 fn load_splashes(
+    mods: &crate::mods::ModRegistry,
     style: &NoteStyle,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
@@ -219,12 +222,12 @@ fn load_splashes(
     if !style.splash_enabled {
         return (None, None, Default::default());
     }
-    let Ok(xml) = SparrowAtlas::from_file(style.disk_xml(&style.splash_path)) else {
+    let Ok(xml) = SparrowAtlas::from_file(style.disk_xml_in(mods, &style.splash_path)) else {
         return (None, None, Default::default());
     };
     let (layout_data, map) = xml.build_layout();
     let layout = layouts.add(layout_data);
-    let tex = asset_server.load(style.asset_path(&style.splash_path));
+    let tex = asset_server.load(style.asset_path_in(mods, &style.splash_path));
     let mut variants: [Vec<AnimClipFrames>; 4] = Default::default();
     for i in 0..KEY_COUNT {
         for prefix in &style.splash_anims[i] {
@@ -238,6 +241,7 @@ fn load_splashes(
 }
 
 fn load_hold_covers(
+    mods: &crate::mods::ModRegistry,
     style: &NoteStyle,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
@@ -254,12 +258,12 @@ fn load_hold_covers(
     }
     for i in 0..KEY_COUNT {
         let dir_cfg = &style.hold_cover_dirs[i];
-        let Ok(xml) = SparrowAtlas::from_file(style.disk_xml(&dir_cfg.path)) else {
+        let Ok(xml) = SparrowAtlas::from_file(style.disk_xml_in(mods, &dir_cfg.path)) else {
             continue;
         };
         let (layout_data, map) = xml.build_layout();
         layout_handles[i] = Some(layouts.add(layout_data));
-        textures[i] = Some(asset_server.load(style.asset_path(&dir_cfg.path)));
+        textures[i] = Some(asset_server.load(style.asset_path_in(mods, &dir_cfg.path)));
         let hold = AnimClipFrames::from_sparrow(xml.find_prefix_frames(&map, &dir_cfg.hold_anim));
         let raw_start = AnimClipFrames::from_sparrow(xml.find_prefix_frames(&map, &dir_cfg.start_anim));
         let start = if raw_start.indices.is_empty() { hold.first_only() } else { raw_start };

@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::play::scene::PlayState;
 use crate::play::types::SongEventData;
+use crate::scripting::{HookKind, ScriptEvent, ScriptValue};
 use crate::utils::constants::{DEFAULT_BOP_INTENSITY, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE};
 use crate::utils::easing::EaseKind;
 
@@ -41,12 +42,18 @@ pub fn load_song_events(events_path: &Path, difficulty: &str) -> Vec<SongEventDa
 }
 
 fn parse_song_event(raw: RawEventEntry) -> SongEventData {
+    parse_raw_song_event(raw.t, raw.e, raw.v)
+}
+
+/// Parses a raw chart/script event entry into a normalized [`SongEventData`].
+pub fn parse_raw_song_event(time_ms: f64, kind: String, v: serde_json::Value) -> SongEventData {
     let mut ev = SongEventData {
-        time_ms: raw.t,
-        kind: raw.e,
+        time_ms,
+        kind,
+        raw_value: v.clone(),
         ..Default::default()
     };
-    let v = &raw.v;
+    let v = &v;
     match ev.kind.as_str() {
         "FocusCamera" => {
             ev.target_char = get_int(v, "char").or_else(|| scalar_int(v));
@@ -102,6 +109,13 @@ impl PlayState {
             }
         }
         for event in due {
+            self.pending_hooks.push((
+                HookKind::SongEvent,
+                ScriptEvent::new(HookKind::SongEvent)
+                    .with_field("name", event.kind.clone())
+                    .with_field("time", event.time_ms)
+                    .with_field("value", ScriptValue::from_json(&event.raw_value)),
+            ));
             let target_lower = event.strumline_target.to_ascii_lowercase();
             let apply_player = target_lower != "opponent";
             let apply_opponent = target_lower != "player";

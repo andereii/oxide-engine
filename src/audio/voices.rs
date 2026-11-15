@@ -1,6 +1,8 @@
 use bevy::audio::{AudioSink, AudioSinkPlayback, Volume};
 use bevy::prelude::Query;
 
+use crate::utils::constants::RESYNC_COOLDOWN_S;
+
 use super::sound::{TrackHandle, TrackRole};
 
 #[derive(Debug, Clone)]
@@ -63,7 +65,7 @@ impl VoicesGroup {
                         sink.play();
                         track.pending = false;
                         track.started = true;
-                        track.resync_cooldown_s = 0.5;
+                        track.resync_cooldown_s = RESYNC_COOLDOWN_S;
                     }
                 }
             }

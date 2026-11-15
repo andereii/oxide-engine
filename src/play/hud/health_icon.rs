@@ -1,10 +1,9 @@
 use std::f32::consts::FRAC_PI_2;
-use std::path::Path;
 
 use bevy::prelude::*;
-use oxin_app::resolve_assets_dir;
 
 use crate::animations::{AnimationController, SparrowAtlas};
+use crate::mods::ModRegistry;
 use crate::play::characters::schema::{CharacterRole, HealthIconData};
 use crate::play::characters::loader::CharactersResource;
 use crate::utils::constants::{
@@ -96,22 +95,22 @@ impl HealthIcon {
 }
 
 pub fn spawn_health_icons(
+    mods: &ModRegistry,
     commands: &mut Commands,
     chars: Option<&CharactersResource>,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
-    let assets_dir = resolve_assets_dir();
     let p2_char = chars.and_then(|c| c.characters.iter().find(|ch| ch.role == CharacterRole::Opponent));
     let p1_char = chars.and_then(|c| c.characters.iter().find(|ch| ch.role == CharacterRole::Player));
 
-    spawn_single_icon(commands, &assets_dir, 1, p2_char.map(|c| c.id.as_str()), p2_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
-    spawn_single_icon(commands, &assets_dir, 0, p1_char.map(|c| c.id.as_str()), p1_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
+    spawn_single_icon(commands, mods, 1, p2_char.map(|c| c.id.as_str()), p2_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
+    spawn_single_icon(commands, mods, 0, p1_char.map(|c| c.id.as_str()), p1_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
 }
 
 fn spawn_single_icon(
     commands: &mut Commands,
-    assets_dir: &Path,
+    mods: &ModRegistry,
     player_id: u8,
     char_id: Option<&str>,
     data: Option<&HealthIconData>,
@@ -119,7 +118,7 @@ fn spawn_single_icon(
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
     let requested_id = data.and_then(|d| d.id.as_deref()).or(char_id).unwrap_or(DEFAULT_HEALTH_ICON);
-    let icon_id = if icon_png_exists(assets_dir, requested_id) { requested_id } else { DEFAULT_HEALTH_ICON };
+    let icon_id = if icon_png_exists(mods, requested_id) { requested_id } else { DEFAULT_HEALTH_ICON };
     let is_pixel = data.and_then(|d| d.is_pixel).unwrap_or(false);
     let should_bop = true;
     let scale = data.and_then(|d| d.scale).unwrap_or(1.0);
@@ -131,11 +130,15 @@ fn spawn_single_icon(
 
     let xml_rel = format!("gameplay/characters/{icon_id}/icon-{icon_id}.xml");
     let png_rel = format!("gameplay/characters/{icon_id}/icon-{icon_id}.png");
-    let texture = asset_server.load(png_rel);
+    let png_asset = mods.resolve_asset_server_path(&png_rel).unwrap_or(png_rel);
+    let texture = asset_server.load(png_asset);
     let mut anim = AnimationController::default();
 
+    let xml_disk = mods
+        .resolve_file(&xml_rel)
+        .unwrap_or_else(|| mods.assets_dir.join(&xml_rel));
     let (layout_handle, is_legacy_style, base_frame_size, legacy_image) =
-        if let Ok(sparrow) = SparrowAtlas::from_file(assets_dir.join(&xml_rel)) {
+        if let Ok(sparrow) = SparrowAtlas::from_file(&xml_disk) {
             let (layout_data, map) = sparrow.build_layout();
             for name in ["idle", "winning", "losing", "toWinning", "fromWinning", "toLosing", "fromLosing"] {
                 let looped = matches!(name, "idle" | "winning" | "losing");
@@ -188,8 +191,8 @@ fn spawn_single_icon(
     commands.spawn((sprite, Transform::from_xyz(0.0, 0.0, 10.5), anim, hud_render_layer(), icon));
 }
 
-fn icon_png_exists(assets_dir: &Path, char_id: &str) -> bool {
-    assets_dir.join(format!("gameplay/characters/{char_id}/icon-{char_id}.png")).is_file()
+fn icon_png_exists(mods: &ModRegistry, char_id: &str) -> bool {
+    mods.file_exists(&format!("gameplay/characters/{char_id}/icon-{char_id}.png"))
 }
 
 pub fn update_icon_state_and_transform(

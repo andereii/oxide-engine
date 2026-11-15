@@ -3,14 +3,13 @@ use std::time::Duration;
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, PlaybackMode, PlaybackSettings, Volume};
 use bevy::prelude::{AssetServer, AudioSource, Commands, Query, Resource};
 
-use crate::play::song::song_asset_path;
+use crate::mods::ModRegistry;
+use crate::play::song::song_asset_path_in;
 use crate::play::types::SongChart;
-use crate::utils::constants::RESYNC_THRESHOLD_MS;
+use crate::utils::constants::{RESYNC_COOLDOWN_S, RESYNC_THRESHOLD_MS};
 
 use super::sound::{TrackHandle, TrackRole};
 use super::voices::VoicesGroup;
-
-pub const RESYNC_COOLDOWN_S: f64 = 0.5;
 
 /// Only vocal tracks resync periodically (instrumental is the master clock),
 /// and never before `resync_cooldown_s` settles an async `rodio` seek.
@@ -51,8 +50,9 @@ pub struct SongAudioPlayer {
 }
 
 impl SongAudioPlayer {
-    pub fn load_for_chart(
+    pub fn load_for_chart_with_mods(
         &mut self,
+        mods: &ModRegistry,
         commands: &mut Commands,
         asset_server: &AssetServer,
         chart: &SongChart,
@@ -78,7 +78,7 @@ impl SongAudioPlayer {
                 commands,
                 asset_server,
                 TrackRole::Instrumental,
-                song_asset_path(&chart.song_id, "Inst.ogg"),
+                song_asset_path_in(mods, &chart.song_id, "Inst.ogg"),
                 0.0,
                 1.0,
             );
@@ -88,7 +88,7 @@ impl SongAudioPlayer {
                     commands,
                     asset_server,
                     TrackRole::Instrumental,
-                    song_asset_path(&chart.song_id, &spec.file),
+                    song_asset_path_in(mods, &chart.song_id, &spec.file),
                     spec.offset_ms,
                     spec.volume,
                 );
@@ -102,7 +102,7 @@ impl SongAudioPlayer {
                         commands,
                         asset_server,
                         TrackRole::PlayerVocal,
-                        song_asset_path(&chart.song_id, &spec.file),
+                        song_asset_path_in(mods, &chart.song_id, &spec.file),
                         spec.offset_ms,
                         spec.volume,
                     );
@@ -112,7 +112,7 @@ impl SongAudioPlayer {
                         commands,
                         asset_server,
                         TrackRole::OpponentVocal,
-                        song_asset_path(&chart.song_id, &spec.file),
+                        song_asset_path_in(mods, &chart.song_id, &spec.file),
                         spec.offset_ms,
                         spec.volume,
                     );
@@ -122,7 +122,7 @@ impl SongAudioPlayer {
                         commands,
                         asset_server,
                         TrackRole::SpectatorVocal,
-                        song_asset_path(&chart.song_id, &spec.file),
+                        song_asset_path_in(mods, &chart.song_id, &spec.file),
                         spec.offset_ms,
                         spec.volume,
                     );
@@ -132,7 +132,7 @@ impl SongAudioPlayer {
                     commands,
                     asset_server,
                     TrackRole::SharedVocal,
-                    song_asset_path(&chart.song_id, &chart.audio.shared_vocal_file),
+                    song_asset_path_in(mods, &chart.song_id, &chart.audio.shared_vocal_file),
                     0.0,
                     1.0,
                 );

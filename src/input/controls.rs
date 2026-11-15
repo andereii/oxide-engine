@@ -33,6 +33,7 @@ pub enum Action {
     DebugCamera,
     DebugStage,
     DebugDisplay,
+    ReloadMods,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,6 +67,7 @@ pub enum Control {
     DebugCamera,
     DebugStage,
     DebugDisplay,
+    ReloadMods,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +121,7 @@ impl Controls {
         self.bind_keys(Action::VolumeMute, vec![KeyCode::Digit0, KeyCode::Numpad0]);
         self.bind_keys(Action::WindowFullscreen, vec![KeyCode::F11]);
         self.bind_keys(Action::WindowScreenshot, vec![KeyCode::F3]);
+        self.bind_keys(Action::ReloadMods, vec![KeyCode::F5]);
         self.bind_keys(Action::DebugDisplay, vec![KeyCode::F6]);
 
         match scheme {

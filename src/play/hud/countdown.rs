@@ -2,6 +2,7 @@ use bevy::audio::{AudioPlayer, PlaybackMode, PlaybackSettings, Volume};
 use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
+use crate::mods::ModRegistry;
 use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
@@ -31,12 +32,16 @@ pub struct CountdownGraphicVisual {
     pub base_alpha: f32,
 }
 
-pub fn load_countdown_assets(style: &NoteStyle, asset_server: &AssetServer) -> CountdownAssets {
+pub fn load_countdown_assets(
+    mods: &ModRegistry,
+    style: &NoteStyle,
+    asset_server: &AssetServer,
+) -> CountdownAssets {
     let sounds = std::array::from_fn(|idx| {
         style.countdown_sounds[idx]
             .as_ref()
             .filter(|rel| !rel.trim().is_empty())
-            .map(|rel| (asset_server.load(style.asset_path(rel)), style.countdown_volumes[idx]))
+            .map(|rel| (asset_server.load(style.asset_path_in(mods, rel)), style.countdown_volumes[idx]))
     });
     let graphics = std::array::from_fn(|idx| {
         let cfg = &style.countdown_images[idx];
@@ -44,7 +49,7 @@ pub fn load_countdown_assets(style: &NoteStyle, asset_server: &AssetServer) -> C
             .as_ref()
             .filter(|rel| !rel.trim().is_empty())
             .map(|rel| CountdownGraphicSpec {
-                texture: asset_server.load(style.asset_path(rel)),
+                texture: asset_server.load(style.asset_path_in(mods, rel)),
                 scale: cfg.scale,
                 alpha: cfg.alpha,
                 offset: cfg.offset,

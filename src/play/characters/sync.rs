@@ -8,6 +8,7 @@ use crate::play::notes::CharNoteSignal;
 use crate::play::scene::PlayState;
 use crate::play::stage::schema::stage_layer_z;
 use crate::play::types::PlayPhase;
+use crate::utils::conductor::advance_step_range;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::ecs::{
     set_sprite_atlas, set_sprite_color, set_sprite_flip, set_transform_full, set_visibility,
@@ -52,15 +53,7 @@ pub fn sync_characters(
     sync_state.last_song_pos_ms = Some(current_pos_ms);
 
     let current_step = state.conductor.current_step;
-    let step_changed = if did_reset {
-        sync_state.last_step = Some(current_step);
-        false
-    } else if !paused && sync_state.last_step != Some(current_step) {
-        sync_state.last_step = Some(current_step);
-        true
-    } else {
-        false
-    };
+    let step_range = advance_step_range(&mut sync_state.last_step, current_step, paused, did_reset);
 
     let elapsed_s = if paused { 0.0 } else { f64::from(time.delta_secs()) };
     let song_pos_ms = (state.phase == PlayPhase::Playing).then_some(current_pos_ms);
@@ -94,8 +87,10 @@ pub fn sync_characters(
             for sig in opponent_signals.iter() {
                 actor.handle_opponent_signal(sig, &state.note_kinds);
             }
-            if step_changed {
-                actor.on_step_hit(current_step);
+            if let Some(steps) = step_range.clone() {
+                for step in steps {
+                    actor.on_step_hit(step);
+                }
             }
         }
 
@@ -118,7 +113,8 @@ fn sync_actor_visuals(
     let anim_flip = actor.controller.current_flip();
     let flip = [eff_flip[0] ^ anim_flip[0], eff_flip[1] ^ anim_flip[1]];
     let anim_off = actor.controller.current_offset();
-    let tint = Color::srgba(1.0, 1.0, 1.0, actor.slot.opacity.clamp(0.0, 1.0));
+    let alpha = (actor.slot.opacity * actor.mod_tint[3]).clamp(0.0, 1.0);
+    let tint = Color::srgba(actor.mod_tint[0], actor.mod_tint[1], actor.mod_tint[2], alpha);
 
     let cur_clip = actor.controller.current_name().and_then(|n| actor.clips.get(n));
     match cur_clip {
@@ -216,7 +212,14 @@ fn sync_sheet_part(
         Vec3::new(scale[0] * zoom, scale[1] * zoom, 1.0),
         Quat::from_rotation_z(rot),
     );
-    set_visibility(vis, if actor.slot.visible { Visibility::Visible } else { Visibility::Hidden });
+    set_visibility(
+        vis,
+        if actor.slot.visible && actor.mod_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        },
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

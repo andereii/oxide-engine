@@ -135,27 +135,39 @@ fn sync_receptors(
         }
         let rec_state = &strum.receptors[rec.lane];
         let z = { let t: &Transform = &*transform; t.translation.z };
-        let scale = style.strum_scale * strum.strumline_scale;
+        let base_scale = style.strum_scale * strum.strumline_scale;
+        let sx = base_scale * rec_state.mod_scale[0];
+        let sy = base_scale * rec_state.mod_scale[1];
         let f_off = anim.current_frame_offset();
         let anim_off = anim.current_offset();
         let flip = anim.current_flip();
-        let rot = if anim.current_frame_rotated() {
-            Quat::from_rotation_z(if flip[0] ^ flip[1] { -FRAC_PI_2 } else { FRAC_PI_2 })
+        let frame_rot = if anim.current_frame_rotated() {
+            if flip[0] ^ flip[1] { -FRAC_PI_2 } else { FRAC_PI_2 }
         } else {
-            Quat::IDENTITY
+            0.0
         };
+        let rot = Quat::from_rotation_z(-rec_state.mod_angle_deg.to_radians() + frame_rot);
+        let middle_alpha = if strum.middlescroll && !strum.is_player { 0.0 } else { 1.0 };
         set_sprite_flip(&mut sprite, flip[0], flip[1]);
         set_transform_full(
             &mut transform,
             Vec3::new(
-                strum.lane_x(rec.lane) + (f_off[0] - anim_off[0]) * scale,
-                strum.receptor_y() + rec_state.y_offset + (f_off[1] + anim_off[1]) * scale,
+                strum.lane_x(rec.lane) + (f_off[0] - anim_off[0]) * sx,
+                strum.lane_y(rec.lane) + rec_state.y_offset + (f_off[1] + anim_off[1]) * sy,
                 z,
             ),
-            Vec3::splat(scale),
+            Vec3::new(sx, sy, 1.0),
             rot,
         );
-        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.strum_alpha * rec_state.alpha));
+        set_sprite_color(
+            &mut sprite,
+            Color::srgba(
+                1.0,
+                1.0,
+                1.0,
+                style.strum_alpha * rec_state.alpha * rec_state.mod_alpha * middle_alpha,
+            ),
+        );
 
         if rec.last_anim_gen != rec_state.anim_gen {
             rec.last_anim_gen = rec_state.anim_gen;
@@ -242,25 +254,41 @@ fn apply_note_transform(
     transform: &mut Mut<'_, Transform>,
     visibility: &mut Mut<'_, Visibility>,
 ) {
-    let y = strum.note_y_at(note.data.time_ms, vis_pos) + style.notes_offset[1] + note.y_offset;
+    let lane_idx = note.lane.index();
+    if strum.middlescroll && !strum.is_player {
+        set_visibility(visibility, Visibility::Hidden);
+        return;
+    }
+    let rec_state = strum.receptors.get(lane_idx);
+    let mod_scale = rec_state.map_or([1.0, 1.0], |r| r.mod_scale);
+    let mod_alpha = rec_state.map_or(1.0, |r| r.mod_alpha);
+    let mod_angle = rec_state.map_or(0.0, |r| r.mod_angle_deg);
+
+    let y = strum.note_y_at(lane_idx, note.data.time_ms, vis_pos) + style.notes_offset[1] + note.y_offset;
     if y < -520.0 || y > 520.0 {
         set_visibility(visibility, Visibility::Hidden);
         return;
     }
     set_visibility(visibility, Visibility::Visible);
     let z = { let t: &Mut<'_, Transform> = &*transform; t.translation.z };
-    let scale = style.notes_scale * strum.strumline_scale;
-    let rot = if rotated { Quat::from_rotation_z(FRAC_PI_2) } else { Quat::IDENTITY };
+    let base_scale = style.notes_scale * strum.strumline_scale;
+    let sx = base_scale * mod_scale[0];
+    let sy = base_scale * mod_scale[1];
+    let rot_z = -mod_angle.to_radians() + if rotated { FRAC_PI_2 } else { 0.0 };
+    let rot = Quat::from_rotation_z(rot_z);
     set_transform_full(
         transform,
         Vec3::new(
-            strum.lane_x(note.lane.index()) + style.notes_offset[0] + frame_offset[0] * scale,
-            y + frame_offset[1] * scale,
+            strum.lane_x(lane_idx) + style.notes_offset[0] + frame_offset[0] * sx,
+            y + frame_offset[1] * sy,
             z,
         ),
-        Vec3::splat(scale),
+        Vec3::new(sx, sy, 1.0),
         rot,
     );
     let tint = if note.desaturated { 0.65 } else { 1.0 };
-    set_sprite_color(sprite, Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha));
+    set_sprite_color(
+        sprite,
+        Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha * mod_alpha),
+    );
 }

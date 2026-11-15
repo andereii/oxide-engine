@@ -1,8 +1,8 @@
 use bevy::prelude::KeyCode;
 
 use crate::utils::constants::{
-    GHOST_TAP_DELAY_S, HIT_WINDOW_MS, NOTE_NUDGE, NOTE_SPACING, PIXELS_PER_MS, SCREEN_HEIGHT,
-    STRUMLINE_X_OFFSET, STRUMLINE_Y_OFFSET,
+    GHOST_TAP_DELAY_S, HIT_WINDOW_MS, KEY_COUNT, NOTE_NUDGE, NOTE_SPACING, PIXELS_PER_MS,
+    SCREEN_HEIGHT, STRUMLINE_X_OFFSET, STRUMLINE_Y_OFFSET,
 };
 
 use crate::play::notes::data::{ActiveHold, NoteDirection, NoteSprite, ScrollLagState, ScrollVelocityTimeline};
@@ -44,6 +44,8 @@ pub enum CharNoteSignal {
 pub struct Strumline {
     pub is_player: bool,
     pub is_downscroll: bool,
+    pub middlescroll: bool,
+    pub strums_swapped: bool,
     pub scroll_speed: f64,
     pub base_scroll_speed: f64,
     pub note_spacing_scale: f32,
@@ -57,9 +59,9 @@ pub struct Strumline {
     pub notes: Vec<NoteSprite>,
     pub active_start_index: usize,
     pub next_note_index: usize,
-    pub held_keys: [Vec<KeyCode>; 4],
-    pub active_holds: [Option<ActiveHold>; 4],
-    pub receptors: [ReceptorState; 4],
+    pub held_keys: [Vec<KeyCode>; KEY_COUNT],
+    pub active_holds: [Option<ActiveHold>; KEY_COUNT],
+    pub receptors: [ReceptorState; KEY_COUNT],
     pub scroll_velocity: Option<ScrollVelocityTimeline>,
     pub lag_state: ScrollLagState,
     pub song_position_ms: f64,
@@ -76,6 +78,8 @@ impl Strumline {
         Self {
             is_player,
             is_downscroll: false,
+            middlescroll: false,
+            strums_swapped: false,
             scroll_speed,
             base_scroll_speed: scroll_speed,
             note_spacing_scale: 1.0,
@@ -90,7 +94,7 @@ impl Strumline {
             active_start_index: 0,
             next_note_index: 0,
             held_keys: Default::default(),
-            active_holds: [None; 4],
+            active_holds: [None; KEY_COUNT],
             receptors: [
                 ReceptorState::new(is_player),
                 ReceptorState::new(is_player),
@@ -133,12 +137,20 @@ impl Strumline {
     pub fn lane_x(&self, lane: usize) -> f32 {
         let spacing = NOTE_SPACING * self.note_spacing_scale * self.strumline_scale;
         let group_w = spacing * 3.0;
-        let start_x = if self.is_player {
+        let mod_x = self.receptors.get(lane).map_or(0.0, |r| r.mod_offset[0]);
+        let start_x = if self.middlescroll && self.is_player {
+            -group_w * 0.5
+        } else if self.is_player ^ self.strums_swapped {
             640.0 - STRUMLINE_X_OFFSET - group_w - 72.0
         } else {
             -640.0 + STRUMLINE_X_OFFSET + 72.0
         };
-        start_x + (lane as f32) * spacing
+        start_x + (lane as f32) * spacing + mod_x
+    }
+
+    pub fn lane_y(&self, lane: usize) -> f32 {
+        let mod_y = self.receptors.get(lane).map_or(0.0, |r| r.mod_offset[1]);
+        self.receptor_y() + mod_y
     }
 
     pub fn note_x(&self, lane: usize) -> f32 {
@@ -150,9 +162,9 @@ impl Strumline {
         PIXELS_PER_MS * self.scroll_speed * dir
     }
 
-    pub fn note_y_at(&self, note_time_ms: f64, song_pos_ms: f64) -> f32 {
+    pub fn note_y_at(&self, lane: usize, note_time_ms: f64, song_pos_ms: f64) -> f32 {
         let distance_ms = note_time_ms - song_pos_ms;
-        self.receptor_y() + (distance_ms * self.scroll_rate()) as f32
+        self.lane_y(lane) + (distance_ms * self.scroll_rate()) as f32
     }
 
     pub fn clean(&mut self) {
@@ -160,7 +172,7 @@ impl Strumline {
         self.active_start_index = 0;
         self.next_note_index = 0;
         self.held_keys = Default::default();
-        self.active_holds = [None; 4];
+        self.active_holds = [None; KEY_COUNT];
         self.ghost_tap_timer = 0.0;
         self.pending_splashes.clear();
         self.pending_hold_covers.clear();
@@ -188,7 +200,7 @@ impl Strumline {
             .position(|n| !n.killed)
             .unwrap_or(self.notes.len());
         self.next_note_index = self.active_start_index;
-        self.active_holds = [None; 4];
+        self.active_holds = [None; KEY_COUNT];
         self.lag_state = ScrollLagState::default();
         for dir in NoteDirection::ALL {
             self.pending_hold_covers.push(HoldCoverCmd::Kill(dir));
