@@ -142,22 +142,16 @@ fn sync_actor_visuals(
             }
             hide_entities(&actor.piece_entities, parts);
         }
-        Some(ClipVisual::Composite { source_idx, clip, feet_anchor }) => {
+        Some(ClipVisual::Composite { source_idx, clip, bounds_min, bounds_size }) => {
             hide_entities(&[actor.sheet_entity], parts);
             let pieces = clip.frames.get(actor.controller.frame_cursor).map(Vec::as_slice).unwrap_or(&[]);
+            let feet_anchor = [
+                if flip[0] { bounds_min[0] + bounds_size[0] - actor.idle_size[0] * 0.5 } else { bounds_min[0] + actor.idle_size[0] * 0.5 },
+                if flip[1] { bounds_min[1] + bounds_size[1] - actor.idle_size[1] } else { bounds_min[1] + actor.idle_size[1] },
+            ];
             sync_composite_parts(
-                actor,
-                *source_idx,
-                pieces,
-                *feet_anchor,
-                scale,
-                flip,
-                anim_off,
-                tint,
-                cam_scroll_x,
-                cam_scroll_y,
-                zoom,
-                parts,
+                actor, *source_idx, pieces, feet_anchor, scale, flip, anim_off,
+                tint, cam_scroll_x, cam_scroll_y, zoom, parts,
             );
         }
         None => {
@@ -192,8 +186,8 @@ fn sync_sheet_part(
     set_sprite_flip(sprite, flip[0], flip[1]);
 
     let frame_sz = src.frame_sizes.get(&frame_idx).copied().unwrap_or(actor.idle_size);
-    let mut world_cx = actor.slot.position[0] + (frame_sz[0] - actor.idle_size[0]) * 0.5 * scale[0] + actor.data.offsets[0];
-    let mut world_cy = actor.slot.position[1] - (actor.idle_size[1] - frame_sz[1] * 0.5) * scale[1] + actor.data.offsets[1];
+    let mut world_cx = actor.slot.position[0] + (frame_sz[0] - actor.idle_size[0]) * 0.5 * scale[0] + actor.data.offsets[0] * (1.0 + scale[0]);
+    let mut world_cy = actor.slot.position[1] - (actor.idle_size[1] - frame_sz[1] * 0.5) * scale[1] + actor.data.offsets[1] * (1.0 + scale[1]);
     world_cx -= anim_off[0] * scale[0];
     world_cy -= anim_off[1] * scale[1];
 
@@ -238,9 +232,9 @@ fn sync_composite_parts(
         hide_entities(&actor.piece_entities, parts);
         return;
     };
-    let screen_fx = actor.slot.position[0] + actor.data.offsets[0] - anim_off[0] * scale[0]
+    let screen_fx = actor.slot.position[0] + actor.data.offsets[0] * (1.0 + scale[0]) - anim_off[0] * scale[0]
         - cam_scroll_x * actor.slot.scroll_factor[0];
-    let screen_fy = actor.slot.position[1] + actor.data.offsets[1] - anim_off[1] * scale[1]
+    let screen_fy = actor.slot.position[1] + actor.data.offsets[1] * (1.0 + scale[1]) - anim_off[1] * scale[1]
         - cam_scroll_y * actor.slot.scroll_factor[1];
     let bevy_fx = (screen_fx - SCREEN_WIDTH * 0.5) * zoom;
     let bevy_fy = (SCREEN_HEIGHT * 0.5 - screen_fy) * zoom;

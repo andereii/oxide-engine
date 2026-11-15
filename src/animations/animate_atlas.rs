@@ -37,6 +37,7 @@ pub struct AnimateTimelineFrame {
 #[derive(Debug, Clone)]
 pub struct AnimateTimelineLayer {
     pub name: String,
+    pub visible: bool,
     pub frames: Vec<AnimateTimelineFrame>,
 }
 
@@ -125,12 +126,32 @@ impl AnimateAtlas {
         (layout, indices)
     }
 
+    /// Matches `flixel-animate`'s `Timeline.findFrameLabelIndices`: trims trailing
+    /// whitespace on frame labels and returns all tick indices from the first matching layer.
+    pub fn find_frame_label_indices(&self, label: &str) -> Vec<usize> {
+        let target = label.trim_end();
+        let mut found = Vec::new();
+        for layer in &self.main_layers {
+            let mut matched = false;
+            for frame in &layer.frames {
+                if frame.name.as_deref().is_some_and(|n| n.trim_end() == target) {
+                    matched = true;
+                    found.extend(frame.index..frame.index + frame.duration);
+                }
+            }
+            if matched {
+                break;
+            }
+        }
+        found
+    }
+
     pub fn frame_labels(&self) -> HashMap<String, (usize, usize)> {
         let mut labels = HashMap::new();
         for layer in &self.main_layers {
             for frame in &layer.frames {
                 if let Some(name) = &frame.name {
-                    labels.insert(name.clone(), (frame.index, frame.duration));
+                    labels.entry(name.trim_end().to_string()).or_insert((frame.index, frame.duration));
                 }
             }
         }

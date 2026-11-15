@@ -200,9 +200,9 @@ fn collect_atlas_timeline(
             return sample_layers(atlas, indices, sprite_map, layers, None);
         }
     }
-    let labels = atlas.frame_labels();
-    if let Some(&(start, duration)) = labels.get(prefix) {
-        return sample_layers(atlas, indices, sprite_map, &atlas.main_layers, Some((start, start + duration)));
+    let ticks = atlas.find_frame_label_indices(prefix);
+    if !ticks.is_empty() {
+        return sample_layer_ticks(atlas, indices, sprite_map, &atlas.main_layers, &ticks);
     }
     if let Some(layers) = atlas.symbols.get(prefix) {
         return sample_layers(atlas, indices, sprite_map, layers, None);
@@ -224,11 +224,22 @@ fn sample_layers(
         .max()
         .unwrap_or(0);
     let (start_t, end_t) = range.unwrap_or((0, max_end));
+    let ticks: Vec<usize> = (start_t..end_t).collect();
+    sample_layer_ticks(atlas, indices, sprite_map, layers, &ticks)
+}
+
+fn sample_layer_ticks(
+    atlas: &AnimateAtlas,
+    indices: &HashMap<String, usize>,
+    sprite_map: &HashMap<&str, bool>,
+    layers: &[AnimateTimelineLayer],
+    ticks: &[usize],
+) -> (Vec<usize>, Vec<[f32; 2]>, Vec<bool>) {
     let mut out_f = Vec::new();
     let mut out_o = Vec::new();
     let mut out_r = Vec::new();
 
-    for t in start_t..end_t {
+    for &t in ticks {
         if let Some((idx, offset, rot)) = resolve_tick(atlas, indices, sprite_map, layers, t, 0) {
             out_f.push(idx);
             out_o.push(offset);
@@ -249,7 +260,7 @@ fn resolve_tick(
     if depth > 8 {
         return None;
     }
-    for layer in layers {
+    for layer in layers.iter().filter(|l| l.visible) {
         let Some(frame) = layer.frames.iter().find(|f| tick >= f.index && tick < f.index + f.duration) else {
             continue;
         };
