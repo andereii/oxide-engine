@@ -109,6 +109,7 @@ impl PlayState {
             }
         }
         for event in due {
+            self.pending_shader_events.push(event.clone());
             self.pending_hooks.push((
                 HookKind::SongEvent,
                 ScriptEvent::new(HookKind::SongEvent)

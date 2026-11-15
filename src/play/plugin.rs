@@ -72,6 +72,7 @@ struct ScriptTickParams<'w, 's> {
     mod_store: ResMut<'w, ModStore>,
     script_host: ResMut<'w, ScriptHost>,
     pending_ecs: ResMut<'w, PendingEcsScriptCommands>,
+    pending_shaders: ResMut<'w, super::shaders::systems::PendingShaderCommands>,
     actors: Query<'w, 's, &'static mut CharacterActor>,
     props: Query<
         'w,
@@ -152,6 +153,7 @@ impl Plugin for PlayPlugin {
                 was_paused: false,
             })
             .insert_resource(state)
+            .add_plugins(super::shaders::FunkinShadersPlugin)
             .add_systems(Startup, setup_play_scene)
             .add_systems(Update, (handle_play_input, tick_play_state).chain().before(crate::animations::sprite::step_animations))
             .add_systems(Update, (sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
@@ -547,6 +549,7 @@ fn tick_play_state(
         &scripts.mods,
         &mut scripts.actors,
         &mut scripts.props,
+        &mut scripts.pending_shaders,
         &ecs_cmds,
     );
 
@@ -576,7 +579,7 @@ fn tick_play_state(
     }
 }
 
-fn actor_matches_target(actor: &CharacterActor, target: &str) -> bool {
+pub(crate) fn actor_matches_target(actor: &CharacterActor, target: &str) -> bool {
     let lower = target.trim().to_ascii_lowercase();
     match lower.as_str() {
         "bf" | "boyfriend" | "player" | "0" => actor.role == CharacterRole::Player,
@@ -586,6 +589,7 @@ fn actor_matches_target(actor: &CharacterActor, target: &str) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_ecs_script_commands(
     commands: &mut Commands,
     asset_server: &AssetServer,
@@ -598,6 +602,7 @@ fn apply_ecs_script_commands(
         Option<&mut AnimationController>,
         Option<&DynamicScriptProp>,
     )>,
+    pending_shaders: &mut super::shaders::systems::PendingShaderCommands,
     cmds: &[ScriptCommand],
 ) {
     for cmd in cmds {
@@ -756,6 +761,95 @@ fn apply_ecs_script_commands(
                     .unwrap_or_else(|| path.clone());
                 let handle: Handle<AudioSource> = asset_server.load(resolved);
                 spawn_one_shot(commands, handle, *volume);
+            }
+            ScriptCommand::SetShaderAdjustColor {
+                target,
+                hue,
+                saturation,
+                brightness,
+                contrast,
+            } => {
+                pending_shaders.0.push(
+                    super::shaders::systems::ShaderScriptCommand::SetAdjustColor {
+                        target: target.clone(),
+                        hue: *hue,
+                        saturation: *saturation,
+                        brightness: *brightness,
+                        contrast: *contrast,
+                    },
+                );
+            }
+            ScriptCommand::SetShaderDropShadow {
+                target,
+                color,
+                angle_deg,
+                distance,
+                strength,
+                threshold,
+                hue,
+                saturation,
+                brightness,
+                contrast,
+                use_alt_mask,
+                alt_mask_path,
+                mask_threshold,
+            } => {
+                pending_shaders.0.push(
+                    super::shaders::systems::ShaderScriptCommand::SetDropShadow {
+                        target: target.clone(),
+                        color: *color,
+                        angle_deg: *angle_deg,
+                        distance: *distance,
+                        strength: *strength,
+                        threshold: *threshold,
+                        hue: *hue,
+                        saturation: *saturation,
+                        brightness: *brightness,
+                        contrast: *contrast,
+                        use_alt_mask: *use_alt_mask,
+                        alt_mask_path: alt_mask_path.clone(),
+                        mask_threshold: *mask_threshold,
+                    },
+                );
+            }
+            ScriptCommand::SetShaderWiggle {
+                target,
+                effect,
+                speed,
+                frequency,
+                amplitude,
+            } => {
+                pending_shaders.0.push(
+                    super::shaders::systems::ShaderScriptCommand::SetWiggle {
+                        target: target.clone(),
+                        effect_type: super::shaders::systems::parse_wiggle_effect_type(effect),
+                        speed: *speed,
+                        frequency: *frequency,
+                        amplitude: *amplitude,
+                    },
+                );
+            }
+            ScriptCommand::SetCameraRain {
+                scale,
+                intensity,
+                color,
+                time_scale_decay,
+            } => {
+                pending_shaders.0.push(
+                    super::shaders::systems::ShaderScriptCommand::SetCameraRain {
+                        scale: *scale,
+                        intensity: *intensity,
+                        color: *color,
+                        time_scale_decay: *time_scale_decay,
+                    },
+                );
+            }
+            ScriptCommand::ClearShader { target } => {
+                pending_shaders.0.push(
+                    super::shaders::systems::ShaderScriptCommand::ClearShader {
+                        target: target.clone(),
+                    },
+                );
             }
             _ => {}
         }

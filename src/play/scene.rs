@@ -79,6 +79,7 @@ pub struct PlayState {
     pub status_message: String,
     pub last_hud_key: (i64, u32, u32, i32),
     pub last_raw_audio_ms: Option<f64>,
+    pub pending_shader_events: Vec<SongEventData>,
 }
 
 impl PlayState {
@@ -145,6 +146,7 @@ impl PlayState {
             status_message: String::new(),
             last_hud_key: (i64::MIN, u32::MAX, u32::MAX, i32::MIN),
             last_raw_audio_ms: None,
+            pending_shader_events: Vec::new(),
         };
         state.create();
         state
@@ -346,6 +348,7 @@ impl PlayState {
         self.regen_note_data(self.start_timestamp_ms);
         self.player_strumline.fade_in_arrows();
         self.opponent_strumline.fade_in_arrows();
+        self.pending_shader_events.clear();
         self.pending_hooks
             .push((HookKind::SongRetry, ScriptEvent::new(HookKind::SongRetry)));
         self.start_countdown();
@@ -815,7 +818,12 @@ impl PlayState {
             | ScriptCommand::SetCharacterVisible { .. }
             | ScriptCommand::SetCharacterDanceEvery { .. }
             | ScriptCommand::SetPropVisible { .. }
-            | ScriptCommand::PlaySfx { .. } => false,
+            | ScriptCommand::PlaySfx { .. }
+            | ScriptCommand::SetShaderAdjustColor { .. }
+            | ScriptCommand::SetShaderDropShadow { .. }
+            | ScriptCommand::SetShaderWiggle { .. }
+            | ScriptCommand::SetCameraRain { .. }
+            | ScriptCommand::ClearShader { .. } => false,
         }
     }
 
