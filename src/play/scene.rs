@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use bevy::prelude::Resource;
 
-use crate::scripting::{HookKind, ScriptEvent};
+use crate::scripting::{HookKind, ScriptCommand, ScriptEvent};
 use crate::utils::conductor::Conductor;
 use crate::utils::constants::{
     DEFAULT_BOP_INTENSITY, DEFAULT_CAMERA_ANGLE_DEG, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE,
@@ -118,6 +118,7 @@ pub struct PlayState {
     pub last_raw_audio_ms: Option<f64>,
     pub audio_finished: bool,
     pub pending_shader_events: Vec<SongEventData>,
+    pub pending_event_commands: Vec<ScriptCommand>,
 }
 
 impl PlayState {
@@ -130,6 +131,10 @@ impl PlayState {
         if let Some(pt) = params.camera_follow_point {
             camera.follow_point = pt;
         }
+        let mut player_strumline = Strumline::new(true, scroll_speed, params.note_style.clone());
+        player_strumline.is_downscroll = params.downscroll;
+        let mut opponent_strumline = Strumline::new(false, scroll_speed, params.note_style);
+        opponent_strumline.is_downscroll = params.downscroll;
         let mut state = Self {
             chart: params.chart,
             current_difficulty: difficulty,
@@ -159,8 +164,8 @@ impl PlayState {
             opponent_vocals_volume: 1.0,
             conductor: Conductor::new(bpm),
             camera,
-            player_strumline: Strumline::new(true, scroll_speed, params.note_style.clone()),
-            opponent_strumline: Strumline::new(false, scroll_speed, params.note_style),
+            player_strumline,
+            opponent_strumline,
             note_kinds: NoteKindManager::default(),
             song_events: Vec::new(),
             scroll_speed_tweens: Vec::new(),
@@ -221,6 +226,7 @@ impl PlayState {
             last_raw_audio_ms: None,
             audio_finished: false,
             pending_shader_events: Vec::new(),
+            pending_event_commands: Vec::new(),
         };
         state.create();
         state
@@ -411,6 +417,7 @@ impl PlayState {
         self.player_strumline.fade_in_arrows();
         self.opponent_strumline.fade_in_arrows();
         self.pending_shader_events.clear();
+        self.pending_event_commands.clear();
         self.pending_hooks
             .push((HookKind::SongRetry, ScriptEvent::new(HookKind::SongRetry)));
         self.start_countdown();

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use oxin_app::RenderBackend;
+
 use crate::utils::constants::{DEFAULT_DIFFICULTY, DEFAULT_VARIATION};
 
 #[derive(Debug, Clone)]
@@ -10,9 +12,11 @@ pub struct LaunchFlags {
     pub bot_play_mode: bool,
     pub practice_mode: bool,
     pub minimal_mode: bool,
+    pub downscroll: Option<bool>,
     pub playback_rate: f64,
     pub start_timestamp_ms: f64,
     pub vsync: Option<bool>,
+    pub render_backend: RenderBackend,
     pub capture_timestamps_ms: Vec<f64>,
     pub capture_out_dir: Option<PathBuf>,
     pub show_help: bool,
@@ -27,9 +31,11 @@ impl Default for LaunchFlags {
             bot_play_mode: false,
             practice_mode: false,
             minimal_mode: false,
+            downscroll: None,
             playback_rate: 1.0,
             start_timestamp_ms: 0.0,
             vsync: None,
+            render_backend: RenderBackend::Auto,
             capture_timestamps_ms: Vec::new(),
             capture_out_dir: None,
             show_help: false,
@@ -84,6 +90,12 @@ impl LaunchFlags {
                 "--minimal" => {
                     out.minimal_mode = parse_bool_flag(inline_val, true);
                 }
+                "--downscroll" => {
+                    out.downscroll = Some(parse_bool_flag(inline_val, true));
+                }
+                "--upscroll" => {
+                    out.downscroll = Some(false);
+                }
                 "--rate" | "--playback-rate" => {
                     if let Some(v) = take_value(inline_val, &mut iter)
                         && let Ok(rate) = v.parse::<f64>()
@@ -103,6 +115,17 @@ impl LaunchFlags {
                 }
                 "--vsync" => out.vsync = Some(parse_bool_flag(inline_val, true)),
                 "--no-vsync" => out.vsync = Some(false),
+                "--renderer" | "--render" | "--backend" => {
+                    if let Some(v) = take_value(inline_val, &mut iter) {
+                        out.render_backend = parse_render_backend(&v);
+                    }
+                }
+                "--vulkan" => out.render_backend = RenderBackend::Vulkan,
+                "--dx12" | "--d3d12" | "--directx12" => out.render_backend = RenderBackend::Dx12,
+                "--dx11" | "--d3d11" | "--directx11" | "--gl" | "--opengl" => {
+                    out.render_backend = RenderBackend::Gl;
+                }
+                "--metal" => out.render_backend = RenderBackend::Metal,
                 "--capture-ms" => {
                     if let Some(v) = take_value(inline_val, &mut iter) {
                         parse_capture_ms_list(&v, &mut out.capture_timestamps_ms);
@@ -129,9 +152,13 @@ impl LaunchFlags {
              \x20 --botplay / --bot-play      Enable botplay mode (default: false)\n\
              \x20 --practice                  Enable practice mode (default: false)\n\
              \x20 --minimal                   Enable minimal HUD-only mode (default: false)\n\
+             \x20 --upscroll                  Force upscroll note direction (default)\n\
+             \x20 --downscroll                Force downscroll note direction\n\
              \x20 --rate:<f64>                Playback rate multiplier (default: 1.0)\n\
              \x20 --start-ms:<f64>            Start timestamp in ms (default: 0.0)\n\
              \x20 --vsync / --no-vsync        Override OXIDE_VSYNC\n\
+             \x20 --renderer:<api>            Select GPU backend: auto, vulkan, dx12, dx11/gl, metal\n\
+             \x20 --vulkan / --dx12 / --gl    Shorthand GPU backend flags\n\
              \x20 --capture-ms:<ms,...>       Capture screenshots at sorted ms and exit\n\
              \x20 --capture-out:<dir>         Output directory for --capture-ms (default: captures)\n\
              \x20 -h, --help                  Show this help message"
@@ -183,6 +210,18 @@ fn parse_bool_flag(inline: Option<&str>, default_on: bool) -> bool {
         Some("false" | "0" | "no" | "off") => false,
         Some("true" | "1" | "yes" | "on") => true,
         _ => default_on,
+    }
+}
+
+fn parse_render_backend(raw: &str) -> RenderBackend {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "vulkan" | "vk" => RenderBackend::Vulkan,
+        "dx12" | "d3d12" | "directx12" | "directx-12" => RenderBackend::Dx12,
+        "dx11" | "d3d11" | "directx11" | "directx-11" | "gl" | "opengl" | "gles" => {
+            RenderBackend::Gl
+        }
+        "metal" => RenderBackend::Metal,
+        _ => RenderBackend::Auto,
     }
 }
 

@@ -161,7 +161,7 @@ pub(super) fn setup_play_scene(
         },
         TextLayout::justify(Justify::Right),
         bevy::sprite::Text2dShadow {
-            offset: Vec2::new(1.5, -1.5),
+            offset: Vec2::new(1.0, -1.0),
             color: Color::BLACK,
         },
         bevy::sprite::Anchor::TOP_LEFT,

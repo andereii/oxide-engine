@@ -90,7 +90,6 @@ pub(super) fn spawn_tagged_sound(
 #[derive(Default)]
 pub(super) struct HudTextSyncCache {
     score_text: String,
-    status_message: String,
     hud_visible: bool,
     botplay_layout: bool,
     downscroll: bool,
@@ -118,7 +117,6 @@ pub(super) fn sync_hud_text(
     let downscroll = state.player_strumline.is_downscroll;
     if cache.initialized
         && cache.score_text == state.score_text
-        && cache.status_message == state.status_message
         && cache.hud_visible == state.hud_visible
         && cache.botplay_layout == botplay_layout
         && cache.downscroll == downscroll
@@ -127,7 +125,6 @@ pub(super) fn sync_hud_text(
     }
     cache.initialized = true;
     cache.score_text.clone_from(&state.score_text);
-    cache.status_message.clone_from(&state.status_message);
     cache.hud_visible = state.hud_visible;
     cache.botplay_layout = botplay_layout;
     cache.downscroll = downscroll;

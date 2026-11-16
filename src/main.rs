@@ -26,10 +26,12 @@ fn main() {
             .map(|v| v != "0")
             .unwrap_or(true)
     });
+    let render_backend = flags.render_backend;
     run_window(
         WindowConfig {
             title: "Oxide Engine - PlayState".to_string(),
             vsync,
+            render_backend,
             ..Default::default()
         },
         move |app| {

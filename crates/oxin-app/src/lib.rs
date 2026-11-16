@@ -3,11 +3,23 @@ use std::path::PathBuf;
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::asset::{AssetApp, AssetPlugin};
 use bevy::prelude::*;
-use bevy::window::PresentMode;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{Backends, WgpuSettings};
+use bevy::window::{MonitorSelection, PresentMode, WindowPosition};
 use bevy::winit::WinitSettings;
 
 mod fps_counter;
 use fps_counter::FpsCounterPlugin;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderBackend {
+    #[default]
+    Auto,
+    Vulkan,
+    Dx12,
+    Gl,
+    Metal,
+}
 
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -15,6 +27,7 @@ pub struct WindowConfig {
     pub width: u32,
     pub height: u32,
     pub vsync: bool,
+    pub render_backend: RenderBackend,
     pub assets_dir: Option<PathBuf>,
     pub mods_dir: Option<PathBuf>,
 }
@@ -26,6 +39,7 @@ impl Default for WindowConfig {
             width: 1280,
             height: 720,
             vsync: false,
+            render_backend: RenderBackend::Auto,
             assets_dir: None,
             mods_dir: None,
         }
@@ -105,6 +119,14 @@ pub fn build_app(config: WindowConfig) -> App {
     let _ = std::fs::create_dir_all(&mods_dir);
     let mods_path = mods_dir.to_string_lossy().into_owned();
 
+    let backends = match config.render_backend {
+        RenderBackend::Auto => None,
+        RenderBackend::Vulkan => Some(Backends::VULKAN),
+        RenderBackend::Dx12 => Some(Backends::DX12),
+        RenderBackend::Gl => Some(Backends::GL),
+        RenderBackend::Metal => Some(Backends::METAL),
+    };
+
     app.register_asset_source("mods", AssetSourceBuilder::platform_default(&mods_path, None))
         .add_plugins(
             DefaultPlugins
@@ -112,10 +134,19 @@ pub fn build_app(config: WindowConfig) -> App {
                     file_path: assets_path,
                     ..default()
                 })
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        backends,
+                        ..default()
+                    }
+                    .into(),
+                    ..default()
+                })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: config.title,
                         resolution: (config.width, config.height).into(),
+                        position: WindowPosition::Centered(MonitorSelection::Primary),
                         present_mode,
                         ..default()
                     }),

@@ -132,16 +132,10 @@ impl PlayState {
             }
             return;
         }
-        let acc_tenths = (self.tallies.accuracy_percent() * 10.0).round() as i32;
-        let key = (self.song_score.round() as i64, self.tallies.combo, self.tallies.missed, acc_tenths);
+        let score = self.song_score.round() as i64;
+        let key = (score, 0, 0, 0);
         if self.last_hud_key == key { return; }
         self.last_hud_key = key;
-        self.score_text = format!(
-            "Score: {} | Accuracy: {:.1}% | Misses: {} | Combo: {}",
-            key.0,
-            f64::from(acc_tenths) / 10.0,
-            key.2,
-            key.1,
-        );
+        self.score_text = format!("Score: {score}");
     }
 }

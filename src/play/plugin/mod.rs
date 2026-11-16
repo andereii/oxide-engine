@@ -165,6 +165,7 @@ impl Plugin for PlayPlugin {
             practice_mode: self.flags.practice_mode,
             bot_play_mode: self.flags.bot_play_mode,
             minimal_mode: self.flags.minimal_mode,
+            downscroll: self.flags.downscroll.unwrap_or(false),
             start_timestamp_ms: self.flags.start_timestamp_ms,
             playback_rate: self.flags.playback_rate,
             ..default()

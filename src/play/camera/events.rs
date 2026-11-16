@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::play::scene::{PlayState, SongEventRevertSnapshot};
 use crate::play::types::SongEventData;
-use crate::scripting::{HookKind, ScriptEvent, ScriptValue};
+use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptValue};
 use crate::utils::constants::{DEFAULT_BOP_INTENSITY, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE};
 use crate::utils::easing::EaseKind;
 
@@ -197,6 +197,30 @@ impl PlayState {
                         strum.custom_render_distance_ms = ms;
                     }
                 }
+            }
+            "PlayAnimation" => {
+                let anim = event
+                    .raw_value
+                    .get("anim")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("idle")
+                    .to_string();
+                let force = event
+                    .raw_value
+                    .get("force")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let target = event
+                    .raw_value
+                    .get("target")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("boyfriend")
+                    .to_string();
+                self.pending_event_commands.push(ScriptCommand::PlayAnim {
+                    target,
+                    anim,
+                    force,
+                });
             }
             _ => {}
         }

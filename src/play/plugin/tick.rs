@@ -273,6 +273,7 @@ pub(super) fn tick_play_state(
 
     let hooks = std::mem::take(&mut state.pending_hooks);
     let mut ecs_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
+    ecs_cmds.extend(state.pending_event_commands.drain(..));
     let run_update = !is_paused && scripts.script_host.has_frame_update_work();
     let step_dt = if is_paused { 0.0 } else { dt };
     if !hooks.is_empty() || run_update {

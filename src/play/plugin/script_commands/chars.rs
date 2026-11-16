@@ -44,9 +44,12 @@ pub(super) fn handle_char_cmd(
             let mut matched_actor = false;
             for (_, mut actor) in scripts.actors.iter_mut() {
                 if actor_matches_target(&actor, target) {
-                    actor.controller.play(anim, *force, false, 0);
-                    actor.hold_timer = 0.0;
-                    actor.script_anim_override = true;
+                    let char_actor = &mut *actor;
+                    char_actor
+                        .bopper
+                        .play_animation(&mut char_actor.controller, anim, *force, *force);
+                    char_actor.hold_timer = 0.0;
+                    char_actor.script_anim_override = true;
                     matched_actor = true;
                 }
             }
