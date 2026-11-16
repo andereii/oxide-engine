@@ -5,12 +5,14 @@ mod input;
 mod mods;
 mod play;
 mod scripting;
+mod ui;
 mod utils;
 
 use animations::AnimationsPlugin;
 use cli::LaunchFlags;
 use oxin_app::{WindowConfig, run_window};
 use play::PlayPlugin;
+use ui::LoadingScreenPlugin;
 
 fn main() {
     let flags = LaunchFlags::from_env_args();
@@ -31,7 +33,11 @@ fn main() {
             ..Default::default()
         },
         move |app| {
-            app.add_plugins((AnimationsPlugin, PlayPlugin::with_flags(flags)));
+            app.add_plugins((
+                AnimationsPlugin,
+                LoadingScreenPlugin,
+                PlayPlugin::with_flags(flags),
+            ));
         },
     );
 }

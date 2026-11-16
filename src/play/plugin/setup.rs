@@ -2,28 +2,21 @@ use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 
-use crate::audio::SongAudioPlayer;
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptValue};
+use crate::ui::LoadingScreenState;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
 use super::super::characters::{
-    CharacterRole, CharactersResource, append_character_sidecar_scripts, load_characters_resource,
-    spawn_characters,
+    CharacterRole, CharactersResource, append_character_sidecar_scripts,
 };
-use super::super::hud::countdown::load_countdown_assets;
-use super::super::hud::healthbar::spawn_health_bar;
-use super::super::hud::popups::{load_popup_assets, spawn_popup_pool};
-use super::super::notes::effects::spawn_effect_pools;
-use super::super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools};
 use super::super::playlist::PlayStatePlaylist;
 use super::super::preload::PlayPreloadTracker;
 use super::super::scene::PlayState;
-use super::super::stage::{
-    StageResource, append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props,
-};
-use super::{HudTextVisual, PendingEcsScriptCommands, PlaySfxAssets};
+use super::super::stage::{StageResource, append_stage_sidecar_scripts};
+use super::HudTextVisual;
+use super::load_pipeline::{PlayLoadPipeline, begin_play_scene_load};
 
 pub(crate) fn seed_stage_and_chars_into_state(
     state: &mut PlayState,
@@ -135,183 +128,19 @@ pub(crate) fn seed_stage_and_chars_into_state(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn populate_play_scene_entities(
-    commands: &mut Commands,
-    asset_server: &AssetServer,
-    layouts: &mut Assets<TextureAtlasLayout>,
-    mods: &ModRegistry,
-    mod_store: &mut ModStore,
-    script_host: &mut ScriptHost,
-    pending_ecs: &mut PendingEcsScriptCommands,
-    state: &mut PlayState,
-    playlist: &mut PlayStatePlaylist,
-    audio: &mut SongAudioPlayer,
-    sfx: &mut PlaySfxAssets,
-    mut preload: Option<&mut PlayPreloadTracker>,
-) {
-    if let Some(tr) = preload.as_deref_mut() {
-        tr.clear();
-    }
-    let style = &state.player_strumline.note_style;
-    sfx.miss_sounds = style
-        .miss_sound_assets_in(mods)
-        .into_iter()
-        .map(|rel| asset_server.load(rel))
-        .collect();
-    sfx.miss_volume = style.miss_volume;
-    sfx.miss_cursor = 0;
-    if let Some(tr) = preload.as_deref_mut() {
-        tr.register_sfx(&sfx.miss_sounds);
-    }
-
-    if state.critical_failure {
-        return;
-    }
-
-    let mut stage_script_source: Option<(String, std::path::PathBuf)> = None;
-    let mut char_script_sources: Vec<(String, std::path::PathBuf)> = Vec::new();
-    if !state.is_minimal_mode {
-        let stage_id = state.chart.stage_id.clone();
-        let loaded_stage = match load_stage_resource(mods, &stage_id, asset_server, layouts) {
-            Ok(stage) => {
-                state.camera.stage_zoom = f64::from(stage.camera_zoom);
-                if state.camera.follow_point == [0.0, 0.0] {
-                    state.camera.follow_point = [
-                        f64::from(SCREEN_WIDTH) * 0.5,
-                        f64::from(SCREEN_HEIGHT) * 0.5,
-                    ];
-                }
-                state.reset_camera(true, true, true);
-                spawn_stage_props(commands, &stage);
-                Some(stage)
-            }
-            Err(err) => {
-                state.status_message = format!("Stage error: {err}");
-                None
-            }
-        };
-        let chars = load_characters_resource(
-            mods,
-            &state.chart.characters,
-            loaded_stage.as_ref(),
-            asset_server,
-            layouts,
-        );
-        for c in &chars.characters {
-            if c.data.script {
-                char_script_sources.push((c.id.clone(), c.json_path.clone()));
-            }
-        }
-        seed_stage_and_chars_into_state(state, loaded_stage.as_ref(), &chars);
-        spawn_characters(commands, &chars);
-        spawn_health_bar(
-            mods,
-            commands,
-            Some(&chars),
-            &state.player_strumline.note_style,
-            asset_server,
-            layouts,
-        );
-        if let Some(tr) = preload.as_deref_mut() {
-            tr.register_characters(&chars);
-        }
-        commands.insert_resource(chars);
-        if let Some(stage) = loaded_stage {
-            if stage.scripts {
-                stage_script_source = Some((stage.stage_id.clone(), stage.json_path.clone()));
-            }
-            if let Some(tr) = preload.as_deref_mut() {
-                tr.register_stage(&stage);
-            }
-            commands.insert_resource(stage);
-        }
-    }
-    let countdown_assets =
-        load_countdown_assets(mods, &state.player_strumline.note_style, asset_server);
-    if let Some(tr) = preload.as_deref_mut() {
-        tr.register_countdown(&countdown_assets);
-    }
-    commands.insert_resource(countdown_assets);
-
-    let popup_assets = load_popup_assets(mods, &state.player_strumline.note_style, asset_server);
-    if let Some(tr) = preload.as_deref_mut() {
-        tr.register_popups(&popup_assets);
-    }
-    spawn_popup_pool(commands, &popup_assets);
-    commands.insert_resource(popup_assets);
-
-    audio.load_for_chart_with_mods(
-        mods,
-        commands,
-        asset_server,
-        &state.chart,
-        state.playback_rate,
-    );
-    if let Some(tr) = preload.as_deref_mut() {
-        tr.register_song_audio(audio);
-    }
-
-    match load_noteskin_assets(
-        mods,
-        &state.player_strumline.note_style,
-        asset_server,
-        layouts,
-    ) {
-        Ok(skin_assets) => {
-            if let Some(tr) = preload.as_deref_mut() {
-                tr.register_noteskin(&skin_assets);
-            }
-            spawn_strumline_and_pools(commands, state, &skin_assets);
-            spawn_effect_pools(commands, &skin_assets);
-            commands.insert_resource(skin_assets);
-        }
-        Err(err) => {
-            state.status_message = format!("Noteskin error: {err}");
-        }
-    }
-
-    let cmds = load_and_init_scripts(
-        mods,
-        mod_store,
-        script_host,
-        state,
-        playlist,
-        stage_script_source.as_ref(),
-        &char_script_sources,
-    );
-    pending_ecs.0.extend(cmds);
-    state.enter_loading_phase();
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(super) fn setup_play_scene(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    mods: Res<ModRegistry>,
-    mut mod_store: ResMut<ModStore>,
-    mut script_host: ResMut<ScriptHost>,
-    mut pending_ecs: ResMut<PendingEcsScriptCommands>,
     mut state: ResMut<PlayState>,
-    mut playlist: ResMut<PlayStatePlaylist>,
-    mut audio: ResMut<SongAudioPlayer>,
-    mut sfx: ResMut<PlaySfxAssets>,
     mut preload: ResMut<PlayPreloadTracker>,
+    mut loading_screen: ResMut<LoadingScreenState>,
+    mut load_pipeline: ResMut<PlayLoadPipeline>,
 ) {
     spawn_hud_camera(&mut commands);
-    populate_play_scene_entities(
-        &mut commands,
-        &asset_server,
-        &mut layouts,
-        &mods,
-        &mut mod_store,
-        &mut script_host,
-        &mut pending_ecs,
+    begin_play_scene_load(
         &mut state,
-        &mut playlist,
-        &mut audio,
-        &mut sfx,
         Some(&mut preload),
+        &mut loading_screen,
+        &mut load_pipeline,
     );
 
     commands.spawn((
