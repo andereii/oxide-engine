@@ -15,6 +15,3 @@ pub mod stage;
 pub mod types;
 
 pub use plugin::PlayPlugin;
-
-#[cfg(test)]
-mod tests;

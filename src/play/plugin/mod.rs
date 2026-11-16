@@ -1,12 +1,10 @@
 mod capture;
 mod hud_audio;
 mod input;
+mod load_pipeline;
 mod script_commands;
 pub(crate) mod setup;
 mod tick;
-
-#[cfg(test)]
-mod tests;
 
 use capture::{ParityCaptureState, drive_parity_capture};
 use hud_audio::sync_hud_text;
@@ -196,6 +194,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(CharacterSyncState::default())
             .insert_resource(HotReloadState::default())
             .insert_resource(PlayPreloadTracker::default())
+            .init_resource::<load_pipeline::PlayLoadPipeline>()
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,

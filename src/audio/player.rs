@@ -1,9 +1,10 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bevy::audio::{
-    AudioPlayer, AudioSink, AudioSinkPlayback, PlaybackMode, PlaybackSettings, SampleRate, Volume,
+    AudioPlayer, AudioSink, AudioSinkPlayback, ChannelCount, PlaybackMode, PlaybackSettings,
+    SampleRate, Volume,
 };
 use bevy::prelude::{AssetServer, Assets, AudioSource, Commands, Entity, Handle, Query, Resource};
 
@@ -14,6 +15,21 @@ use crate::play::types::SongChart;
 use super::mixer::{MixTrackControl, PcmBuffer, SyncedSongAudio, normalize_pcm};
 use super::sound::{TrackHandle, TrackRole};
 use super::voices::VoicesGroup;
+
+struct DecodedMixResult {
+    controls: Vec<MixTrackControl>,
+    target_channels: ChannelCount,
+    target_rate: SampleRate,
+    mix_origin_ms: f64,
+}
+
+struct PendingTrackDecode {
+    role: TrackRole,
+    base_volume: f32,
+    initial_vol: f32,
+    offset_ms: f64,
+    source: AudioSource,
+}
 
 /// Coordinates multi-track song stems through a single sample-locked [`SyncedSongAudio`] mix.
 #[derive(Resource)]
@@ -33,6 +49,7 @@ pub struct SongAudioPlayer {
     pub(super) mix_origin_ms: f64,
     mix_empty: bool,
     pub(super) pending_play_from_ms: Option<f64>,
+    pending_decode_rx: Option<Mutex<mpsc::Receiver<Option<DecodedMixResult>>>>,
 }
 
 impl Default for SongAudioPlayer {
@@ -53,6 +70,7 @@ impl Default for SongAudioPlayer {
             mix_origin_ms: 0.0,
             mix_empty: false,
             pending_play_from_ms: None,
+            pending_decode_rx: None,
         }
     }
 }
@@ -165,6 +183,7 @@ impl SongAudioPlayer {
         self.mix_empty = false;
         self.pending_play_from_ms = None;
         self.last_synced_vols = None;
+        self.pending_decode_rx = None;
     }
 
     /// Returns `true` when all song tracks are empty or mixed into a single [`SyncedSongAudio`] entity.
@@ -190,69 +209,63 @@ impl SongAudioPlayer {
             return true;
         }
 
-        let mut raw_sources = Vec::with_capacity(self.tracks.len());
+        if let Some(ref rx_mutex) = self.pending_decode_rx {
+            let recv_state = rx_mutex.lock().ok().map(|rx| rx.try_recv());
+            match recv_state {
+                Some(Ok(Some(res))) => {
+                    self.pending_decode_rx = None;
+                    return self.finalize_decoded_mix(commands, synced_assets, res);
+                }
+                Some(Ok(None)) | Some(Err(mpsc::TryRecvError::Disconnected)) | None => {
+                    self.pending_decode_rx = None;
+                    self.mix_empty = true;
+                    return true;
+                }
+                Some(Err(mpsc::TryRecvError::Empty)) => return false,
+            }
+        }
+
+        let mut pending = Vec::with_capacity(self.tracks.len());
         for track in &self.tracks {
             let Some(src) = audio_sources.get(&track.handle) else {
                 return false;
             };
-            raw_sources.push((track, src));
-        }
-
-        let decoded: Vec<(&TrackHandle, Option<PcmBuffer>)> = raw_sources
-            .into_iter()
-            .map(|(track, src)| (track, PcmBuffer::decode_from_audio_source(src)))
-            .collect();
-
-        let ref_format = decoded
-            .iter()
-            .find_map(|(track, buf)| {
-                (track.role == TrackRole::Instrumental)
-                    .then_some(buf.as_ref())
-                    .flatten()
-                    .map(|b| (b.channels, b.sample_rate))
-            })
-            .or_else(|| {
-                decoded
-                    .iter()
-                    .find_map(|(_, buf)| buf.as_ref().map(|b| (b.channels, b.sample_rate)))
+            pending.push(PendingTrackDecode {
+                role: track.role,
+                base_volume: track.base_volume,
+                initial_vol: self.effective_track_volume(track.role, track.base_volume),
+                offset_ms: track.offset_ms,
+                source: AudioSource {
+                    bytes: Arc::clone(&src.bytes),
+                },
             });
+        }
 
-        let Some((target_channels, target_rate)) = ref_format else {
-            self.mix_empty = true;
-            return true;
-        };
+        let (tx, rx) = mpsc::channel();
+        self.pending_decode_rx = Some(Mutex::new(rx));
+        std::thread::spawn(move || {
+            let _ = tx.send(decode_tracks_sequential(pending));
+        });
+        false
+    }
 
-        let mix_origin_ms = self.tracks.iter().map(|t| t.offset_ms).fold(0.0_f64, f64::min);
-        let rate_f64 = f64::from(target_rate.get());
-        let controls: Vec<MixTrackControl> = decoded
-            .into_iter()
-            .filter_map(|(track, buf_opt)| {
-                let buf = buf_opt?;
-                let samples = normalize_pcm(&buf, target_channels, target_rate);
-                let offset_frames =
-                    ((track.offset_ms - mix_origin_ms) / 1000.0 * rate_f64).round() as isize;
-                let initial_vol = self.effective_track_volume(track.role, track.base_volume);
-                Some(MixTrackControl::new(
-                    track.role,
-                    track.base_volume,
-                    initial_vol,
-                    offset_frames,
-                    samples,
-                ))
-            })
-            .collect();
-
-        if controls.is_empty() {
+    fn finalize_decoded_mix(
+        &mut self,
+        commands: &mut Commands,
+        synced_assets: &mut Assets<SyncedSongAudio>,
+        res: DecodedMixResult,
+    ) -> bool {
+        if res.controls.is_empty() {
             self.mix_empty = true;
             return true;
         }
 
-        let mix_controls: Arc<[MixTrackControl]> = Arc::from(controls);
+        let mix_controls: Arc<[MixTrackControl]> = Arc::from(res.controls);
         let cursor_frames = Arc::new(AtomicUsize::new(0));
         let synced = SyncedSongAudio::new(
             Arc::clone(&mix_controls),
-            target_channels,
-            target_rate,
+            res.target_channels,
+            res.target_rate,
             Arc::clone(&cursor_frames),
         );
         let mix_handle = synced_assets.add(synced);
@@ -273,8 +286,8 @@ impl SongAudioPlayer {
         self.mix_handle = Some(mix_handle);
         self.mix_controls = mix_controls;
         self.cursor_frames = cursor_frames;
-        self.mix_sample_rate = Some(target_rate);
-        self.mix_origin_ms = mix_origin_ms;
+        self.mix_sample_rate = Some(res.target_rate);
+        self.mix_origin_ms = res.mix_origin_ms;
         self.mix_empty = false;
         true
     }
@@ -428,4 +441,50 @@ impl SongAudioPlayer {
         sink.play();
         true
     }
+}
+
+fn decode_tracks_sequential(pending: Vec<PendingTrackDecode>) -> Option<DecodedMixResult> {
+    let mut decoded: Vec<(PendingTrackDecode, PcmBuffer)> = Vec::with_capacity(pending.len());
+    for item in pending {
+        if let Some(buf) = PcmBuffer::decode_from_audio_source(&item.source) {
+            decoded.push((item, buf));
+        }
+    }
+    if decoded.is_empty() {
+        return None;
+    }
+
+    let (target_channels, target_rate) = decoded
+        .iter()
+        .find_map(|(item, buf)| {
+            (item.role == TrackRole::Instrumental).then_some((buf.channels, buf.sample_rate))
+        })
+        .unwrap_or_else(|| (decoded[0].1.channels, decoded[0].1.sample_rate));
+
+    let mix_origin_ms = decoded
+        .iter()
+        .map(|(item, _)| item.offset_ms)
+        .fold(0.0_f64, f64::min);
+    let rate_f64 = f64::from(target_rate.get());
+
+    let mut controls = Vec::with_capacity(decoded.len());
+    for (item, buf) in decoded {
+        let samples = normalize_pcm(&buf, target_channels, target_rate);
+        let offset_frames =
+            ((item.offset_ms - mix_origin_ms) / 1000.0 * rate_f64).round() as isize;
+        controls.push(MixTrackControl::new(
+            item.role,
+            item.base_volume,
+            item.initial_vol,
+            offset_frames,
+            samples,
+        ));
+    }
+
+    Some(DecodedMixResult {
+        controls,
+        target_channels,
+        target_rate,
+        mix_origin_ms,
+    })
 }

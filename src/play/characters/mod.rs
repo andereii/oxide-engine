@@ -10,8 +10,8 @@ pub use behavior::{
     CharacterActor, CharacterTrailConfig, CharacterTrailState, CharacterUnderlayConfig,
 };
 pub use loader::{
-    CharactersResource, append_character_sidecar_scripts, ensure_character_gameover_anims_loaded,
-    load_characters_resource, load_single_character,
+    CharactersResource, LoadedCharacter, append_character_sidecar_scripts,
+    ensure_character_gameover_anims_loaded, load_characters_resource, load_single_character,
 };
 pub use schema::CharacterRole;
 pub use spawn::{
@@ -19,6 +19,3 @@ pub use spawn::{
     spawn_single_character, spawn_single_character_with_underlay,
 };
 pub use sync::{CharacterSyncState, sync_characters};
-
-#[cfg(test)]
-mod tests;

@@ -335,7 +335,7 @@ pub(super) fn handle_char_hud_audio_cmd(
                     ) {
                         loaded.facing_flip_x = parent_flip_x;
                         if let Some(tr) = scripts.preload.as_deref_mut() {
-                            tr.register_loaded_character(&loaded);
+                            tr.register_character(&loaded);
                         }
                         spawn_single_character_with_underlay(
                             commands,
@@ -409,7 +409,7 @@ pub(super) fn handle_char_hud_audio_cmd(
                     &mut scripts.layouts,
                 ) {
                     if let Some(tr) = scripts.preload.as_deref_mut() {
-                        tr.register_loaded_character(&loaded);
+                        tr.register_character(&loaded);
                     }
                     despawn_actor_with_parts(commands, ent, sheet_ent, &pieces, &trails);
                     spawn_single_character(commands, &loaded);

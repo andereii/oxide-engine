@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::window::WindowFocused;
 
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent};
+use crate::ui::LoadingScreenState;
 
 use super::super::characters::{
     CharacterRole, CharacterTrailVisual, ensure_character_gameover_anims_loaded,
@@ -25,9 +26,9 @@ use super::super::shaders::systems::ShaderScriptCommand;
 use super::super::song::{SongSelection, load_song_chart_in};
 use super::super::stage::StageCompositePiece;
 use super::super::types::{PlayPhase, PlayStateParams, SongChart};
-use super::hud_audio::{prewarm_sfx_handles, spawn_one_shot};
+use super::hud_audio::spawn_one_shot;
+use super::load_pipeline::{PlayLoadPipeline, begin_play_scene_load, step_play_load_pipeline};
 use super::script_commands::apply_ecs_script_commands;
-use super::setup::populate_play_scene_entities;
 use super::{AudioTickParams, ScriptHudAndTextParams, ScriptTickParams};
 
 pub(super) type ReloadCleanupQuery<'w, 's> = Query<
@@ -233,6 +234,8 @@ fn execute_song_reload(
     scripts: &mut ScriptTickParams,
     hud_texts: &mut ScriptHudAndTextParams,
     reload_cleanup: &ReloadCleanupQuery,
+    loading_screen: &mut LoadingScreenState,
+    load_pipeline: &mut PlayLoadPipeline,
 ) {
     let _ = state.run_script_hooks(
         vec![(HookKind::Destroy, ScriptEvent::new(HookKind::Destroy))],
@@ -315,19 +318,11 @@ fn execute_song_reload(
     audio_res.sync.was_countdown = state.is_in_countdown;
     audio_res.sync.was_paused = false;
 
-    populate_play_scene_entities(
-        commands,
-        &scripts.asset_server,
-        &mut scripts.layouts,
-        &scripts.mods,
-        &mut scripts.mod_store,
-        &mut scripts.script_host,
-        &mut scripts.pending_ecs,
+    begin_play_scene_load(
         state,
-        playlist,
-        &mut audio_res.audio,
-        &mut audio_res.sfx,
         scripts.preload.as_deref_mut(),
+        loading_screen,
+        load_pipeline,
     );
 }
 
@@ -344,6 +339,8 @@ pub(super) fn tick_play_state(
     mut focus_events: MessageReader<WindowFocused>,
     mut exit_events: MessageReader<AppExit>,
     reload_cleanup: ReloadCleanupQuery,
+    mut loading_screen: ResMut<LoadingScreenState>,
+    mut load_pipeline: ResMut<PlayLoadPipeline>,
 ) {
     for ev in focus_events.read() {
         let kind = if ev.focused {
@@ -385,45 +382,24 @@ pub(super) fn tick_play_state(
             &mut scripts,
             &mut hud_texts,
             &reload_cleanup,
+            &mut loading_screen,
+            &mut load_pipeline,
         );
         return;
     }
 
     if state.phase == PlayPhase::Loading {
-        if !scripts.pending_ecs.0.is_empty() {
-            let init_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
-            apply_ecs_script_commands(
-                &mut commands,
-                &mut audio_res,
-                &mut scripts,
-                &mut hud_texts,
-                &init_cmds,
-            );
-        }
-
-        prewarm_sfx_handles(
-            &audio_res.sfx.miss_sounds,
-            &audio_res.audio_sources,
-            &mut audio_res.pcm_sfx,
-            &mut audio_res.sfx_cache,
+        step_play_load_pipeline(
+            time.delta_secs(),
+            &mut commands,
+            &mut state,
+            &mut playlist,
+            &mut audio_res,
+            &mut scripts,
+            &mut hud_texts,
+            &mut loading_screen,
+            &mut load_pipeline,
         );
-
-        let progress = if let Some(ref mut preload) = scripts.preload {
-            preload.poll(&scripts.asset_server, audio_res.audio.is_ready())
-        } else {
-            return;
-        };
-        state.status_message = format!(
-            "Loading... {:.0}% ({}/{})",
-            progress.fraction() * 100.0,
-            progress.loaded_assets,
-            progress.total_assets,
-        );
-        if progress.is_complete() {
-            state.start_countdown();
-            audio_res.sync.was_countdown = true;
-            audio_res.sync.was_paused = false;
-        }
         return;
     }
 
@@ -507,6 +483,8 @@ pub(super) fn tick_play_state(
             &mut scripts,
             &mut hud_texts,
             &reload_cleanup,
+            &mut loading_screen,
+            &mut load_pipeline,
         );
         return;
     }
