@@ -5,7 +5,8 @@ pub mod schema;
 pub mod sync;
 
 pub use loader::{
-    StageResource, append_stage_sidecar_scripts, begin_stage_load, resolve_stage_prop,
+    StageResource, append_stage_sidecar_scripts, begin_stage_load, load_stage_resource,
+    resolve_stage_prop,
 };
 pub use sync::{
     DynamicScriptProp, DynamicScriptText, StageCompositePiece, StageCompositeProp,

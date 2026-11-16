@@ -210,18 +210,18 @@ impl SongAudioPlayer {
         }
 
         if let Some(ref rx_mutex) = self.pending_decode_rx {
-            let recv_state = rx_mutex.lock().map(|rx| rx.try_recv());
+            let recv_state = rx_mutex.lock().ok().map(|rx| rx.try_recv());
             match recv_state {
-                Ok(Ok(Some(res))) => {
+                Some(Ok(Some(res))) => {
                     self.pending_decode_rx = None;
                     return self.finalize_decoded_mix(commands, synced_assets, res);
                 }
-                Ok(Ok(None)) | Ok(Err(mpsc::TryRecvError::Disconnected)) | Err(_) => {
+                Some(Ok(None)) | Some(Err(mpsc::TryRecvError::Disconnected)) | None => {
                     self.pending_decode_rx = None;
                     self.mix_empty = true;
                     return true;
                 }
-                Ok(Err(mpsc::TryRecvError::Empty)) => return false,
+                Some(Err(mpsc::TryRecvError::Empty)) => return false,
             }
         }
 
