@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
 use crate::play::characters::{
-    CharacterTrailConfig, CharacterTrailState, CharacterTrailVisual, CharacterUnderlayConfig,
-    load_single_character, spawn_single_character, spawn_single_character_with_underlay,
+    CharacterActor, CharacterTrailConfig, CharacterTrailState, CharacterTrailVisual,
+    CharacterUnderlayConfig, load_single_character, spawn_single_character,
+    spawn_single_character_with_underlay,
 };
 use crate::play::notes::data::NoteDirection;
 use crate::play::stage::schema::stage_layer_z;

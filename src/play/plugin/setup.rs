@@ -148,7 +148,8 @@ pub(super) fn setup_play_scene(
         &mut load_pipeline,
     );
 
-    let score_font: Handle<Font> = asset_server.load(mods.resolve_asset("ui/fonts/VCR OSD Mono.ttf"));
+    let score_font: Handle<Font> =
+        asset_server.load(mods.resolve_asset_server_path("ui/fonts/VCR OSD Mono.ttf"));
     commands.spawn((
         Text2d::new(""),
         TextFont {

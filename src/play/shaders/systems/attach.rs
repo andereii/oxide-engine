@@ -52,10 +52,10 @@ fn ensure_character_composite_rt(
             Camera2d,
             Camera {
                 order: cam_order,
-                target: RenderTarget::from(rt_image.clone()),
                 clear_color: ClearColorConfig::Custom(Color::NONE),
                 ..default()
             },
+            RenderTarget::from(rt_image.clone()),
             Msaa::Off,
             Tonemapping::None,
             layer,
