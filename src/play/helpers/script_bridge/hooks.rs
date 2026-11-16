@@ -1,4 +1,4 @@
-﻿use std::collections::BTreeMap;
+use std::collections::BTreeMap;
 
 use crate::mods::{ModRegistry, ModStore};
 use crate::play::events::apply_notekind_to_play_state;
@@ -116,7 +116,6 @@ fn apply_song_loaded_mutations(state: &mut PlayState, orig: &ScriptEvent, ev: &S
     }
 }
 
-impl PlayState {
 impl PlayState {
     /// Dispatches queued lifecycle/gameplay hooks, optionally runs `Update` + timers/tweens,
     /// applies state mutations, and returns commands requiring Bevy ECS execution.
