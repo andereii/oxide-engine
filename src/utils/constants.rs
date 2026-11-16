@@ -113,9 +113,9 @@ pub const SCRIPT_DIR_STAGES: &str = "scripts/stages";
 pub const SCRIPT_DIR_CHARACTERS: &str = "scripts/characters";
 pub const SCRIPT_DIR_NOTEKINDS: &str = "scripts/notekinds";
 pub const SCRIPT_DIR_EVENTS: &str = "scripts/events";
-pub const RHAI_MAX_OPERATIONS: u64 = 250_000;
-pub const RHAI_MAX_CALL_LEVELS: usize = 32;
-pub const RHAI_MAX_ARRAY_SIZE: usize = 4096;
-pub const RHAI_MAX_MAP_SIZE: usize = 4096;
-pub const RHAI_MAX_STRING_SIZE: usize = 65_536;
+pub const RHAI_MAX_OPERATIONS: u64 = 1_000_000;
+pub const RHAI_MAX_CALL_LEVELS: usize = 64;
+pub const RHAI_MAX_ARRAY_SIZE: usize = 65_536;
+pub const RHAI_MAX_MAP_SIZE: usize = 32_768;
+pub const RHAI_MAX_STRING_SIZE: usize = 1_048_576;
 

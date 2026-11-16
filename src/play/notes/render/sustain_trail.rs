@@ -65,8 +65,13 @@ pub fn compute_sustain_geometry(
     }
 
     let rendered_end_px = end_raw_h * style.sustains_scale;
-    let body_px = (total_px - rendered_end_px).max(0.0);
-    let end_height_px = if body_px > 0.5 { rendered_end_px } else { total_px.min(rendered_end_px).max(1.0) };
+    let raw_body_px = (total_px - rendered_end_px).max(0.0);
+    let body_px = if raw_body_px > 0.5 { raw_body_px } else { 0.0 };
+    let end_height_px = if body_px > 0.0 {
+        rendered_end_px
+    } else {
+        total_px.min(rendered_end_px).max(1.0)
+    };
     let sign = if strum.is_downscroll { 1.0 } else { -1.0 };
 
     let lane_idx = note.lane.index();

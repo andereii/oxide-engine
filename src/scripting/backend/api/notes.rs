@@ -3,6 +3,64 @@ use rhai::{Dynamic, Engine, EvalAltResult, Map};
 use crate::scripting::api::{ScriptCommand, TweenProp, TweenTarget};
 use crate::scripting::backend::context::{dyn_to_f64, dyn_to_usize, runtime_err, with_ctx};
 
+fn map_opt_str(fields: &Map, keys: &[&str]) -> Option<String> {
+    for &key in keys {
+        let Some(val) = fields.get(key) else {
+            continue;
+        };
+        if val.is_unit() {
+            continue;
+        }
+        if let Ok(s) = val.clone().into_string() {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn map_opt_bool(fields: &Map, keys: &[&str]) -> Result<Option<bool>, Box<EvalAltResult>> {
+    for &key in keys {
+        let Some(val) = fields.get(key) else {
+            continue;
+        };
+        if val.is_unit() {
+            continue;
+        }
+        return val
+            .as_bool()
+            .map(Some)
+            .map_err(|_| runtime_err(format!("expected bool for '{key}', got {}", val.type_name())));
+    }
+    Ok(None)
+}
+
+fn emit_register_notekind(id: &str, fields: &Map) -> Result<(), Box<EvalAltResult>> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return Err(runtime_err("register_notekind: id cannot be empty"));
+    }
+    let description = map_opt_str(fields, &["description", "desc"]).unwrap_or_default();
+    let note_style_id = map_opt_str(fields, &["note_style", "style", "noteStyle", "note_style_id"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let no_anim = map_opt_bool(fields, &["no_anim", "noAnim"])?.unwrap_or(false);
+    let suffix = map_opt_str(fields, &["suffix", "anim_suffix", "animSuffix"]).unwrap_or_default();
+    let scoreable = map_opt_bool(fields, &["scoreable"])?.unwrap_or(true);
+    let low_priority = map_opt_bool(fields, &["low_priority", "lowPriority"])?.unwrap_or(false);
+
+    with_ctx(|c| {
+        c.commands.push(ScriptCommand::RegisterNoteKind {
+            id: trimmed.to_string(),
+            description,
+            note_style_id,
+            no_anim,
+            suffix,
+            scoreable,
+            low_priority,
+        });
+    })
+}
+
 pub fn register_notes_api(engine: &mut Engine) {
     // Modcharting lane helpers (lanes 0..3 player, 4..7 opponent).
     engine.register_fn("lane_x", |lane: Dynamic, dx: Dynamic| -> Result<(), Box<EvalAltResult>> {
@@ -143,6 +201,44 @@ pub fn register_notes_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn("strum_visible", |side: &str, visible: bool| {
+        let alpha = if visible { 1.0_f32 } else { 0.0_f32 };
+        let key_count = crate::utils::constants::KEY_COUNT;
+        with_ctx(|c| {
+            let lower = side.trim().to_ascii_lowercase();
+            let update_player = matches!(
+                lower.as_str(),
+                "player" | "ply" | "bf" | "boyfriend" | "p1" | "0" | "both" | "all"
+            );
+            let update_opp = matches!(
+                lower.as_str(),
+                "opponent" | "opp" | "dad" | "p2" | "1" | "both" | "all"
+            );
+            if update_player {
+                for lane in 0..key_count {
+                    c.snapshot.lane_alphas.insert(lane, alpha);
+                }
+            }
+            if update_opp {
+                for lane in key_count..(key_count * 2) {
+                    c.snapshot.lane_alphas.insert(lane, alpha);
+                }
+            }
+            c.commands.push(ScriptCommand::SetStrumVisible {
+                side: side.to_string(),
+                visible,
+            });
+        })
+    });
+
+    for name in ["register_notekind", "notekind"] {
+        engine.register_fn(name, |id: &str| -> Result<(), Box<EvalAltResult>> {
+            emit_register_notekind(id, &Map::new())
+        });
+        engine.register_fn(name, |id: &str, fields: Map| -> Result<(), Box<EvalAltResult>> {
+            emit_register_notekind(id, &fields)
+        });
+    }
 
     engine.register_fn("notes", || {
         with_ctx(|c| {

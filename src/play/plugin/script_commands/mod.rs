@@ -26,6 +26,7 @@ pub(crate) fn apply_ecs_script_commands(
     // and invalidate if a spawn/despawn mutates prop entities mid-batch.
     let mut prop_index: Option<HashMap<String, Vec<Entity>>> =
         (cmds.len() >= 2).then(|| build_prop_index_ci(&scripts.props));
+    let mut pending_spawned: HashMap<String, Entity> = HashMap::new();
 
     for cmd in cmds {
         match cmd {
@@ -60,6 +61,7 @@ pub(crate) fn apply_ecs_script_commands(
                     &scripts.sparrows,
                     &mut hud_texts.texts,
                     &mut prop_index,
+                    &mut pending_spawned,
                 );
             }
             ScriptCommand::SetShaderAdjustColor {
@@ -173,6 +175,7 @@ pub(crate) fn apply_ecs_script_commands(
                     audio_res,
                     scripts,
                     hud_texts,
+                    &pending_spawned,
                 );
             }
         }

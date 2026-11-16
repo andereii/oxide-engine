@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::mods::{ModRegistry, ModStore};
-use crate::play::notes::data::{NoteDirection, SongNoteData};
+use crate::play::events::apply_notekind_to_play_state;
+use crate::play::notes::data::{NoteDirection, NoteKind, SongNoteData};
 use crate::play::notes::strum::{CharNoteSignal, Strumline};
 use crate::scripting::{
     HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptMutableState, ScriptNoteSnapshot,
@@ -381,14 +382,78 @@ impl PlayState {
 
         let mut ctx = host.finalize_context(ctx, store);
         self.apply_script_mutable(&ctx.mutable);
+        self.apply_pending_notekind_registrations(&ctx.commands);
 
         let mut remaining = Vec::new();
         for cmd in ctx.commands.drain(..) {
-            if !self.apply_state_script_command(&cmd, playlist) {
-                remaining.push(cmd);
+            if matches!(cmd, ScriptCommand::RegisterNoteKind { .. })
+                || self.apply_bridge_script_command(&cmd)
+                || self.apply_state_script_command(&cmd, playlist)
+            {
+                continue;
             }
+            remaining.push(cmd);
         }
         remaining
+    }
+
+    /// Applies any queued [`ScriptCommand::RegisterNoteKind`] entries to [`PlayState::note_kinds`]
+    /// and updates matching chart/strumline notes and `total_notes`.
+    pub fn apply_pending_notekind_registrations(&mut self, cmds: &[ScriptCommand]) {
+        for cmd in cmds {
+            if let ScriptCommand::RegisterNoteKind {
+                id,
+                description,
+                note_style_id,
+                no_anim,
+                suffix,
+                scoreable,
+                low_priority,
+            } = cmd
+            {
+                apply_notekind_to_play_state(
+                    self,
+                    NoteKind {
+                        id: id.clone(),
+                        description: description.clone(),
+                        note_style_id: note_style_id.clone(),
+                        no_anim: *no_anim,
+                        suffix: suffix.clone(),
+                        scoreable: *scoreable,
+                        low_priority: *low_priority,
+                    },
+                );
+            }
+        }
+    }
+
+    fn apply_bridge_script_command(&mut self, cmd: &ScriptCommand) -> bool {
+        match cmd {
+            ScriptCommand::SetStrumVisible { side, visible } => {
+                let alpha = if *visible { 1.0 } else { 0.0 };
+                let lower = side.trim().to_ascii_lowercase();
+                let apply_player = matches!(
+                    lower.as_str(),
+                    "player" | "ply" | "bf" | "boyfriend" | "p1" | "0" | "both" | "all"
+                );
+                let apply_opponent = matches!(
+                    lower.as_str(),
+                    "opponent" | "opp" | "dad" | "p2" | "1" | "both" | "all"
+                );
+                if apply_player {
+                    for rec in &mut self.player_strumline.receptors {
+                        rec.mod_alpha = alpha;
+                    }
+                }
+                if apply_opponent {
+                    for rec in &mut self.opponent_strumline.receptors {
+                        rec.mod_alpha = alpha;
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn apply_hook_outcome(

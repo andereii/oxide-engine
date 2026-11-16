@@ -6,7 +6,11 @@ use bevy::audio::Volume;
 use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
 
-use crate::play::characters::{load_single_character, spawn_single_character};
+use crate::play::characters::{
+    CharacterTrailConfig, CharacterTrailState, CharacterTrailVisual, CharacterUnderlayConfig,
+    load_single_character, spawn_single_character, spawn_single_character_with_underlay,
+};
+use crate::play::stage::schema::stage_layer_z;
 use crate::play::hud::health_icon::apply_icon_char_id;
 use crate::play::notes::data::NoteDirection;
 use crate::scripting::ScriptCommand;
@@ -59,6 +63,29 @@ pub(super) fn trigger_sandboxed_screenshot(
     );
 }
 
+fn despawn_actor_with_parts(
+    commands: &mut Commands,
+    ent: Entity,
+    sheet_ent: Entity,
+    pieces: &[Entity],
+    trails: &[Entity],
+) {
+    if sheet_ent != Entity::PLACEHOLDER {
+        commands.entity(sheet_ent).despawn();
+    }
+    for &p_ent in pieces {
+        if p_ent != Entity::PLACEHOLDER {
+            commands.entity(p_ent).despawn();
+        }
+    }
+    for &t_ent in trails {
+        if t_ent != Entity::PLACEHOLDER {
+            commands.entity(t_ent).despawn();
+        }
+    }
+    commands.entity(ent).despawn();
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_char_hud_audio_cmd(
     cmd: &ScriptCommand,
@@ -66,6 +93,7 @@ pub(super) fn handle_char_hud_audio_cmd(
     audio_res: &mut AudioTickParams,
     scripts: &mut ScriptTickParams,
     hud_texts: &mut ScriptHudAndTextParams,
+    pending_spawned: &std::collections::HashMap<String, Entity>,
 ) {
     match cmd {
         ScriptCommand::PlayAnim { target, anim, force } => {
@@ -79,12 +107,23 @@ pub(super) fn handle_char_hud_audio_cmd(
                 }
             }
             if !matched_actor {
+                let mut matched_prop = false;
                 for (_, vis, _, anim_opt, _, _) in scripts.props.iter_mut() {
                     if vis.name.eq_ignore_ascii_case(target)
                         && let Some(mut ctrl) = anim_opt
                     {
                         ctrl.play(anim, *force, false, 0);
+                        matched_prop = true;
                     }
+                }
+                if !matched_prop && let Some(&ent) = pending_spawned.get(target) {
+                    let anim_name = anim.clone();
+                    let force_flag = *force;
+                    commands.queue(move |world: &mut World| {
+                        if let Some(mut ctrl) = world.get_mut::<crate::animations::AnimationController>(ent) {
+                            ctrl.play(&anim_name, force_flag, false, 0);
+                        }
+                    });
                 }
             }
         }
@@ -99,12 +138,24 @@ pub(super) fn handle_char_hud_audio_cmd(
                 }
             }
             if !matched_actor {
+                let mut matched_prop = false;
                 for (_, vis, _, anim_opt, _, _) in scripts.props.iter_mut() {
                     if vis.name.eq_ignore_ascii_case(target)
                         && let Some(mut ctrl) = anim_opt
                     {
                         ctrl.play(anim, *force, false, *frame);
+                        matched_prop = true;
                     }
+                }
+                if !matched_prop && let Some(&ent) = pending_spawned.get(target) {
+                    let anim_name = anim.clone();
+                    let force_flag = *force;
+                    let frame_idx = *frame;
+                    commands.queue(move |world: &mut World| {
+                        if let Some(mut ctrl) = world.get_mut::<crate::animations::AnimationController>(ent) {
+                            ctrl.play(&anim_name, force_flag, false, frame_idx);
+                        }
+                    });
                 }
             }
         }
@@ -184,6 +235,143 @@ pub(super) fn handle_char_hud_audio_cmd(
                 }
             }
         }
+        ScriptCommand::SetCharTrail {
+            target,
+            length,
+            delay_s,
+            alpha,
+            diff,
+            z_layer,
+        } => {
+            for (_, mut actor) in scripts.actors.iter_mut() {
+                if !actor_matches_target(&actor, target) {
+                    continue;
+                }
+                for ent in actor.trail_entities.drain(..) {
+                    commands.entity(ent).despawn();
+                }
+                let layer = z_layer.unwrap_or(actor.slot.layer.saturating_sub(1));
+                let z_f32 = stage_layer_z(layer, 0);
+                let mut entities = Vec::with_capacity(*length);
+                for _ in 0..*length {
+                    let sprite = match actor.sources.first() {
+                        Some(src) => Sprite::from_atlas_image(
+                            src.texture.clone(),
+                            TextureAtlas {
+                                layout: src.layout.clone(),
+                                index: 0,
+                            },
+                        ),
+                        None => Sprite::default(),
+                    };
+                    entities.push(
+                        commands
+                            .spawn((
+                                sprite,
+                                Transform::from_xyz(0.0, 0.0, z_f32),
+                                Visibility::Hidden,
+                                CharacterTrailVisual,
+                            ))
+                            .id(),
+                    );
+                }
+                actor.trail_entities = entities;
+                actor.trail = Some(CharacterTrailState::new(CharacterTrailConfig {
+                    length: *length,
+                    delay_s: *delay_s,
+                    alpha: *alpha,
+                    diff: *diff,
+                    z_layer: z_f32,
+                }));
+            }
+        }
+        ScriptCommand::ClearCharTrail { target } => {
+            for (_, mut actor) in scripts.actors.iter_mut() {
+                if actor_matches_target(&actor, target) {
+                    for ent in actor.trail_entities.drain(..) {
+                        commands.entity(ent).despawn();
+                    }
+                    actor.trail = None;
+                }
+            }
+        }
+        ScriptCommand::SetCharUnderlay {
+            target,
+            char_id,
+            offset,
+            z_offset,
+        } => {
+            let mut parent_specs = Vec::new();
+            for (_, actor) in scripts.actors.iter() {
+                if actor_matches_target(&actor, target) {
+                    let mut underlay_slot = actor.slot.clone();
+                    underlay_slot.layer = underlay_slot.layer.saturating_add(*z_offset);
+                    underlay_slot.opacity = 1.0;
+                    parent_specs.push((actor.role, underlay_slot, actor.facing_flip_x));
+                }
+            }
+            if !parent_specs.is_empty() {
+                for (ent, actor) in scripts.actors.iter() {
+                    if let Some(cfg) = actor.mirror_of
+                        && parent_specs.iter().any(|(r, _, _)| *r == cfg.parent_role)
+                    {
+                        despawn_actor_with_parts(
+                            commands,
+                            ent,
+                            actor.sheet_entity,
+                            &actor.piece_entities,
+                            &actor.trail_entities,
+                        );
+                    }
+                }
+                for (parent_role, underlay_slot, parent_flip_x) in parent_specs {
+                    if let Ok(mut loaded) = load_single_character(
+                        &scripts.mods,
+                        char_id,
+                        parent_role,
+                        underlay_slot,
+                        &scripts.asset_server,
+                        &mut scripts.layouts,
+                    ) {
+                        loaded.facing_flip_x = parent_flip_x;
+                        if let Some(tr) = scripts.preload.as_deref_mut() {
+                            tr.register_loaded_character(&loaded);
+                        }
+                        spawn_single_character_with_underlay(
+                            commands,
+                            &loaded,
+                            Some(CharacterUnderlayConfig {
+                                parent_role,
+                                offset: *offset,
+                            }),
+                        );
+                    }
+                }
+            }
+        }
+        ScriptCommand::ClearCharUnderlay { target } => {
+            let mut roles = Vec::new();
+            for (_, actor) in scripts.actors.iter() {
+                if actor_matches_target(&actor, target) {
+                    roles.push(actor.role);
+                }
+            }
+            if !roles.is_empty() {
+                for (ent, actor) in scripts.actors.iter() {
+                    if let Some(cfg) = actor.mirror_of
+                        && roles.contains(&cfg.parent_role)
+                    {
+                        despawn_actor_with_parts(
+                            commands,
+                            ent,
+                            actor.sheet_entity,
+                            &actor.piece_entities,
+                            &actor.trail_entities,
+                        );
+                    }
+                }
+            }
+        }
         ScriptCommand::SwapChar { role, char_id } => {
             let mut replacement_specs = Vec::new();
             for (ent, actor) in scripts.actors.iter() {
@@ -194,10 +382,24 @@ pub(super) fn handle_char_hud_audio_cmd(
                         actor.slot.clone(),
                         actor.sheet_entity,
                         actor.piece_entities.clone(),
+                        actor.trail_entities.clone(),
                     ));
                 }
             }
-            for (ent, role_enum, slot, sheet_ent, pieces) in replacement_specs {
+            for (ent, role_enum, slot, sheet_ent, pieces, trails) in replacement_specs {
+                for (u_ent, u_actor) in scripts.actors.iter() {
+                    if let Some(cfg) = u_actor.mirror_of
+                        && cfg.parent_role == role_enum
+                    {
+                        despawn_actor_with_parts(
+                            commands,
+                            u_ent,
+                            u_actor.sheet_entity,
+                            &u_actor.piece_entities,
+                            &u_actor.trail_entities,
+                        );
+                    }
+                }
                 if let Ok(loaded) = load_single_character(
                     &scripts.mods,
                     char_id,
@@ -206,11 +408,10 @@ pub(super) fn handle_char_hud_audio_cmd(
                     &scripts.asset_server,
                     &mut scripts.layouts,
                 ) {
-                    commands.entity(sheet_ent).despawn();
-                    for p_ent in pieces {
-                        commands.entity(p_ent).despawn();
+                    if let Some(tr) = scripts.preload.as_deref_mut() {
+                        tr.register_loaded_character(&loaded);
                     }
-                    commands.entity(ent).despawn();
+                    despawn_actor_with_parts(commands, ent, sheet_ent, &pieces, &trails);
                     spawn_single_character(commands, &loaded);
                 }
             }

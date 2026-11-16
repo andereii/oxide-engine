@@ -86,13 +86,12 @@ fn apply_body_geom(
         return;
     }
     let mod_alpha = strum.receptors.get(vis.lane).map_or(1.0, |r| r.mod_alpha);
-    let mod_y = strum.receptors.get(vis.lane).map_or(0.0, |r| r.mod_offset[1]);
     let x_off = if note.hold_hit { style.sustains_offset_hit[0] } else { style.sustains_offset[0] };
     set_visibility(visibility, Visibility::Visible);
     let (z, scale) = { let t: &Mut<'_, Transform> = &*transform; (t.translation.z, t.scale) };
     set_transform_pos_scale(
         transform,
-        Vec3::new(strum.lane_x(vis.lane) + x_off, geom.body_y + mod_y, z),
+        Vec3::new(strum.lane_x(vis.lane) + x_off, geom.body_y, z),
         scale,
     );
     let flip_x = { let s: &Mut<'_, Sprite> = &*sprite; s.flip_x };
@@ -102,7 +101,7 @@ fn apply_body_geom(
         sprite,
         Some(Vec2::new(
             vis.raw_width_px,
-            (geom.body_height_px / style.sustains_scale.max(0.01)).max(1.0),
+            geom.body_height_px / style.sustains_scale.max(0.01),
         )),
     );
 }
@@ -177,18 +176,17 @@ fn apply_end_geom(
     visibility: &mut Mut<'_, Visibility>,
 ) {
     let geom = compute_sustain_geometry(note, strum, style, vis_pos, vis.end_raw_h);
-    if !geom.visible || geom.body_height_px <= 0.5 || (strum.middlescroll && !strum.is_player) {
+    if !geom.visible || geom.end_height_px <= 0.5 || (strum.middlescroll && !strum.is_player) {
         set_visibility(visibility, Visibility::Hidden);
         return;
     }
     let mod_alpha = strum.receptors.get(vis.lane).map_or(1.0, |r| r.mod_alpha);
-    let mod_y = strum.receptors.get(vis.lane).map_or(0.0, |r| r.mod_offset[1]);
     let x_off = if note.hold_hit { style.sustains_offset_hit[0] } else { style.sustains_offset[0] };
     set_visibility(visibility, Visibility::Visible);
     let (z, scale) = { let t: &Mut<'_, Transform> = &*transform; (t.translation.z, t.scale) };
     set_transform_pos_scale(
         transform,
-        Vec3::new(strum.lane_x(vis.lane) + x_off + geom.end_x_offset, geom.end_y + mod_y, z),
+        Vec3::new(strum.lane_x(vis.lane) + x_off + geom.end_x_offset, geom.end_y, z),
         scale,
     );
     let flip_x = { let s: &Mut<'_, Sprite> = &*sprite; s.flip_x };
@@ -199,7 +197,7 @@ fn apply_end_geom(
         if geom.end_height_px + 0.5 < vis.end_raw_h * style.sustains_scale {
             Some(Vec2::new(
                 vis.end_raw_w,
-                (geom.end_height_px / style.sustains_scale.max(0.01)).max(1.0),
+                geom.end_height_px / style.sustains_scale.max(0.01),
             ))
         } else {
             None

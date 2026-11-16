@@ -72,11 +72,13 @@ impl NoteKindManager {
     }
 
     pub fn get(&self, kind_id: Option<&str>) -> Option<&NoteKind> {
-        let id = kind_id?;
+        let id = kind_id?.trim();
         if id.is_empty() {
             return None;
         }
-        self.kinds.get(id)
+        self.kinds
+            .get(id)
+            .or_else(|| self.kinds.values().find(|k| k.id.eq_ignore_ascii_case(id)))
     }
 
     pub fn is_scoreable(&self, kind_id: Option<&str>) -> bool {

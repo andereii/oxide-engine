@@ -1,9 +1,18 @@
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use super::popups::{
-    PREALLOC_DIGITS_PER_KIND, PREALLOC_RATINGS_PER_KIND, PopupAssets, PopupKind, PopupSpawnParams,
-    PopupVisual, spawn_or_reuse, spawn_popup_pool,
+    PREALLOC_DIGITS_PER_KIND, PREALLOC_RATINGS_PER_KIND, PopupAssets, PopupKind,
+    PopupSamplerState, PopupSpawnParams, PopupVisual, apply_pixel_popup_samplers, spawn_or_reuse,
+    spawn_popup_pool,
 };
+use crate::play::notes::data::{NoteSprite, SongNoteData};
+use crate::play::notes::render::sustain_trail::compute_sustain_geometry;
+use crate::play::notes::skin::NoteStyle;
+use crate::play::notes::strum::Strumline;
+use crate::play::scene::PlayState;
+use crate::play::types::PlayStateParams;
+use crate::utils::constants::{HEALTH_MAX, HEALTH_STARTING};
 
 #[derive(Resource, Default)]
 struct TestSpawnInput(Option<PopupSpawnParams>);
@@ -180,4 +189,169 @@ fn spawn_or_reuse_spawns_only_when_zero_entities_exist() {
     let entries: Vec<&PopupVisual> = q.iter(&world).filter(|v| v.kind == target_kind).collect();
     assert_eq!(entries.len(), 1);
     assert!((entries[0].delay_s - updated_delay_s).abs() < 1e-6);
+}
+
+#[test]
+fn botplay_sets_score_text_and_full_health_lerp_until_custom_override() {
+    let mut bot_state = PlayState::new(PlayStateParams {
+        bot_play_mode: true,
+        ..Default::default()
+    });
+    assert_eq!(bot_state.score_text, "Bot Play Enabled");
+
+    bot_state.health = HEALTH_STARTING;
+    bot_state.health_lerp = HEALTH_STARTING;
+    bot_state.update_health_bar(0.016);
+    assert!((bot_state.health_lerp - HEALTH_MAX).abs() < 1e-9);
+
+    bot_state.custom_score_text = Some("Custom Bot Text".to_string());
+    bot_state.update_score_text();
+    assert_eq!(bot_state.score_text, "Custom Bot Text");
+
+    bot_state.custom_score_text = None;
+    bot_state.update_score_text();
+    assert_eq!(bot_state.score_text, "Bot Play Enabled");
+
+    let mut normal_state = PlayState::new(PlayStateParams::default());
+    assert_eq!(
+        normal_state.score_text,
+        "Score: 0 | Combo: 0 | Misses: 0 | Health: 50%"
+    );
+    normal_state.update_health_bar(0.016);
+    assert!((normal_state.health_lerp - HEALTH_STARTING).abs() < 1e-9);
+}
+
+#[test]
+fn pixel_popup_samplers_wait_for_async_load_and_apply_nearest_to_all_handles() {
+    let mut images = Assets::<Image>::default();
+    let r0 = images.add(Image::default());
+    let r1 = images.reserve_handle();
+    let d0 = images.add(Image::default());
+    let d1 = images.reserve_handle();
+
+    let mut assets = test_popup_assets(0, 0);
+    assets.is_pixel = true;
+    assets.ratings[0] = Some((r0.clone(), 4.2, 1.0, [0.0, 0.0]));
+    assets.ratings[1] = Some((r1.clone(), 4.2, 1.0, [0.0, 0.0]));
+    assets.digits[0] = Some(d0.clone());
+    assets.digits[1] = Some(d1.clone());
+
+    let mut sampler_state = PopupSamplerState::default();
+    apply_pixel_popup_samplers(&assets, &mut sampler_state, &mut images);
+
+    assert!(sampler_state.ratings[0]);
+    assert!(!sampler_state.ratings[1]);
+    assert!(sampler_state.digits[0]);
+    assert!(!sampler_state.digits[1]);
+    assert_eq!(
+        images.get(&r0).map(|img| &img.sampler),
+        Some(&ImageSampler::nearest())
+    );
+    assert_eq!(
+        images.get(&d0).map(|img| &img.sampler),
+        Some(&ImageSampler::nearest())
+    );
+
+    assert!(images.insert(&r1, Image::default()).is_ok());
+    assert!(images.insert(&d1, Image::default()).is_ok());
+    apply_pixel_popup_samplers(&assets, &mut sampler_state, &mut images);
+
+    assert!(sampler_state.ratings[1]);
+    assert!(sampler_state.digits[1]);
+    assert_eq!(
+        images.get(&r1).map(|img| &img.sampler),
+        Some(&ImageSampler::nearest())
+    );
+    assert_eq!(
+        images.get(&d1).map(|img| &img.sampler),
+        Some(&ImageSampler::nearest())
+    );
+
+    assets.is_pixel = false;
+    apply_pixel_popup_samplers(&assets, &mut sampler_state, &mut images);
+    assert_eq!(sampler_state.ratings, [false; 4]);
+    assert_eq!(sampler_state.digits, [false; 10]);
+}
+
+#[test]
+fn pixel_short_holds_keep_contiguous_end_cap_without_gaps() {
+    let mut style = NoteStyle::fallback_funkin();
+    style.is_pixel = true;
+    style.sustains_scale = 6.0;
+    style.sustains_end_offset = [0.0, 0.0];
+
+    let end_raw_h = 6.0_f32;
+    let rendered_end_px = end_raw_h * style.sustains_scale;
+    let scroll_speed = 1.6_f64;
+
+    for downscroll in [false, true] {
+        let mut strum = Strumline::new(true, scroll_speed, style.clone());
+        strum.is_downscroll = downscroll;
+        strum.visual_song_position = 1000.0;
+        let sign = if downscroll { 1.0_f32 } else { -1.0_f32 };
+
+        let medium_note = NoteSprite::from_data(SongNoteData {
+            id: 1,
+            time_ms: 1000.0,
+            direction: 0,
+            sustain_length_ms: 208.0,
+            kind: None,
+            low_priority: false,
+            scoreable: true,
+        });
+        assert!(medium_note.is_some());
+        if let Some(note) = medium_note {
+            let geom = compute_sustain_geometry(&note, &strum, &style, 1000.0, end_raw_h);
+            assert!(geom.visible);
+            assert!(geom.body_height_px > 0.5);
+            assert!((geom.end_height_px - rendered_end_px).abs() < 1e-4);
+            let body_end = geom.body_y + sign * (geom.body_height_px * 0.5);
+            let end_start = geom.end_y - sign * (geom.end_height_px * 0.5);
+            assert!((body_end - end_start).abs() < 1e-4);
+        }
+
+        // total_px = 36.3px -> raw_body_px = 0.3px (<= 0.5 threshold) -> body hides cleanly and end stays flush at start_y.
+        let threshold_ms = 36.3_f64 / (0.45 * scroll_speed);
+        let threshold_note = NoteSprite::from_data(SongNoteData {
+            id: 2,
+            time_ms: 1000.0,
+            direction: 1,
+            sustain_length_ms: threshold_ms,
+            kind: None,
+            low_priority: false,
+            scoreable: true,
+        });
+        assert!(threshold_note.is_some());
+        if let Some(note) = threshold_note {
+            let geom = compute_sustain_geometry(&note, &strum, &style, 1000.0, end_raw_h);
+            assert!(geom.visible);
+            assert!(geom.body_height_px.abs() < 1e-6);
+            assert!((geom.end_height_px - rendered_end_px).abs() < 1e-4);
+            let start_y = strum.note_y_at(1, note.data.time_ms, 1000.0);
+            let end_start = geom.end_y - sign * (geom.end_height_px * 0.5);
+            assert!((end_start - start_y).abs() < 1e-4);
+        }
+
+        // total_px = 18.0px (< rendered_end_px = 36.0px) -> end cap shrinks smoothly and stays visible.
+        let tiny_ms = 18.0_f64 / (0.45 * scroll_speed);
+        let tiny_note = NoteSprite::from_data(SongNoteData {
+            id: 3,
+            time_ms: 1000.0,
+            direction: 2,
+            sustain_length_ms: tiny_ms,
+            kind: None,
+            low_priority: false,
+            scoreable: true,
+        });
+        assert!(tiny_note.is_some());
+        if let Some(note) = tiny_note {
+            let geom = compute_sustain_geometry(&note, &strum, &style, 1000.0, end_raw_h);
+            assert!(geom.visible);
+            assert!(geom.body_height_px.abs() < 1e-6);
+            assert!((geom.end_height_px - 18.0).abs() < 1e-3);
+            let start_y = strum.note_y_at(2, note.data.time_ms, 1000.0);
+            let end_start = geom.end_y - sign * (geom.end_height_px * 0.5);
+            assert!((end_start - start_y).abs() < 1e-4);
+        }
+    }
 }

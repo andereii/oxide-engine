@@ -68,6 +68,22 @@ fn apply_prop_number(
     }
 }
 
+fn patch_pending_prop(
+    commands: &mut Commands,
+    pending_spawned: &HashMap<String, Entity>,
+    id: &str,
+    patch: impl FnOnce(&mut StagePropVisual, &mut Sprite) + Send + Sync + 'static,
+) {
+    if let Some(&ent) = pending_spawned.get(id) {
+        commands.queue(move |world: &mut World| {
+            let mut q = world.query::<(&mut StagePropVisual, &mut Sprite)>();
+            if let Ok((mut vis, mut sprite)) = q.get_mut(world, ent) {
+                patch(&mut vis, &mut sprite);
+            }
+        });
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_prop_text_cmd(
     cmd: &ScriptCommand,
@@ -80,11 +96,12 @@ pub(super) fn handle_prop_text_cmd(
     sparrows: &Query<&ScriptSparrowData>,
     texts: &mut TextsQuery,
     prop_index: &mut Option<HashMap<String, Vec<Entity>>>,
+    pending_spawned: &mut HashMap<String, Entity>,
 ) {
     match cmd {
         ScriptCommand::SpawnProp { id, image_path, color, size, pos, z, hud } => {
             *prop_index = None;
-            despawn_prop_by_id(commands, props, id, true);
+            despawn_prop_by_id(commands, props, id, true, pending_spawned);
             let mut sprite = match image_path {
                 Some(rel) => {
                     let resolved = mods.resolve_asset_server_path(rel).unwrap_or_else(|| rel.clone());
@@ -132,6 +149,7 @@ pub(super) fn handle_prop_text_cmd(
             if *hud {
                 ec.insert(hud_render_layer());
             }
+            pending_spawned.insert(id.clone(), ec.id());
         }
         ScriptCommand::SpawnAnimatedProp {
             id,
@@ -146,13 +164,13 @@ pub(super) fn handle_prop_text_cmd(
             top_left,
         } => {
             *prop_index = None;
-            despawn_prop_by_id(commands, props, id, true);
+            despawn_prop_by_id(commands, props, id, true, pending_spawned);
             let coord_mode = if *top_left {
                 StageCoordMode::TopLeft
             } else {
                 StageCoordMode::Center
             };
-            spawn_animated_script_prop(
+            if let Some(ent) = spawn_animated_script_prop(
                 commands,
                 asset_server,
                 layouts,
@@ -168,11 +186,13 @@ pub(super) fn handle_prop_text_cmd(
                 *z,
                 *hud,
                 coord_mode,
-            );
+            ) {
+                pending_spawned.insert(id.clone(), ent);
+            }
         }
         ScriptCommand::DespawnProp(id) => {
             *prop_index = None;
-            despawn_prop_by_id(commands, props, id, false);
+            despawn_prop_by_id(commands, props, id, false, pending_spawned);
             for (ent, txt, _, _, _, _) in texts.iter() {
                 if txt.id == *id {
                     commands.entity(ent).despawn();
@@ -201,26 +221,41 @@ pub(super) fn handle_prop_text_cmd(
                 }
             }
             if !matched_prop {
-                for (_, mut txt, _, _, mut color, _) in texts.iter_mut() {
-                    if txt.id == *id {
-                        match prop {
-                            TweenProp::X => txt.base_position[0] = *value,
-                            TweenProp::Y => txt.base_position[1] = *value,
-                            TweenProp::Z => txt.z_layer = *value,
-                            TweenProp::Alpha => {
-                                color.0 = color.0.with_alpha(value.clamp(0.0, 1.0));
+                let p = *prop;
+                let v = *value;
+                patch_pending_prop(commands, pending_spawned, id, move |vis, sprite| {
+                    apply_prop_number(vis, sprite, p, v);
+                });
+                if !pending_spawned.contains_key(id) {
+                    for (_, mut txt, _, _, mut color, _) in texts.iter_mut() {
+                        if txt.id == *id {
+                            match prop {
+                                TweenProp::X => txt.base_position[0] = *value,
+                                TweenProp::Y => txt.base_position[1] = *value,
+                                TweenProp::Z => txt.z_layer = *value,
+                                TweenProp::Alpha => {
+                                    color.0 = color.0.with_alpha(value.clamp(0.0, 1.0));
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
                 }
             }
         }
         ScriptCommand::SetPropTint { id, color } => {
+            let mut matched_prop = false;
             for (_, vis, mut sprite, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     sprite.color = Color::srgba(color[0], color[1], color[2], color[3]);
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let c = *color;
+                patch_pending_prop(commands, pending_spawned, id, move |_, sprite| {
+                    sprite.color = Color::srgba(c[0], c[1], c[2], c[3]);
+                });
             }
             for (_, txt, _, _, mut tc, _) in texts.iter_mut() {
                 if txt.id == *id {
@@ -229,10 +264,18 @@ pub(super) fn handle_prop_text_cmd(
             }
         }
         ScriptCommand::SetPropVisible { id, visible } => {
+            let mut matched_prop = false;
             for (_, mut vis, _, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     vis.visible = *visible;
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let v = *visible;
+                patch_pending_prop(commands, pending_spawned, id, move |vis, _| {
+                    vis.visible = v;
+                });
             }
             for (_, mut txt, _, _, _, _) in texts.iter_mut() {
                 if txt.id == *id {
@@ -241,17 +284,33 @@ pub(super) fn handle_prop_text_cmd(
             }
         }
         ScriptCommand::SetPropFlip { id, flip_x, flip_y } => {
+            let mut matched_prop = false;
             for (_, mut vis, _, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     vis.base_flip = [*flip_x, *flip_y];
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let fl = [*flip_x, *flip_y];
+                patch_pending_prop(commands, pending_spawned, id, move |vis, _| {
+                    vis.base_flip = fl;
+                });
             }
         }
         ScriptCommand::SetPropScroll { id, sx, sy } => {
+            let mut matched_prop = false;
             for (_, mut vis, _, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     vis.scroll_factor = [*sx, *sy];
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let sc = [*sx, *sy];
+                patch_pending_prop(commands, pending_spawned, id, move |vis, _| {
+                    vis.scroll_factor = sc;
+                });
             }
             for (_, mut txt, _, _, _, _) in texts.iter_mut() {
                 if txt.id == *id {
@@ -260,10 +319,18 @@ pub(super) fn handle_prop_text_cmd(
             }
         }
         ScriptCommand::SetPropZ { id, z } => {
+            let mut matched_prop = false;
             for (_, mut vis, _, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     vis.z_layer = *z;
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let zv = *z;
+                patch_pending_prop(commands, pending_spawned, id, move |vis, _| {
+                    vis.z_layer = zv;
+                });
             }
             for (_, mut txt, _, _, _, _) in texts.iter_mut() {
                 if txt.id == *id {
@@ -272,19 +339,37 @@ pub(super) fn handle_prop_text_cmd(
             }
         }
         ScriptCommand::SetPropSize { id, w, h } => {
+            let mut matched_prop = false;
             for (_, mut vis, mut sprite, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     vis.raw_size = [*w, *h];
                     sprite.custom_size = Some(Vec2::new(w.max(1.0), h.max(1.0)));
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let (wv, hv) = (*w, *h);
+                patch_pending_prop(commands, pending_spawned, id, move |vis, sprite| {
+                    vis.raw_size = [wv, hv];
+                    sprite.custom_size = Some(Vec2::new(wv.max(1.0), hv.max(1.0)));
+                });
             }
         }
         ScriptCommand::SetPropVelocity { id, vx, vy, ax, ay } => {
+            let mut matched_prop = false;
             for (_, mut vis, _, _, _, _) in props.iter_mut() {
                 if vis.name == *id {
                     vis.velocity = [*vx, *vy];
                     vis.acceleration = [*ax, *ay];
+                    matched_prop = true;
                 }
+            }
+            if !matched_prop {
+                let (vel, acc) = ([*vx, *vy], [*ax, *ay]);
+                patch_pending_prop(commands, pending_spawned, id, move |vis, _| {
+                    vis.velocity = vel;
+                    vis.acceleration = acc;
+                });
             }
         }
         ScriptCommand::AddPropAnim { id, anim } => {
@@ -373,7 +458,24 @@ pub(crate) fn despawn_prop_by_id(
     props: &PropsQuery,
     id: &str,
     only_dynamic: bool,
+    pending_spawned: &mut HashMap<String, Entity>,
 ) {
+    if let Some(pending_ent) = pending_spawned.remove(id) {
+        commands.queue(move |world: &mut World| {
+            let pieces = world
+                .get::<StageCompositeProp>(pending_ent)
+                .map(|c| c.piece_entities.clone())
+                .unwrap_or_default();
+            for p in pieces {
+                if world.get_entity(p).is_ok() {
+                    world.despawn(p);
+                }
+            }
+            if world.get_entity(pending_ent).is_ok() {
+                world.despawn(pending_ent);
+            }
+        });
+    }
     for (entity, vis, _, _, dyn_opt, comp_opt) in props.iter() {
         let matched = if only_dynamic {
             dyn_opt.is_some_and(|d| d.id == id)
@@ -408,7 +510,7 @@ fn spawn_animated_script_prop(
     z: f32,
     hud: bool,
     coord_mode: StageCoordMode,
-) {
+) -> Option<Entity> {
     let tint = Color::srgba(color[0], color[1], color[2], color[3]);
     let scroll_factor = if hud { [0.0, 0.0] } else { [1.0, 1.0] };
     let make_vis = |raw_size: [f32; 2]| StagePropVisual {
@@ -458,6 +560,7 @@ fn spawn_animated_script_prop(
             if hud {
                 ec.insert(hud_render_layer());
             }
+            Some(ec.id())
         }
         ScriptPropAnimKind::Rect => {
             let spr = Sprite::from_color(tint, Vec2::new(size[0].max(1.0), size[1].max(1.0)));
@@ -474,6 +577,7 @@ fn spawn_animated_script_prop(
             if hud {
                 ec.insert(hud_render_layer());
             }
+            Some(ec.id())
         }
         ScriptPropAnimKind::Sparrow => {
             let Some(img_path) = mods
@@ -481,12 +585,12 @@ fn spawn_animated_script_prop(
                 .or_else(|| mods.resolve_file(&format!("{path}.png")))
             else {
                 warn!("spawn_sparrow({id}): missing image for '{path}'");
-                return;
+                return None;
             };
             let xml_path = img_path.with_extension("xml");
             let Ok(atlas) = SparrowAtlas::from_file(&xml_path) else {
                 warn!("spawn_sparrow({id}): failed to parse '{}'", xml_path.display());
-                return;
+                return None;
             };
             let (layout, indices) = atlas.build_layout();
             let mut controller = AnimationController::default();
@@ -544,15 +648,16 @@ fn spawn_animated_script_prop(
             if hud {
                 ec.insert(hud_render_layer());
             }
+            Some(ec.id())
         }
         ScriptPropAnimKind::Atlas => {
             let Some(dir) = mods.resolve_dir(path) else {
                 warn!("spawn_atlas({id}): missing atlas directory '{path}'");
-                return;
+                return None;
             };
             let Ok(atlas) = AnimateAtlas::from_dir(&dir) else {
                 warn!("spawn_atlas({id}): failed to parse '{}'", dir.display());
-                return;
+                return None;
             };
             let (atlas_layouts, indices) = atlas.build_layouts();
             let textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)> = atlas_layouts
@@ -568,7 +673,7 @@ fn spawn_animated_script_prop(
                 })
                 .collect();
             let Some((base_tex, base_layout)) = textures.first() else {
-                return;
+                return None;
             };
             let mut controller = AnimationController::default();
             let mut clips = HashMap::new();
@@ -652,6 +757,7 @@ fn spawn_animated_script_prop(
             if hud {
                 ec.insert(hud_render_layer());
             }
+            Some(ec.id())
         }
     }
 }

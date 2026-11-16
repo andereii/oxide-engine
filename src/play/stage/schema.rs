@@ -141,11 +141,11 @@ pub fn parse_stage_json(stage_id: &str, raw_json: &str) -> Result<StageData, Str
     parse_stage_raw(stage_id, raw_json)
 }
 
-pub const STAGE_SUBORDER_Z_STEP: f32 = 0.001;
+pub const STAGE_SUBORDER_Z_STEP: f32 = 0.0002;
 
 #[inline]
 pub fn stage_layer_z(layer: i32, sub_order: usize) -> f32 {
-    composite_piece_z(-500.0 + (layer as f32) * 2.0, sub_order)
+    composite_piece_z(-500.0 + (layer as f32) * 0.1, sub_order)
 }
 
 #[inline]

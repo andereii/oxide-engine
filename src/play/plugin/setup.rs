@@ -12,6 +12,7 @@ use super::super::characters::{
     CharacterRole, CharactersResource, append_character_sidecar_scripts, load_characters_resource,
     spawn_characters,
 };
+use super::super::events::append_notekind_sidecar_scripts;
 use super::super::hud::countdown::load_countdown_assets;
 use super::super::hud::healthbar::spawn_health_bar;
 use super::super::hud::popups::{load_popup_assets, spawn_popup_pool};
@@ -20,6 +21,7 @@ use super::super::notes::render::{load_noteskin_assets, spawn_strumline_and_pool
 use super::super::playlist::PlayStatePlaylist;
 use super::super::preload::PlayPreloadTracker;
 use super::super::scene::PlayState;
+use super::super::song::append_song_sidecar_scripts;
 use super::super::stage::{
     StageResource, append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props,
 };
@@ -93,11 +95,12 @@ pub(crate) fn seed_stage_and_chars_into_state(
         state.script_char_sizes.insert(c.id.clone(), c.idle_size);
         state.script_char_focus.insert(c.id.clone(), focus);
 
-        let alias = match c.role {
-            CharacterRole::Player => "bf",
-            CharacterRole::Opponent => "dad",
-            CharacterRole::Spectator => "gf",
+        let (alias, role_idx) = match c.role {
+            CharacterRole::Player => ("bf", 0),
+            CharacterRole::Opponent => ("dad", 1),
+            CharacterRole::Spectator => ("gf", 2),
         };
+        state.camera.focus_points[role_idx] = Some(focus);
         state
             .script_char_positions
             .entry(alias.to_string())
@@ -225,6 +228,25 @@ pub(crate) fn populate_play_scene_entities(
             }
             commands.insert_resource(stage);
         }
+    }
+    if let Some(pt) = state.camera.focus_points[1]
+        .or(state.camera.focus_points[2])
+        .or(state.camera.focus_points[0])
+    {
+        state.camera.follow_point = pt;
+        state.camera.follow_target = Some(pt);
+    }
+    let initial_events: Vec<_> = state
+        .song_events
+        .iter()
+        .filter(|ev| ev.time_ms <= 0.0)
+        .cloned()
+        .collect();
+    for ev in &initial_events {
+        state.apply_due_song_event(ev);
+    }
+    if let Some(target) = state.camera.follow_target {
+        state.camera.follow_point = target;
     }
     let countdown_assets =
         load_countdown_assets(mods, &state.player_strumline.note_style, asset_server);
@@ -379,79 +401,84 @@ pub(crate) fn load_and_init_scripts(
         &note_kind_vec,
         &event_vec,
     );
+    let supported = script_host.supported_extensions();
     if let Some((stage_id, json_path)) = stage_script_source {
-        let supported = script_host.supported_extensions();
         append_stage_sidecar_scripts(mods, stage_id, json_path, &supported, &mut discovered);
     }
-    if !char_script_sources.is_empty() {
-        let supported = script_host.supported_extensions();
-        for (char_id, json_path) in char_script_sources {
-            append_character_sidecar_scripts(mods, char_id, json_path, &supported, &mut discovered);
-        }
+    for (char_id, json_path) in char_script_sources {
+        append_character_sidecar_scripts(mods, char_id, json_path, &supported, &mut discovered);
     }
+    append_notekind_sidecar_scripts(mods, &note_kind_vec, &supported, &mut discovered);
+    append_song_sidecar_scripts(mods, &state.chart, &supported, &mut discovered);
     script_host.load_discovered(&discovered);
     for err in &script_host.compile_errors {
         warn!("Script compile error: {err}");
     }
 
-    let init_hooks = vec![
-        (HookKind::Create, ScriptEvent::new(HookKind::Create)),
-        (
-            HookKind::SongLoaded,
-            {
-                let mut ev_list = Vec::with_capacity(state.chart.events.len());
-                for ev in &state.chart.events {
-                    let mut m = std::collections::BTreeMap::new();
-                    m.insert("time".to_string(), ScriptValue::Float(ev.time_ms));
-                    m.insert("kind".to_string(), ScriptValue::String(ev.kind.clone()));
-                    m.insert("name".to_string(), ScriptValue::String(ev.kind.clone()));
-                    m.insert("value".to_string(), ScriptValue::from_json(&ev.raw_value));
-                    ev_list.push(ScriptValue::Map(m));
-                }
-                let mut note_list = Vec::with_capacity(
-                    state.player_strumline.notes.len() + state.opponent_strumline.notes.len(),
-                );
-                for (is_player, notes) in [
-                    (true, &state.player_strumline.notes),
-                    (false, &state.opponent_strumline.notes),
-                ] {
-                    for n in notes {
-                        let mut m = std::collections::BTreeMap::new();
-                        m.insert("id".to_string(), ScriptValue::Int(n.data.id as i64));
-                        m.insert("time".to_string(), ScriptValue::Float(n.data.time_ms));
-                        m.insert("dir".to_string(), ScriptValue::Int(n.lane.index() as i64));
-                        m.insert("len".to_string(), ScriptValue::Float(n.data.sustain_length_ms));
-                        m.insert(
-                            "kind".to_string(),
-                            ScriptValue::String(n.data.kind.clone().unwrap_or_default()),
-                        );
-                        m.insert("is_player".to_string(), ScriptValue::Bool(is_player));
-                        m.insert("scoreable".to_string(), ScriptValue::Bool(n.data.scoreable));
-                        note_list.push(ScriptValue::Map(m));
-                    }
-                }
-                ScriptEvent::new(HookKind::SongLoaded)
-                    .with_field("song", state.chart.song_id.clone())
-                    .with_field("bpm", state.conductor.bpm())
-                    .with_field("notes", ScriptValue::List(note_list))
-                    .with_field("events", ScriptValue::List(ev_list))
-                    .with_field(
-                        "count",
-                        ScriptValue::Int(
-                            (state.player_strumline.notes.len()
-                                + state.opponent_strumline.notes.len()) as i64,
-                        ),
-                    )
-            },
-        ),
-    ];
-    state.run_script_hooks(
-        init_hooks,
+    // Run Create first so scripted NoteKind registrations update note flags before SongLoaded.
+    let mut ecs_cmds = state.run_script_hooks(
+        vec![(HookKind::Create, ScriptEvent::new(HookKind::Create))],
         false,
         0.0,
         playlist,
         script_host,
         mods,
         mod_store,
-    )
+    );
+
+    let song_loaded_ev = {
+        let mut ev_list = Vec::with_capacity(state.chart.events.len());
+        for ev in &state.chart.events {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert("time".to_string(), ScriptValue::Float(ev.time_ms));
+            m.insert("kind".to_string(), ScriptValue::String(ev.kind.clone()));
+            m.insert("name".to_string(), ScriptValue::String(ev.kind.clone()));
+            m.insert("value".to_string(), ScriptValue::from_json(&ev.raw_value));
+            ev_list.push(ScriptValue::Map(m));
+        }
+        let mut note_list = Vec::with_capacity(
+            state.player_strumline.notes.len() + state.opponent_strumline.notes.len(),
+        );
+        for (is_player, notes) in [
+            (true, &state.player_strumline.notes),
+            (false, &state.opponent_strumline.notes),
+        ] {
+            for n in notes {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("id".to_string(), ScriptValue::Int(n.data.id as i64));
+                m.insert("time".to_string(), ScriptValue::Float(n.data.time_ms));
+                m.insert("dir".to_string(), ScriptValue::Int(n.lane.index() as i64));
+                m.insert("len".to_string(), ScriptValue::Float(n.data.sustain_length_ms));
+                m.insert(
+                    "kind".to_string(),
+                    ScriptValue::String(n.data.kind.clone().unwrap_or_default()),
+                );
+                m.insert("is_player".to_string(), ScriptValue::Bool(is_player));
+                m.insert("scoreable".to_string(), ScriptValue::Bool(n.data.scoreable));
+                note_list.push(ScriptValue::Map(m));
+            }
+        }
+        ScriptEvent::new(HookKind::SongLoaded)
+            .with_field("song", state.chart.song_id.clone())
+            .with_field("bpm", state.conductor.bpm())
+            .with_field("notes", ScriptValue::List(note_list))
+            .with_field("events", ScriptValue::List(ev_list))
+            .with_field(
+                "count",
+                ScriptValue::Int(
+                    (state.player_strumline.notes.len()
+                        + state.opponent_strumline.notes.len()) as i64,
+                ),
+            )
+    };
+    ecs_cmds.extend(state.run_script_hooks(
+        vec![(HookKind::SongLoaded, song_loaded_ev)],
+        false,
+        0.0,
+        playlist,
+        script_host,
+        mods,
+        mod_store,
+    ));
+    ecs_cmds
 }

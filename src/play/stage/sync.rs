@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use crate::animations::atlas_composite::{
@@ -72,6 +73,12 @@ pub struct StagePropVisual {
     pub acceleration: [f32; 2],
 }
 
+#[derive(Component)]
+pub struct StagePropPixelSampler {
+    pub is_pixel: bool,
+    pub sampler_applied: bool,
+}
+
 #[derive(Resource, Default)]
 pub struct StageSyncState {
     pub last_step: Option<i32>,
@@ -99,6 +106,10 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     Transform::from_xyz(0.0, 0.0, z_layer),
                     visibility,
                     make_visual_comp(d.name.clone(), d.position, d.scale, d.scroll_factor, d.flip, d.angle, z_layer, d.visible, stage.coord_mode, *size),
+                    StagePropPixelSampler {
+                        is_pixel: d.is_pixel,
+                        sampler_applied: false,
+                    },
                 ));
             }
             StagePropKind::SolidColor { color } => {
@@ -150,6 +161,10 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     *frame_size,
                 );
                 let atlas_sizes = StageAtlasFrameSizes(frame_sizes.clone());
+                let pixel_sampler = StagePropPixelSampler {
+                    is_pixel: d.is_pixel,
+                    sampler_applied: false,
+                };
                 if d.dance_every != 0.0 || !d.animations.is_empty() {
                     let mut bopper = Bopper::new(d.dance_every);
                     bopper.name = d.name.clone();
@@ -162,6 +177,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         bopper,
                         visual,
                         atlas_sizes,
+                        pixel_sampler,
                     ));
                 } else {
                     commands.spawn((
@@ -171,6 +187,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         controller.clone(),
                         visual,
                         atlas_sizes,
+                        pixel_sampler,
                     ));
                 }
             }
@@ -230,6 +247,10 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     stage_matrix: *stage_matrix,
                     piece_entities,
                 };
+                let pixel_sampler = StagePropPixelSampler {
+                    is_pixel: d.is_pixel,
+                    sampler_applied: false,
+                };
                 if d.dance_every != 0.0 || !d.animations.is_empty() {
                     let mut bopper = Bopper::new(d.dance_every);
                     bopper.name = d.name.clone();
@@ -242,6 +263,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         bopper,
                         visual,
                         composite,
+                        pixel_sampler,
                     ));
                 } else {
                     commands.spawn((
@@ -251,6 +273,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         controller.clone(),
                         visual,
                         composite,
+                        pixel_sampler,
                     ));
                 }
             }
@@ -262,6 +285,7 @@ pub fn sync_stage_props(
     time: Res<Time>,
     state: Res<PlayState>,
     mut sync_state: ResMut<StageSyncState>,
+    mut images: ResMut<Assets<Image>>,
     mut animated_props: Query<(
         &mut StagePropVisual,
         &mut Sprite,
@@ -272,6 +296,7 @@ pub fn sync_stage_props(
         Option<&DynamicScriptProp>,
         Option<&StageCompositeProp>,
         Option<&StageAtlasFrameSizes>,
+        Option<&mut StagePropPixelSampler>,
     )>,
     mut pieces: StagePiecesQuery,
 ) {
@@ -302,8 +327,28 @@ pub fn sync_stage_props(
         dyn_opt,
         composite_opt,
         frame_sizes_opt,
+        sampler_opt,
     ) in &mut animated_props
     {
+        if let Some(mut px) = sampler_opt
+            && px.is_pixel
+            && !px.sampler_applied
+        {
+            if let Some(composite) = composite_opt {
+                let mut all_ready = true;
+                for (tex, _) in &composite.textures {
+                    if let Some(mut img) = images.get_mut(tex) {
+                        img.sampler = ImageSampler::nearest();
+                    } else {
+                        all_ready = false;
+                    }
+                }
+                px.sampler_applied = all_ready;
+            } else if let Some(mut img) = images.get_mut(&sprite.image) {
+                img.sampler = ImageSampler::nearest();
+                px.sampler_applied = true;
+            }
+        }
         if dt > 0.0 && (vis.velocity != [0.0, 0.0] || vis.acceleration != [0.0, 0.0]) {
             vis.velocity[0] += vis.acceleration[0] * dt;
             vis.velocity[1] += vis.acceleration[1] * dt;

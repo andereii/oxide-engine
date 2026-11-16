@@ -100,6 +100,7 @@ fn onCreate() {
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("nene-dark");
     if target != "" {
+        char_underlay(target, "nene", 0.0, 0.0, -3);
         let ab = abot_mod::spawn_abot(target, -95.0, 384.0);
         viz_mod::spawn_viz(ab[0], ab[1], ab[2], false);
         prop_tint("abot_stereo_bg", "#FF616785");

@@ -233,6 +233,19 @@ pub fn register_text_tweens_timers_and_store_api(engine: &mut Engine) {
             ScriptValue::from_json(&json).into_rhai()
         })
     });
+    engine.register_fn("read_json", |rel: &str, key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
+        with_ctx(|c| {
+            let Ok(txt) = c.registry.read_to_string(rel) else {
+                return Dynamic::UNIT;
+            };
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(&txt) else {
+                return Dynamic::UNIT;
+            };
+            json.get(key)
+                .map(|sub| ScriptValue::from_json(sub).into_rhai())
+                .unwrap_or(Dynamic::UNIT)
+        })
+    });
 
     engine.register_fn("save_has", |key: &str| {
         with_ctx(|c| c.store.has(&c.current_mod_id.clone(), key))

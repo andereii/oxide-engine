@@ -1,5 +1,12 @@
 // Pico (Dark) character script (ported from pico-dark.hxc)
 
+fn find_slot(id) {
+    if char_id("bf") == id { return "bf"; }
+    if char_id("dad") == id { return "dad"; }
+    if char_id("gf") == id { return "gf"; }
+    ""
+}
+
 fn onCreate() {
     import "gameplay/characters/pico-playable/CasingSprite" as casing_mod;
     this.casing = casing_mod::new_casing_state();
@@ -7,6 +14,10 @@ fn onCreate() {
     global_set("gameover_music_suffix", "-pico");
     global_set("gameover_blueball_suffix", "-pico");
     global_set("pause_music_suffix", "-pico");
+    let target = find_slot("pico-dark");
+    if target != "" {
+        char_underlay(target, "pico-playable");
+    }
 }
 
 fn onSongRetry() {

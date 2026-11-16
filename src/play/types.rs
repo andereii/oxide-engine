@@ -178,6 +178,8 @@ pub struct SongChart {
     pub opponent_notes: Vec<SongNoteData>,
     pub events: Vec<SongEventData>,
     pub length_ms: f64,
+    pub scripts: bool,
+    pub script_path: Option<String>,
 }
 
 impl Default for SongChart {
@@ -199,6 +201,8 @@ impl Default for SongChart {
             opponent_notes: Vec::new(),
             events: Vec::new(),
             length_ms: 60_000.0,
+            scripts: false,
+            script_path: None,
         }
     }
 }

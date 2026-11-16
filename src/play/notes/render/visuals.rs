@@ -1,8 +1,12 @@
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
 use bevy::math::URect;
 use bevy::prelude::*;
 
 use crate::animations::SparrowAtlas;
-use crate::utils::constants::KEY_COUNT;
+use crate::utils::constants::{KEY_COUNT, MOD_ASSET_SOURCE_ID};
 
 use crate::play::notes::skin::NoteStyle;
 pub use super::visual_pools::spawn_strumline_and_pools;
@@ -160,6 +164,66 @@ pub fn load_noteskin_assets(
     })
 }
 
+fn read_png_dimensions(path: &Path) -> Option<(u32, u32)> {
+    let mut file = File::open(path).ok()?;
+    let mut header = [0u8; 24];
+    file.read_exact(&mut header).ok()?;
+    if &header[0..8] != b"\x89PNG\r\n\x1a\n" || &header[12..16] != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes([header[16], header[17], header[18], header[19]]);
+    let h = u32::from_be_bytes([header[20], header[21], header[22], header[23]]);
+    Some((w, h))
+}
+
+fn resolve_skin_png_disk_path(
+    mods: &crate::mods::ModRegistry,
+    style: &NoteStyle,
+    rel: &str,
+) -> Option<PathBuf> {
+    let asset_server_path = style.asset_path_in(mods, rel);
+    let mods_prefix = format!("{MOD_ASSET_SOURCE_ID}://");
+    if let Some(rest) = asset_server_path.strip_prefix(&mods_prefix) {
+        let cand = mods.mods_dir.join(rest);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    if let Some(found) = mods.resolve_file(&asset_server_path) {
+        return Some(found);
+    }
+    let direct = Path::new(&asset_server_path);
+    if direct.is_file() {
+        return Some(direct.to_path_buf());
+    }
+    let fallback = oxin_app::resolve_assets_dir().join(&asset_server_path);
+    fallback.is_file().then_some(fallback)
+}
+
+fn load_sustains_grid(
+    mods: &crate::mods::ModRegistry,
+    style: &NoteStyle,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) -> Option<(
+    Option<Handle<Image>>,
+    Option<Handle<TextureAtlasLayout>>,
+    [(usize, usize, f32, f32); 4],
+)> {
+    let png_path = resolve_skin_png_disk_path(mods, style, &style.sustains_path)?;
+    let (width, height) = read_png_dimensions(&png_path)?;
+    let cols = (KEY_COUNT * 2) as u32;
+    let cell_w = width / cols;
+    if cell_w == 0 || height == 0 {
+        return None;
+    }
+    let grid = TextureAtlasLayout::from_grid(UVec2::new(cell_w, height), cols, 1, None, None);
+    let layout = layouts.add(grid);
+    let tex = asset_server.load(style.asset_path_in(mods, &style.sustains_path));
+    let s_idx = std::array::from_fn(|i| (i * 2, i * 2 + 1, cell_w as f32, height as f32));
+    Some((Some(tex), Some(layout), s_idx))
+}
+
 fn load_sustains(
     mods: &crate::mods::ModRegistry,
     style: &NoteStyle,
@@ -171,7 +235,8 @@ fn load_sustains(
     [(usize, usize, f32, f32); 4],
 ) {
     let Ok(xml) = SparrowAtlas::from_file(style.disk_xml_in(mods, &style.sustains_path)) else {
-        return (None, None, [(0, 0, 52.0, 44.0); 4]);
+        return load_sustains_grid(mods, style, asset_server, layouts)
+            .unwrap_or((None, None, [(0, 0, 52.0, 44.0); 4]));
     };
     let (_, map) = xml.build_layout();
     let mut max_x = xml.width.max(1);

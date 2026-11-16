@@ -109,7 +109,7 @@ pub fn sync_note_effects(
             &mut transform,
             &anim,
             p_strum.lane_x(vis.lane),
-            p_strum.receptor_y(),
+            p_strum.lane_y(vis.lane),
             style.splash_offset,
             style.splash_scale,
             p_strum.strumline_scale,
@@ -128,7 +128,7 @@ pub fn sync_note_effects(
 
     for (mut cov, mut sprite, mut anim, mut transform, mut visibility) in &mut covers {
         let strum = if cov.is_player { &state.player_strumline } else { &state.opponent_strumline };
-        if !style.hold_cover_enabled || !strum.show_notesplash {
+        if !style.hold_cover_enabled || !strum.show_notesplash || (strum.middlescroll && !strum.is_player) {
             cov.phase = HoldCoverPhase::Hidden;
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
@@ -149,7 +149,7 @@ pub fn sync_note_effects(
             &mut transform,
             &anim,
             strum.lane_x(cov.lane),
-            strum.receptor_y() + strum.receptors[cov.lane].y_offset,
+            strum.lane_y(cov.lane) + strum.receptors[cov.lane].y_offset,
             style.hold_cover_offset,
             style.hold_cover_scale,
             strum.strumline_scale,

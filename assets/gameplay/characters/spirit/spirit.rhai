@@ -7,6 +7,8 @@ fn find_slot(id) {
 }
 
 fn onCreate() {
-    this.slot = find_slot("spirit");
-    this.trail_delay = 0.069;
+    let slot = find_slot("spirit");
+    if slot != "" {
+        char_trail(slot, 4, 0.4, 0.3, 0.069, 190);
+    }
 }

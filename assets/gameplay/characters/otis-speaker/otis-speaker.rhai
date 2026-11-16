@@ -28,22 +28,25 @@ fn load_otis_timings() {
     if s == "" { return empty; }
     let v = variation();
     let candidates = [];
+    let keys = [];
     if v != "" && v != "default" {
         candidates.push("gameplay/songs/" + s + "/chart-" + v + "/notes.json");
         candidates.push("gameplay/songs/" + s + "/" + v + "/notes.json");
+        keys.push(v + "-picospeaker");
     }
     candidates.push("gameplay/songs/" + s + "/chart/notes.json");
+    keys.push("picospeaker");
 
-    let raw = ();
+    let notes = ();
     for path in candidates {
         if file_exists(path) {
-            raw = read_json(path);
-            if raw != () { break; }
+            for k in keys {
+                notes = read_json(path, k);
+                if notes != () { break; }
+            }
+            if notes != () { break; }
         }
     }
-    if raw == () { return empty; }
-
-    let notes = raw["picospeaker"];
     if notes == () { return empty; }
 
     let list = [];
@@ -64,6 +67,7 @@ fn onCreate() {
     import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.shoot_notes = load_otis_timings();
     this.shoot_idx = 0;
+    this.last_now_ms = 0.0;
     this.abot = abot_mod::new_abot_state("otis-speaker");
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("otis-speaker");
@@ -81,6 +85,7 @@ fn onSongStart() {
 fn onSongRetry() {
     import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.shoot_idx = 0;
+    this.last_now_ms = 0.0;
     this.viz = viz_mod::reset_viz(this.viz);
 }
 
@@ -93,12 +98,20 @@ fn onUpdate() {
     let target = find_slot("otis-speaker");
     if target == "" { return; }
     let now_ms = time();
+    if now_ms < this.last_now_ms - 50.0 {
+        this.shoot_idx = 0;
+    }
+    this.last_now_ms = now_ms;
+
+    let latest_dir = ();
     while this.shoot_idx < this.shoot_notes.len() {
         let note = this.shoot_notes[this.shoot_idx];
         if note.t > now_ms { break; }
         this.shoot_idx += 1;
-
-        let dir = note.d;
+        latest_dir = note.d;
+    }
+    if latest_dir != () {
+        let dir = latest_dir;
         if dir < 0 { dir = 0; }
         if dir > 3 { dir = 3; }
         play_anim(target, "shoot" + (dir + 1));

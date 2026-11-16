@@ -119,8 +119,16 @@ impl PlayState {
 
     pub fn update_score_text(&mut self) {
         if let Some(custom) = &self.custom_score_text {
+            self.last_hud_key = (i64::MIN, u32::MAX, u32::MAX, i32::MIN);
             if self.score_text != *custom {
                 self.score_text = custom.clone();
+            }
+            return;
+        }
+        if self.is_bot_play_mode {
+            self.last_hud_key = (i64::MIN, u32::MAX, u32::MAX, i32::MIN);
+            if self.score_text != "Bot Play Enabled" {
+                self.score_text = "Bot Play Enabled".to_string();
             }
             return;
         }

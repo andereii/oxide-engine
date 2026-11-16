@@ -7,7 +7,9 @@ use bevy::window::WindowFocused;
 
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent};
 
-use super::super::characters::{CharacterRole, ensure_character_gameover_anims_loaded};
+use super::super::characters::{
+    CharacterRole, CharacterTrailVisual, ensure_character_gameover_anims_loaded,
+};
 use super::super::hud::countdown::CountdownGraphicVisual;
 use super::super::hud::health_icon::HealthIcon;
 use super::super::hud::healthbar::{HealthBarBgVisual, HealthBarFillVisual};
@@ -45,6 +47,7 @@ pub(super) type ReloadCleanupQuery<'w, 's> = Query<
         With<NoteSplashVisual>,
         With<HoldCoverVisual>,
         With<PopupVisual>,
+        With<CharacterTrailVisual>,
     )>,
 >;
 
@@ -77,6 +80,9 @@ fn sync_script_entity_maps(
 ) {
     let mut seen_aliases = [false; 3];
     for (_, actor) in &scripts.actors {
+        if actor.mirror_of.is_some() {
+            continue;
+        }
         let tl_x = actor.slot.position[0]
             + actor.data.offsets[0] * (1.0 + actor.slot.scale[0])
             - actor.idle_size[0] * actor.slot.scale[0] * 0.5;
@@ -239,8 +245,9 @@ fn execute_song_reload(
     );
     scripts.script_host.clear_scripts();
     scripts.pending_ecs.0.clear();
+    scripts.pending_shaders.0.clear();
     scripts.pending_shaders.0.push(ShaderScriptCommand::ClearShader {
-        target: "cam".to_string(),
+        target: "__reload__".to_string(),
     });
 
     for (ent, _) in &hud_texts.tagged_sounds {
@@ -256,6 +263,9 @@ fn execute_song_reload(
         commands.entity(actor.sheet_entity).despawn();
         for &piece in &actor.piece_entities {
             commands.entity(piece).despawn();
+        }
+        for &trail_ent in &actor.trail_entities {
+            commands.entity(trail_ent).despawn();
         }
         commands.entity(ent).despawn();
     }

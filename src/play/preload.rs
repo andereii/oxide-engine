@@ -75,14 +75,18 @@ impl PlayPreloadTracker {
         }
     }
 
+    pub fn register_loaded_character(&mut self, loaded: &super::characters::loader::LoadedCharacter) {
+        for src in &loaded.sources {
+            self.register_handle(src.texture.clone());
+            for (extra_tex, _) in &src.extra_layers {
+                self.register_handle(extra_tex.clone());
+            }
+        }
+    }
+
     pub fn register_characters(&mut self, chars: &CharactersResource) {
         for loaded in &chars.characters {
-            for src in &loaded.sources {
-                self.register_handle(src.texture.clone());
-                for (extra_tex, _) in &src.extra_layers {
-                    self.register_handle(extra_tex.clone());
-                }
-            }
+            self.register_loaded_character(loaded);
         }
     }
 

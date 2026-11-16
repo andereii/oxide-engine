@@ -215,6 +215,9 @@ impl Plugin for PlayPlugin {
 }
 
 pub(crate) fn actor_matches_target(actor: &CharacterActor, target: &str) -> bool {
+    if actor.mirror_of.is_some() {
+        return false;
+    }
     let lower = target.trim().to_ascii_lowercase();
     match lower.as_str() {
         "bf" | "boyfriend" | "player" | "0" => actor.role == CharacterRole::Player,

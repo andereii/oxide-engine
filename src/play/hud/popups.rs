@@ -1,3 +1,4 @@
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use crate::utils::constants::KEY_COUNT;
@@ -35,6 +36,74 @@ pub struct PopupAssets {
     pub is_pixel: bool,
     pub rng_state: u32,
     pub next_z_step: u32,
+}
+
+#[derive(Default)]
+pub struct PopupSamplerState {
+    pub ratings: [bool; 4],
+    pub digits: [bool; 10],
+    pub rating_ids: [Option<AssetId<Image>>; 4],
+    pub digit_ids: [Option<AssetId<Image>>; 10],
+}
+
+fn apply_handle_nearest(
+    handle: &Handle<Image>,
+    applied: &mut bool,
+    last_id: &mut Option<AssetId<Image>>,
+    images: &mut Assets<Image>,
+) {
+    let id = handle.id();
+    if *last_id != Some(id) {
+        *last_id = Some(id);
+        *applied = false;
+    }
+    if !*applied
+        && let Some(mut img) = images.get_mut(handle)
+    {
+        img.sampler = ImageSampler::nearest();
+        *applied = true;
+    }
+}
+
+pub(crate) fn apply_pixel_popup_samplers(
+    assets: &PopupAssets,
+    sampler_state: &mut PopupSamplerState,
+    images: &mut Assets<Image>,
+) {
+    if !assets.is_pixel {
+        if sampler_state.ratings.iter().any(|&v| v)
+            || sampler_state.digits.iter().any(|&v| v)
+        {
+            *sampler_state = PopupSamplerState::default();
+        }
+        return;
+    }
+    for (i, entry) in assets.ratings.iter().enumerate() {
+        let Some((handle, ..)) = entry else {
+            sampler_state.ratings[i] = false;
+            sampler_state.rating_ids[i] = None;
+            continue;
+        };
+        apply_handle_nearest(
+            handle,
+            &mut sampler_state.ratings[i],
+            &mut sampler_state.rating_ids[i],
+            images,
+        );
+    }
+    for (d, entry) in assets.digits.iter().enumerate() {
+        let Some(handle) = entry else {
+            sampler_state.digits[d] = false;
+            sampler_state.digit_ids[d] = None;
+            continue;
+        };
+        apply_handle_nearest(
+            handle,
+            &mut sampler_state.digits[d],
+            &mut sampler_state.digit_ids[d],
+            images,
+        );
+    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -100,14 +169,21 @@ pub fn load_popup_assets(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sync_popups(
     mut commands: Commands,
     time: Res<Time>,
     mut state: ResMut<PlayState>,
+    mut images: ResMut<Assets<Image>>,
     assets_opt: Option<ResMut<PopupAssets>>,
+    mut sampler_state: Local<PopupSamplerState>,
     mut pending_buf: Local<Vec<PopupEvent>>,
     mut pool: Query<(&mut PopupVisual, &mut Sprite, &mut Transform, &mut Visibility)>,
 ) {
+    if let Some(ref assets) = assets_opt {
+        apply_pixel_popup_samplers(assets, &mut sampler_state, &mut images);
+    }
+
     if state.is_in_countdown && state.starting_song {
         for (mut vis, _, _, mut visibility) in &mut pool {
             if vis.active {

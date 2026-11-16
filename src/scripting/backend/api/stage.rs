@@ -331,6 +331,114 @@ pub fn register_character_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn(
+        "char_trail",
+        |target: &str,
+         length: Dynamic,
+         delay_s: Dynamic,
+         alpha: Dynamic,
+         diff: Dynamic|
+         -> Result<(), Box<EvalAltResult>> {
+            let length = dyn_to_usize(&length)?.clamp(1, 32);
+            let delay_s = dyn_to_f64(&delay_s)?.max(0.0);
+            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
+            let diff = (dyn_to_f64(&diff)? as f32).clamp(0.0, 1.0);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharTrail {
+                    target: target.to_string(),
+                    length,
+                    delay_s,
+                    alpha,
+                    diff,
+                    z_layer: None,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_trail",
+        |target: &str,
+         length: Dynamic,
+         delay_s: Dynamic,
+         alpha: Dynamic,
+         diff: Dynamic,
+         z_layer: Dynamic|
+         -> Result<(), Box<EvalAltResult>> {
+            let length = dyn_to_usize(&length)?.clamp(1, 32);
+            let delay_s = dyn_to_f64(&delay_s)?.max(0.0);
+            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
+            let diff = (dyn_to_f64(&diff)? as f32).clamp(0.0, 1.0);
+            let z_layer = dyn_to_f64(&z_layer)?.round() as i32;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharTrail {
+                    target: target.to_string(),
+                    length,
+                    delay_s,
+                    alpha,
+                    diff,
+                    z_layer: Some(z_layer),
+                });
+            })
+        },
+    );
+    engine.register_fn("clear_char_trail", |target: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::ClearCharTrail {
+                target: target.to_string(),
+            });
+        })
+    });
+    engine.register_fn("char_underlay", |target: &str, char_id: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetCharUnderlay {
+                target: target.to_string(),
+                char_id: char_id.to_string(),
+                offset: [0.0, 0.0],
+                z_offset: -1,
+            });
+        })
+    });
+    engine.register_fn(
+        "char_underlay",
+        |target: &str, char_id: &str, dx: Dynamic, dy: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let offset = [dyn_to_f64(&dx)? as f32, dyn_to_f64(&dy)? as f32];
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharUnderlay {
+                    target: target.to_string(),
+                    char_id: char_id.to_string(),
+                    offset,
+                    z_offset: -1,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_underlay",
+        |target: &str,
+         char_id: &str,
+         dx: Dynamic,
+         dy: Dynamic,
+         z_offset: Dynamic|
+         -> Result<(), Box<EvalAltResult>> {
+            let offset = [dyn_to_f64(&dx)? as f32, dyn_to_f64(&dy)? as f32];
+            let z_offset = dyn_to_f64(&z_offset)?.round() as i32;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharUnderlay {
+                    target: target.to_string(),
+                    char_id: char_id.to_string(),
+                    offset,
+                    z_offset,
+                });
+            })
+        },
+    );
+    engine.register_fn("clear_char_underlay", |target: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::ClearCharUnderlay {
+                target: target.to_string(),
+            });
+        })
+    });
 }
 
 pub fn register_props_api(engine: &mut Engine) {

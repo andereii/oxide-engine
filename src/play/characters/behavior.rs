@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 
@@ -41,6 +41,82 @@ pub enum ClipVisual {
     },
 }
 
+/// Configuration for a character afterimage trail (`FunkTrail` parity).
+#[derive(Debug, Clone)]
+pub struct CharacterTrailConfig {
+    pub length: usize,
+    pub delay_s: f64,
+    pub alpha: f32,
+    pub diff: f32,
+    pub z_layer: f32,
+}
+
+/// Captured sheet-space pose for a single character trail ghost.
+#[derive(Debug, Clone)]
+pub struct CharacterTrailSample {
+    pub source_idx: usize,
+    pub frame_idx: usize,
+    pub world_cx: f32,
+    pub world_cy: f32,
+    pub foff: [f32; 2],
+    pub scale: [f32; 2],
+    pub flip: [bool; 2],
+    pub rot: f32,
+}
+
+/// Ring-buffer state driving character trail capture and fade falloff.
+#[derive(Debug, Clone)]
+pub struct CharacterTrailState {
+    pub config: CharacterTrailConfig,
+    pub elapsed_s: f64,
+    pub samples: VecDeque<CharacterTrailSample>,
+}
+
+impl CharacterTrailState {
+    pub fn new(config: CharacterTrailConfig) -> Self {
+        Self {
+            config,
+            elapsed_s: 0.0,
+            samples: VecDeque::new(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.elapsed_s = 0.0;
+        self.samples.clear();
+    }
+
+    pub fn step_and_capture(&mut self, dt_s: f64, sample: CharacterTrailSample) -> bool {
+        if self.config.length == 0 || dt_s <= 0.0 {
+            return false;
+        }
+        self.elapsed_s += dt_s;
+        let delay = self.config.delay_s.max(0.0);
+        if self.elapsed_s < delay {
+            return false;
+        }
+        self.elapsed_s = if delay > 0.0 {
+            (self.elapsed_s - delay).min(delay)
+        } else {
+            0.0
+        };
+        self.samples.push_front(sample);
+        self.samples.truncate(self.config.length);
+        true
+    }
+
+    pub fn ghost_alpha(&self, index: usize, parent_alpha: f32) -> f32 {
+        ((self.config.alpha - (index as f32) * self.config.diff) * parent_alpha).clamp(0.0, 1.0)
+    }
+}
+
+/// Mirrors a primary character's animation and pose in a backing Z layer (used by `-dark` overlays).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CharacterUnderlayConfig {
+    pub parent_role: CharacterRole,
+    pub offset: [f32; 2],
+}
+
 #[derive(Component)]
 #[allow(dead_code)]
 pub struct CharacterActor {
@@ -68,6 +144,9 @@ pub struct CharacterActor {
     pub script_anim_override: bool,
     pub sheet_entity: Entity,
     pub piece_entities: Vec<Entity>,
+    pub trail: Option<CharacterTrailState>,
+    pub trail_entities: Vec<Entity>,
+    pub mirror_of: Option<CharacterUnderlayConfig>,
 }
 
 impl CharacterActor {
@@ -77,6 +156,9 @@ impl CharacterActor {
         self.hold_timer = 0.0;
         self.cur_no_anim = false;
         self.cur_suffix.clear();
+        if let Some(trail) = &mut self.trail {
+            trail.reset();
+        }
 
         let start = self.data.starting_animation.clone();
         if start != "idle" && self.controller.has_animation(&start) {

@@ -58,5 +58,6 @@
     "hard": {
       "scrollSpeed": 2.8
     }
-  }
+  },
+  "scripts": true
 }

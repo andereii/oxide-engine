@@ -188,6 +188,12 @@ pub fn register_gameplay_api(engine: &mut Engine) {
         })
     });
     engine.register_fn("middlescroll", || with_ctx(|c| c.mutable.middlescroll));
+    engine.register_fn("middlescroll", |enabled: bool| {
+        with_ctx(|c| {
+            c.mutable.middlescroll = enabled;
+            c.mutable.dirty_middlescroll = true;
+        })
+    });
     engine.register_fn("set_middlescroll", |enabled: bool| {
         with_ctx(|c| {
             c.mutable.middlescroll = enabled;

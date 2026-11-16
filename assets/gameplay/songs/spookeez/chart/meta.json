@@ -61,6 +61,17 @@
     "erect": {
       "scrollSpeed": 2.4,
       "stage": "spookyMansionErect",
+      "characters": {
+        "players": [
+          "bf-dark"
+        ],
+        "opponents": [
+          "spooky-dark"
+        ],
+        "spectator": [
+          "gf-dark"
+        ]
+      },
       "audio": {
         "bpm": 166,
         "needsVoices": true,
@@ -89,6 +100,17 @@
     "nightmare": {
       "scrollSpeed": 2.7,
       "stage": "spookyMansionErect",
+      "characters": {
+        "players": [
+          "bf-dark"
+        ],
+        "opponents": [
+          "spooky-dark"
+        ],
+        "spectator": [
+          "gf-dark"
+        ]
+      },
       "audio": {
         "bpm": 166,
         "needsVoices": true,
@@ -243,5 +265,6 @@
         }
       }
     }
-  }
+  },
+  "scripts": true
 }

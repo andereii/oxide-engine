@@ -1,10 +1,12 @@
 use std::f32::consts::FRAC_PI_2;
+use std::fs;
 
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use crate::animations::{AnimationController, SparrowAtlas};
 use crate::mods::ModRegistry;
-use crate::play::characters::schema::{CharacterRole, HealthIconData};
+use crate::play::characters::schema::{CharacterData, CharacterRole, HealthIconData};
 use crate::play::characters::loader::CharactersResource;
 use crate::utils::constants::{
     DEFAULT_HEALTH_ICON, HEALTH_ICON_ANGLE_HALF_LIFE, HEALTH_ICON_BOP_SCALE,
@@ -36,6 +38,7 @@ pub struct HealthIcon {
     pub current_height: f32,
     pub legacy_image: Option<Handle<Image>>,
     pub legacy_layout_ready: bool,
+    pub sampler_applied: bool,
     bop_active: bool,
     bop_elapsed: f32,
     bop_duration: f32,
@@ -105,8 +108,26 @@ pub fn spawn_health_icons(
     let p2_char = chars.and_then(|c| c.characters.iter().find(|ch| ch.role == CharacterRole::Opponent));
     let p1_char = chars.and_then(|c| c.characters.iter().find(|ch| ch.role == CharacterRole::Player));
 
-    spawn_single_icon(commands, mods, 1, p2_char.map(|c| c.id.as_str()), p2_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
-    spawn_single_icon(commands, mods, 0, p1_char.map(|c| c.id.as_str()), p1_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
+    spawn_single_icon(
+        commands,
+        mods,
+        1,
+        p2_char.map(|c| c.id.as_str()),
+        p2_char.and_then(|c| c.data.health_icon.as_ref()),
+        p2_char.is_some_and(|c| c.data.is_pixel),
+        asset_server,
+        layouts,
+    );
+    spawn_single_icon(
+        commands,
+        mods,
+        0,
+        p1_char.map(|c| c.id.as_str()),
+        p1_char.and_then(|c| c.data.health_icon.as_ref()),
+        p1_char.is_some_and(|c| c.data.is_pixel),
+        asset_server,
+        layouts,
+    );
 }
 
 fn load_icon_visual_bundle(
@@ -167,6 +188,9 @@ pub fn apply_icon_char_id(
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
     let icon_id = if icon_png_exists(mods, char_id) { char_id } else { DEFAULT_HEALTH_ICON };
+    if let Some(is_pixel) = resolve_char_icon_is_pixel(mods, char_id, icon_id) {
+        icon.is_pixel = is_pixel;
+    }
     let (texture, layout_handle, next_anim, is_legacy, base_frame_size, legacy_image) =
         load_icon_visual_bundle(mods, icon_id, icon.is_pixel, asset_server, layouts);
     *anim = next_anim;
@@ -175,6 +199,7 @@ pub fn apply_icon_char_id(
     icon.base_frame_size = base_frame_size;
     icon.legacy_image = legacy_image;
     icon.legacy_layout_ready = false;
+    icon.sampler_applied = false;
     icon.snap_to_target_size();
 
     let init_idx = anim.current_atlas_index().unwrap_or(0);
@@ -185,18 +210,40 @@ pub fn apply_icon_char_id(
     });
 }
 
+fn resolve_char_icon_is_pixel(mods: &ModRegistry, char_id: &str, icon_id: &str) -> Option<bool> {
+    if icon_id == DEFAULT_HEALTH_ICON && char_id != DEFAULT_HEALTH_ICON {
+        return Some(false);
+    }
+    for candidate in [char_id, icon_id] {
+        let rel = format!("gameplay/characters/{candidate}/{candidate}.json");
+        if let Some(path) = mods.resolve_file(&rel)
+            && let Ok(raw) = fs::read_to_string(&path)
+            && let Ok(data) = serde_json::from_str::<CharacterData>(&raw)
+        {
+            return Some(data.health_icon.as_ref().and_then(|h| h.is_pixel).unwrap_or(data.is_pixel));
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_single_icon(
     commands: &mut Commands,
     mods: &ModRegistry,
     player_id: u8,
     char_id: Option<&str>,
     data: Option<&HealthIconData>,
+    char_is_pixel: bool,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
     let requested_id = data.and_then(|d| d.id.as_deref()).or(char_id).unwrap_or(DEFAULT_HEALTH_ICON);
     let icon_id = if icon_png_exists(mods, requested_id) { requested_id } else { DEFAULT_HEALTH_ICON };
-    let is_pixel = data.and_then(|d| d.is_pixel).unwrap_or(false);
+    let is_pixel = if icon_id == DEFAULT_HEALTH_ICON && requested_id != DEFAULT_HEALTH_ICON {
+        false
+    } else {
+        data.and_then(|d| d.is_pixel).unwrap_or(char_is_pixel)
+    };
     let should_bop = true;
     let scale = data.and_then(|d| d.scale).unwrap_or(1.0);
     let icon_offset = data.and_then(|d| d.offsets).unwrap_or([0.0, 0.0]);
@@ -230,6 +277,7 @@ fn spawn_single_icon(
         current_height: HEALTH_ICON_SIZE * scale,
         legacy_image,
         legacy_layout_ready: false,
+        sampler_applied: false,
         bop_active: false,
         bop_elapsed: 0.0,
         bop_duration: 0.0,
@@ -245,17 +293,26 @@ fn icon_png_exists(mods: &ModRegistry, char_id: &str) -> bool {
     mods.file_exists(&format!("gameplay/characters/{char_id}/icon-{char_id}.png"))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_icon_state_and_transform(
     icon: &mut HealthIcon,
     anim: &mut AnimationController,
     sprite: &mut Mut<'_, Sprite>,
     tf: &mut Mut<'_, Transform>,
-    images: &Assets<Image>,
+    images: &mut Assets<Image>,
     layouts: &mut Assets<TextureAtlasLayout>,
     health: f64,
     split_x_flx: f32,
     bar_y_flx: f32,
 ) {
+    if icon.is_pixel
+        && !icon.sampler_applied
+        && let Some(mut img) = images.get_mut(&sprite.image)
+    {
+        img.sampler = ImageSampler::nearest();
+        icon.sampler_applied = true;
+    }
+
     if icon.is_legacy_style && !icon.legacy_layout_ready
         && let Some(img_handle) = &icon.legacy_image
         && let Some(img) = images.get(img_handle)

@@ -1,7 +1,11 @@
 use bevy::audio::{AudioPlayer, PlaybackMode, PlaybackSettings, Volume};
 use bevy::prelude::*;
+use bevy::sprite::Anchor;
 
 use crate::audio::{PcmSfxAudio, PcmSfxCache};
+use crate::utils::constants::{
+    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT, SCREEN_WIDTH,
+};
 
 use super::super::scene::PlayState;
 use super::HudTextVisual;
@@ -83,25 +87,75 @@ pub(super) fn spawn_tagged_sound(
     commands.spawn((AudioPlayer(handle), settings, comp));
 }
 
+#[derive(Default)]
+pub(super) struct HudTextSyncCache {
+    score_text: String,
+    status_message: String,
+    hud_visible: bool,
+    botplay_layout: bool,
+    downscroll: bool,
+    initialized: bool,
+}
+
+fn compute_hud_text_layout(state: &PlayState) -> (String, Anchor, Vec3) {
+    if state.is_bot_play_mode && state.custom_score_text.is_none() {
+        let bg_y_flx = if state.player_strumline.is_downscroll {
+            SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_DOWNSCROLL
+        } else {
+            SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
+        };
+        let by = SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0);
+        (
+            state.score_text.clone(),
+            Anchor::TOP_CENTER,
+            Vec3::new(0.0, by, 10.8),
+        )
+    } else {
+        (
+            format!("{}  |  {}", state.score_text, state.status_message),
+            Anchor::BOTTOM_LEFT,
+            Vec3::new(-SCREEN_WIDTH * 0.5 + 24.0, -SCREEN_HEIGHT * 0.5 + 20.0, 10.8),
+        )
+    }
+}
+
 pub(super) fn sync_hud_text(
     state: Res<PlayState>,
-    mut cache: Local<(String, String, bool)>,
-    mut hud_text: Query<(&mut Text2d, &mut Visibility), With<HudTextVisual>>,
+    mut cache: Local<HudTextSyncCache>,
+    mut hud_text: Query<(&mut Text2d, &mut Anchor, &mut Transform, &mut Visibility), With<HudTextVisual>>,
 ) {
-    if cache.0 == state.score_text && cache.1 == state.status_message && cache.2 == state.hud_visible {
+    let botplay_layout = state.is_bot_play_mode && state.custom_score_text.is_none();
+    let downscroll = state.player_strumline.is_downscroll;
+    if cache.initialized
+        && cache.score_text == state.score_text
+        && cache.status_message == state.status_message
+        && cache.hud_visible == state.hud_visible
+        && cache.botplay_layout == botplay_layout
+        && cache.downscroll == downscroll
+    {
         return;
     }
-    cache.0.clone_from(&state.score_text);
-    cache.1.clone_from(&state.status_message);
-    cache.2 = state.hud_visible;
-    let combined = format!("{}  |  {}", cache.0, cache.1);
+    cache.initialized = true;
+    cache.score_text.clone_from(&state.score_text);
+    cache.status_message.clone_from(&state.status_message);
+    cache.hud_visible = state.hud_visible;
+    cache.botplay_layout = botplay_layout;
+    cache.downscroll = downscroll;
+
+    let (display_text, target_anchor, target_pos) = compute_hud_text_layout(&state);
     let vis = if state.hud_visible {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
-    for (mut text, mut visibility) in &mut hud_text {
-        **text = combined.clone();
+    for (mut text, mut anchor, mut transform, mut visibility) in &mut hud_text {
+        **text = display_text.clone();
+        if *anchor != target_anchor {
+            *anchor = target_anchor;
+        }
+        if transform.translation != target_pos {
+            transform.translation = target_pos;
+        }
         if *visibility != vis {
             *visibility = vis;
         }

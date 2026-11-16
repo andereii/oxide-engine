@@ -1,36 +1,61 @@
 // Spooky Mansion (Erect) stage script (ported from spookyMansionErect.hxc to oxide-engine Rhai)
 
+fn reset_lightning(alpha_val) {
+    cancel_timer("lightning_off");
+    cancel_timer("lightning_fade");
+    cancel_tweens("bgLight");
+    cancel_tweens("stairsLight");
+    prop_alpha("bgLight", alpha_val);
+    prop_alpha("stairsLight", alpha_val);
+    char_alpha("bf", 1.0);
+    char_alpha("dad", 1.0);
+    char_alpha("gf", 1.0);
+}
+
 fn onCreate() {
     this.lightning_strike_beat = 0;
     this.lightning_strike_offset = 8;
-    prop_alpha("bgLight", 0.0001);
-    prop_alpha("stairsLight", 0.0001);
-    set_rain(7.2, 0.4, "#6680CC");
+    this.char_fading = false;
+    this.char_fade_elapsed = 0.0;
+    reset_lightning(0.0001);
 }
 
 fn lightning_off() {
+    cancel_tweens("bgLight");
+    cancel_tweens("stairsLight");
     prop_alpha("bgLight", 0.0);
     prop_alpha("stairsLight", 0.0);
-    char_tint("bf", "#FFFFFFFF");
-    char_tint("dad", "#FFFFFFFF");
-    char_tint("gf", "#FFFFFFFF");
+    this.char_fading = false;
+    char_alpha("bf", 1.0);
+    char_alpha("dad", 1.0);
+    char_alpha("gf", 1.0);
 }
 
 fn lightning_fade() {
+    cancel_tweens("bgLight");
+    cancel_tweens("stairsLight");
     prop_alpha("bgLight", 1.0);
     prop_alpha("stairsLight", 1.0);
-    char_tint("bf", "#00FFFFFF");
-    char_tint("dad", "#00FFFFFF");
-    char_tint("gf", "#00FFFFFF");
+    this.char_fading = true;
+    this.char_fade_elapsed = 0.0;
+    char_alpha("bf", 0.0);
+    char_alpha("dad", 0.0);
+    char_alpha("gf", 0.0);
     tween_prop("bgLight", "alpha", 0.0, 1.5, "linear");
     tween_prop("stairsLight", "alpha", 0.0, 1.5, "linear");
-    after(0.15, "restore_chars");
 }
 
-fn restore_chars() {
-    char_tint("bf", "#FFFFFFFF");
-    char_tint("dad", "#FFFFFFFF");
-    char_tint("gf", "#FFFFFFFF");
+fn onUpdate() {
+    if this.char_fading {
+        this.char_fade_elapsed += dt();
+        let a = clamp(this.char_fade_elapsed / 1.5, 0.0, 1.0);
+        char_alpha("bf", a);
+        char_alpha("dad", a);
+        char_alpha("gf", a);
+        if a >= 1.0 {
+            this.char_fading = false;
+        }
+    }
 }
 
 fn onBeatHit() {
@@ -55,11 +80,17 @@ fn onBeatHit() {
         sfx("gameplay/stages/spookyMansion/sounds/thunder-" + idx + ".ogg", 1.0);
     }
 
+    cancel_timer("lightning_off");
+    cancel_timer("lightning_fade");
+    cancel_tweens("bgLight");
+    cancel_tweens("stairsLight");
+    this.char_fading = false;
+
     prop_alpha("bgLight", 1.0);
     prop_alpha("stairsLight", 1.0);
-    char_tint("bf", "#00FFFFFF");
-    char_tint("dad", "#00FFFFFF");
-    char_tint("gf", "#00FFFFFF");
+    char_alpha("bf", 0.0);
+    char_alpha("dad", 0.0);
+    char_alpha("gf", 0.0);
 
     after(0.06, "lightning_off");
     after(0.12, "lightning_fade");
@@ -71,10 +102,19 @@ fn onBeatHit() {
     gf_anim("scared");
 }
 
+fn onCountdownStart() {
+    this.lightning_strike_beat = 0;
+    this.lightning_strike_offset = 8;
+}
+
+fn onGameOver() {
+    this.char_fading = false;
+    reset_lightning(0.0);
+}
+
 fn onSongRetry() {
     this.lightning_strike_beat = 0;
     this.lightning_strike_offset = 8;
-    prop_alpha("bgLight", 0.0001);
-    prop_alpha("stairsLight", 0.0001);
-    restore_chars();
+    this.char_fading = false;
+    reset_lightning(0.0001);
 }

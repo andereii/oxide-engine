@@ -46,6 +46,7 @@ fn spawn_viz(ax, ay, gz, is_pixel) {
         if is_pixel {
             prop_scale(id, 6.0, 6.0);
         }
+        play_anim_frame(id, "idle", 5);
         prop_alpha(id, 0.0);
         i += 1;
     }
@@ -77,7 +78,16 @@ fn pulse_viz(state) {
     if !state.active { return; }
     let i = 1;
     while i <= 7 {
-        play_anim_frame("abot_viz_" + i, "idle", rand_int(0, 2));
+        let frame = 5;
+        if i <= 2 {
+            // Low-frequency outer bass bars emphasize deeper excursions.
+            frame = rand_int(2, 4);
+        } else if i <= 4 {
+            frame = rand_int(3, 5);
+        } else {
+            frame = if rand_int(0, 3) == 0 { rand_int(2, 3) } else { rand_int(4, 5) };
+        }
+        play_anim_frame("abot_viz_" + i, "idle", frame);
         i += 1;
     }
 }

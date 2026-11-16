@@ -28,22 +28,25 @@ fn load_picospeaker_timings() {
     if s == "" { return empty; }
     let v = variation();
     let candidates = [];
+    let keys = [];
     if v != "" && v != "default" {
         candidates.push("gameplay/songs/" + s + "/chart-" + v + "/notes.json");
         candidates.push("gameplay/songs/" + s + "/" + v + "/notes.json");
+        keys.push(v + "-picospeaker");
     }
     candidates.push("gameplay/songs/" + s + "/chart/notes.json");
+    keys.push("picospeaker");
 
-    let raw = ();
+    let notes = ();
     for path in candidates {
         if file_exists(path) {
-            raw = read_json(path);
-            if raw != () { break; }
+            for k in keys {
+                notes = read_json(path, k);
+                if notes != () { break; }
+            }
+            if notes != () { break; }
         }
     }
-    if raw == () { return empty; }
-
-    let notes = raw["picospeaker"];
     if notes == () { return empty; }
 
     let list = [];
@@ -59,9 +62,23 @@ fn load_picospeaker_timings() {
     sort_notes(list)
 }
 
+fn pick_shot_dir(raw_dir) {
+    let dir = raw_dir;
+    if dir == 3 {
+        dir -= rand_int(0, 1);
+    } else {
+        dir += rand_int(0, 1);
+    }
+    if dir < 0 { dir = 0; }
+    if dir > 3 { dir = 3; }
+    dir
+}
+
 fn onCreate() {
-    this.shoot_notes = load_picospeaker_timings();
+    this.shoot_notes = [];
     this.shoot_idx = 0;
+    this.last_now_ms = 0.0;
+    this.shoot_notes = load_picospeaker_timings();
     let target = find_slot("pico-speaker");
     if target != "" {
         play_anim(target, "idle");
@@ -70,25 +87,35 @@ fn onCreate() {
 
 fn onSongRetry() {
     this.shoot_idx = 0;
+    this.last_now_ms = 0.0;
+    let target = find_slot("pico-speaker");
+    if target != "" {
+        play_anim(target, "idle");
+    }
 }
 
 fn onUpdate() {
     let target = find_slot("pico-speaker");
     if target == "" { return; }
     let now_ms = time();
+    if now_ms < this.last_now_ms - 50.0 {
+        this.shoot_idx = 0;
+    }
+    this.last_now_ms = now_ms;
+
+    let last_note = ();
     while this.shoot_idx < this.shoot_notes.len() {
         let note = this.shoot_notes[this.shoot_idx];
         if note.t > now_ms { break; }
         this.shoot_idx += 1;
-
-        let dir = note.d;
-        if dir == 3 {
-            dir -= rand_int(0, 1);
+        last_note = note;
+    }
+    if last_note != () {
+        let dir = pick_shot_dir(last_note.d);
+        if now_ms - last_note.t <= 500.0 {
+            play_anim(target, "shoot" + (dir + 1));
         } else {
-            dir += rand_int(0, 1);
+            play_anim(target, "shoot" + (dir + 1) + "-hold");
         }
-        if dir < 0 { dir = 0; }
-        if dir > 3 { dir = 3; }
-        play_anim(target, "shoot" + (dir + 1));
     }
 }

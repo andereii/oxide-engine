@@ -152,7 +152,7 @@
       "file": "spookyMansionErect/bg-light",
       "animation": null,
       "visible": true,
-      "opacity": 1,
+      "opacity": 0.0001,
       "position": [
         -560,
         -220
@@ -200,7 +200,7 @@
       "file": "spookyMansionErect/stairs-light",
       "animation": null,
       "visible": true,
-      "opacity": 1,
+      "opacity": 0.0001,
       "position": [
         966,
         -225

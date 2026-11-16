@@ -1,5 +1,6 @@
 use std::f32::consts::FRAC_PI_2;
 
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
@@ -22,6 +23,48 @@ pub struct PoolSyncScratch {
     pub(super) assigned_indices: Vec<usize>,
 }
 
+#[derive(Default)]
+pub struct NoteskinSamplerCache {
+    applied_ids: [Option<AssetId<Image>>; 8],
+}
+
+fn apply_pixel_noteskin_samplers(
+    assets: &NoteskinAssets,
+    cache: &mut NoteskinSamplerCache,
+    images: &mut Assets<Image>,
+) {
+    if !assets.style.is_pixel {
+        if cache.applied_ids.iter().any(Option::is_some) {
+            cache.applied_ids = [None; 8];
+        }
+        return;
+    }
+    let handles: [Option<&Handle<Image>>; 8] = [
+        Some(&assets.strum_texture),
+        Some(&assets.notes_texture),
+        assets.sustain_texture.as_ref(),
+        assets.splash_texture.as_ref(),
+        assets.hold_cover_textures[0].as_ref(),
+        assets.hold_cover_textures[1].as_ref(),
+        assets.hold_cover_textures[2].as_ref(),
+        assets.hold_cover_textures[3].as_ref(),
+    ];
+    for (slot, handle_opt) in handles.into_iter().enumerate() {
+        let Some(handle) = handle_opt else {
+            cache.applied_ids[slot] = None;
+            continue;
+        };
+        let id = handle.id();
+        if cache.applied_ids[slot] == Some(id) {
+            continue;
+        }
+        if let Some(mut img) = images.get_mut(handle) {
+            img.sampler = ImageSampler::nearest();
+            cache.applied_ids[slot] = Some(id);
+        }
+    }
+}
+
 fn strumline(state: &PlayState, is_player: bool) -> &Strumline {
     if is_player {
         &state.player_strumline
@@ -30,9 +73,12 @@ fn strumline(state: &PlayState, is_player: bool) -> &Strumline {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sync_arrow_visuals(
     mut state: ResMut<PlayState>,
     skin_assets: Option<Res<NoteskinAssets>>,
+    mut images: ResMut<Assets<Image>>,
+    mut sampler_cache: Local<NoteskinSamplerCache>,
     mut scratch: Local<PoolSyncScratch>,
     mut receptors: Query<(
         &mut ReceptorVisual,
@@ -69,6 +115,10 @@ pub fn sync_arrow_visuals(
         ),
     >,
 ) {
+    if let Some(assets) = skin_assets.as_deref() {
+        apply_pixel_noteskin_samplers(assets, &mut sampler_cache, &mut images);
+    }
+
     let fallback_style;
     let style = if let Some(s) = skin_assets.as_ref() {
         &s.style

@@ -4,11 +4,16 @@ use bevy::prelude::*;
 use crate::animations::Bopper;
 use crate::play::stage::schema::stage_layer_z;
 
-use super::behavior::{CharacterActor, SheetSource, find_count_animations};
-use super::loader::CharactersResource;
+use super::behavior::{
+    CharacterActor, CharacterUnderlayConfig, SheetSource, find_count_animations,
+};
+use super::loader::{CharactersResource, LoadedCharacter};
 
 #[derive(Component)]
 pub struct CharacterPartVisual;
+
+#[derive(Component)]
+pub struct CharacterTrailVisual;
 
 #[derive(Component, Default, Clone, Copy)]
 pub struct CompositeAffine2d {
@@ -70,7 +75,15 @@ pub(super) fn spawn_composite_piece_entity(
         .id()
 }
 
-pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::LoadedCharacter) {
+pub fn spawn_single_character(commands: &mut Commands, loaded: &LoadedCharacter) {
+    spawn_single_character_with_underlay(commands, loaded, None);
+}
+
+pub fn spawn_single_character_with_underlay(
+    commands: &mut Commands,
+    loaded: &LoadedCharacter,
+    mirror_of: Option<CharacterUnderlayConfig>,
+) {
     let z_base = stage_layer_z(loaded.slot.layer, 0);
     let sheet_entity = commands
         .spawn((
@@ -117,12 +130,18 @@ pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::L
         drop_counts,
         sampler_applied: false,
         mod_tint: [1.0; 4],
-        mod_visible: true,
+        mod_visible: if mirror_of.is_some() { false } else { true },
         mod_z: None,
         script_anim_override: false,
         sheet_entity,
         piece_entities,
+        trail: None,
+        trail_entities: Vec::new(),
+        mirror_of,
     };
+    if mirror_of.is_some() {
+        actor.mod_tint[3] = 0.0;
+    }
     actor.reset_character();
     commands.spawn(actor);
 }

@@ -134,6 +134,26 @@ pub enum ScriptCommand {
         target: String,
         beats: f32,
     },
+    SetCharTrail {
+        target: String,
+        length: usize,
+        delay_s: f64,
+        alpha: f32,
+        diff: f32,
+        z_layer: Option<i32>,
+    },
+    ClearCharTrail {
+        target: String,
+    },
+    SetCharUnderlay {
+        target: String,
+        char_id: String,
+        offset: [f32; 2],
+        z_offset: i32,
+    },
+    ClearCharUnderlay {
+        target: String,
+    },
     SetLaneOffset {
         lane: usize,
         x: f32,
@@ -266,6 +286,19 @@ pub enum ScriptCommand {
     VwooshNotes {
         side: String,
         fade_in: bool,
+    },
+    SetStrumVisible {
+        side: String,
+        visible: bool,
+    },
+    RegisterNoteKind {
+        id: String,
+        description: String,
+        note_style_id: Option<String>,
+        no_anim: bool,
+        suffix: String,
+        scoreable: bool,
+        low_priority: bool,
     },
     SetBarColors {
         opp: [f32; 4],

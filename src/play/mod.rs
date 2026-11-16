@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod characters;
+pub mod events;
 pub mod helpers;
 pub mod hot_reload;
 pub mod hud;

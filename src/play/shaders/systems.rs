@@ -403,6 +403,9 @@ pub fn attach_stage_and_character_shaders(
     }
 
     for mut actor in &mut actors {
+        if actor.mirror_of.is_some() {
+            continue;
+        }
         let role = to_char_shader_role(actor.role);
         if let Some(tint) = stage_character_initial_tint(&stage_id, role) {
             actor.mod_tint = tint;
@@ -472,7 +475,7 @@ pub fn update_stage_shaders(
     mut pending_cmds: ResMut<PendingShaderCommands>,
     mut managed: Query<(Entity, &mut ManagedSpriteShader)>,
     mut stage_props: Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
-    dynamic_props: Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
+    dynamic_props: Query<(Entity, &DynamicScriptProp)>,
     actors: Query<&CharacterActor>,
     mut cameras: Query<(Entity, Option<&mut RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
 ) {
@@ -892,7 +895,7 @@ fn collect_target_entities(
     target: &str,
     managed: &Query<(Entity, &mut ManagedSpriteShader)>,
     stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
     actors: &Query<&CharacterActor>,
 ) -> Vec<(Entity, ShaderTargetKind, String, String)> {
     let mut out = Vec::new();
@@ -969,7 +972,7 @@ fn apply_shader_script_command(
     runtime: &mut StageShaderRuntime,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
     stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
     actors: &Query<&CharacterActor>,
     cameras: &mut Query<(Entity, Option<&mut RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
 ) {
@@ -1004,6 +1007,14 @@ fn apply_shader_script_command(
         }
         ShaderScriptCommand::ClearShader { target } => {
             let lower = target.trim().to_ascii_lowercase();
+            if matches!(lower.as_str(), "all" | "reload" | "__reload__") {
+                runtime.attached = false;
+                runtime.rain_spec = None;
+                for (cam_entity, _) in cameras.iter() {
+                    commands.entity(cam_entity).remove::<RainCameraEffect>();
+                }
+                return;
+            }
             if matches!(lower.as_str(), "cam" | "camera" | "camgame" | "rain") {
                 runtime.rain_spec = None;
                 for (cam_entity, _) in cameras.iter() {
@@ -1261,7 +1272,7 @@ fn mutate_target_materials(
     time_s: f32,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
     stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
     actors: &Query<&CharacterActor>,
     mut mutator: impl FnMut(&mut FunkinSpriteMaterial),
 ) {
@@ -1362,7 +1373,7 @@ fn apply_config_to_target(
     time_s: f32,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
     stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
     actors: &Query<&CharacterActor>,
 ) {
     let aux_rel = aux_path_for_config(&cfg).map(str::to_string);

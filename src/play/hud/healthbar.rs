@@ -97,7 +97,7 @@ pub fn spawn_health_bar(
 pub fn sync_health_bar(
     time: Res<Time>,
     state: Res<PlayState>,
-    images: Res<Assets<Image>>,
+    mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut step_tracker: Local<HealthBarStepTracker>,
     mut bg_query: Query<(&mut HealthBarBgVisual, &mut Transform, &mut Visibility)>,
@@ -189,7 +189,7 @@ pub fn sync_health_bar(
             &mut anim,
             &mut sprite,
             &mut tf,
-            &images,
+            &mut images,
             &mut layouts,
             state.health,
             split_x_flx,

@@ -402,3 +402,56 @@ fn tweens_support_char_sound_text_targets_on_complete_and_timers_pass_args() {
     assert_eq!(store.get("global", "tween_done_cb"), Some(&serde_json::json!(true)));
     assert_eq!(store.get("global", "timer_arg_val"), Some(&serde_json::json!(payload)));
 }
+
+#[test]
+fn read_json_supports_key_lookup_and_large_chart_arrays() {
+    let temp = TempDirGuard::new("read_json_large");
+    let assets_dir = temp.0.join("assets");
+    let mods_dir = temp.0.join("mods");
+    fs::create_dir_all(assets_dir.join("data")).expect("create data dir");
+
+    let large_notes: Vec<_> = (0..5500)
+        .map(|i| serde_json::json!({ "t": i * 10, "d": i % 4 }))
+        .collect();
+    let payload = serde_json::json!({
+        "hard": large_notes,
+        "picospeaker": [
+            { "t": 100.0, "d": 2 },
+            { "t": 200.0, "d": 3 }
+        ]
+    });
+    fs::write(
+        assets_dir.join("data").join("notes.json"),
+        serde_json::to_string(&payload).expect("serialize notes"),
+    )
+    .expect("write large notes json");
+
+    let registry = ModRegistry::discover(assets_dir, mods_dir);
+    let mut store = ModStore::default();
+    let mut host = ScriptHost::with_registry(registry.clone());
+    host.load_source(
+        SCRIPT_EXT_RHAI,
+        ScriptSource::inline(
+            "large_notes_reader",
+            "assets",
+            r#"
+            fn on_create(e) {
+                let full = read_json("data/notes.json");
+                let sub = read_json("data/notes.json", "picospeaker");
+                global_set("full_ok", full["hard"].len() == 5500);
+                global_set("sub_ok", sub.len() == 2 && sub[1]["d"] == 3);
+            }
+            "#,
+        ),
+    )
+    .expect("script should compile");
+
+    let mut ctx = host.make_context(ScriptStateSnapshot::default(), &registry, &mut store);
+    let mut ev = ScriptEvent::new(HookKind::Create);
+    host.dispatch(&HookKind::Create, &mut ev, &mut ctx);
+    let _ = host.finalize_context(ctx, &mut store);
+
+    assert!(host.runtime_errors.is_empty(), "errors: {:?}", host.runtime_errors);
+    assert_eq!(store.get("global", "full_ok"), Some(&serde_json::json!(true)));
+    assert_eq!(store.get("global", "sub_ok"), Some(&serde_json::json!(true)));
+}

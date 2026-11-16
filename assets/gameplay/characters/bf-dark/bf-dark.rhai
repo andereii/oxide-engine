@@ -10,6 +10,9 @@ fn find_slot(id) {
 fn onCreate() {
     this.slot = find_slot("bf-dark");
     this.last_anim = "";
+    if this.slot != "" {
+        char_underlay(this.slot, "bf");
+    }
 }
 
 fn onUpdate() {
