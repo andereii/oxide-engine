@@ -1,14 +1,9 @@
-use std::collections::BTreeMap;
-
 use crate::mods::{ModRegistry, ModStore};
 use crate::play::events::apply_notekind_to_play_state;
 use crate::play::notes::data::{NoteDirection, NoteKind, SongNoteData};
 use crate::play::notes::strum::{CharNoteSignal, Strumline};
-use crate::scripting::{
-    HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptMutableState, ScriptNoteSnapshot,
-    ScriptStateSnapshot, ScriptValue,
-};
-use crate::utils::constants::{HEALTH_MAX, HEALTH_MIN, KEY_COUNT, STEPS_PER_BEAT};
+use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptValue};
+use crate::utils::constants::{HEALTH_MAX, HEALTH_MIN, KEY_COUNT};
 
 use super::super::super::camera::events::parse_raw_song_event;
 use super::super::super::playlist::PlayStatePlaylist;

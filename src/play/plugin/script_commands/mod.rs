@@ -60,6 +60,7 @@ pub(crate) fn apply_ecs_script_commands(
                     scripts.preload.as_deref_mut(),
                     &mut scripts.props,
                     &scripts.sparrows,
+                    &mut hud_texts.texts,
                     &mut prop_index,
                     &mut pending_spawned,
                 );

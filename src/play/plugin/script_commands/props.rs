@@ -18,7 +18,7 @@ use crate::play::stage::sync::StageAtlasFrameSizes;
 use crate::play::stage::{DynamicScriptProp, StageCompositePiece, StageCompositeProp, StagePropVisual};
 use crate::scripting::{ScriptCommand, ScriptPropAnimKind, TweenProp};
 
-use super::PropsQuery;
+use super::{PropsQuery, TextsQuery};
 
 #[derive(Component, Clone)]
 pub(crate) struct ScriptSparrowData {
@@ -80,6 +80,7 @@ pub(super) fn handle_prop_cmd(
     mut preload: Option<&mut PlayPreloadTracker>,
     props: &mut PropsQuery,
     sparrows: &Query<&ScriptSparrowData>,
+    texts: &mut TextsQuery,
     prop_index: &mut Option<HashMap<String, Vec<Entity>>>,
     pending_spawned: &mut HashMap<String, Entity>,
 ) {

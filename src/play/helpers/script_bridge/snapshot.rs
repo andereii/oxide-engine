@@ -5,7 +5,7 @@ use crate::scripting::{ScriptMutableState, ScriptNoteSnapshot, ScriptStateSnapsh
 use crate::utils::constants::{HEALTH_MAX, HEALTH_MIN, KEY_COUNT, STEPS_PER_BEAT};
 
 use super::super::super::scene::PlayState;
-use super::super::super::types::{PauseMode, PlayPhase};
+use super::super::super::types::PlayPhase;
 
 fn push_active_strum_notes(out: &mut Vec<ScriptNoteSnapshot>, strum: &Strumline, is_player: bool) {
     for note in strum.active_slice() {

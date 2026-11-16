@@ -15,7 +15,7 @@ use super::defs::{
 };
 
 pub use attach::attach_stage_and_character_shaders;
-pub use events::{parse_shader_color_rgb, parse_wiggle_effect_type};
+pub use events::parse_wiggle_effect_type;
 pub use update::update_stage_shaders;
 
 /// Dust adjust-color preset set by `sserafim.hxc`'s `resetClear()` before `sserafimKick`.
