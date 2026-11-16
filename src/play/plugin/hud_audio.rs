@@ -103,9 +103,10 @@ fn compute_hud_text_layout(state: &PlayState) -> (String, Anchor, Vec3) {
     } else {
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
     };
+    let bx = 601.0 * 0.5 - 190.0;
     let by = SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0);
     let text = state.score_text.clone();
-    (text, Anchor::TOP_CENTER, Vec3::new(0.0, by, 10.8))
+    (text, Anchor::TOP_LEFT, Vec3::new(bx, by, 10.8))
 }
 
 pub(super) fn sync_hud_text(

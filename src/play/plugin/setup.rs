@@ -133,6 +133,8 @@ pub(crate) fn seed_stage_and_chars_into_state(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_play_scene(
     mut commands: Commands,
+    mods: Res<ModRegistry>,
+    asset_server: Res<AssetServer>,
     mut state: ResMut<PlayState>,
     mut preload: ResMut<PlayPreloadTracker>,
     mut loading_screen: ResMut<LoadingScreenState>,
@@ -146,12 +148,21 @@ pub(super) fn setup_play_scene(
         &mut load_pipeline,
     );
 
+    let score_font: Handle<Font> = asset_server.load(mods.resolve_asset("ui/fonts/VCR OSD Mono.ttf"));
     commands.spawn((
         Text2d::new(""),
-        TextFont { font_size: FontSize::Px(14.0), ..default() },
-        TextLayout::justify(Justify::Center),
-        bevy::sprite::Anchor::TOP_CENTER,
-        Transform::from_xyz(0.0, -SCREEN_HEIGHT * 0.5 + 50.0, 10.8),
+        TextFont {
+            font: score_font.into(),
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextLayout::justify(Justify::Right),
+        bevy::sprite::Text2dShadow {
+            offset: Vec2::new(1.5, -1.5),
+            color: Color::BLACK,
+        },
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(601.0 * 0.5 - 190.0, -SCREEN_HEIGHT * 0.4 - 30.0, 10.8),
         hud_render_layer(),
         HudTextVisual,
     ));
