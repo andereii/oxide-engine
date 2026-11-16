@@ -273,12 +273,14 @@ pub(super) fn tick_play_state(
 
     let hooks = std::mem::take(&mut state.pending_hooks);
     let mut ecs_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
-    if !hooks.is_empty() || scripts.script_host.has_frame_update_work() {
+    let run_update = !is_paused && scripts.script_host.has_frame_update_work();
+    let step_dt = if is_paused { 0.0 } else { dt };
+    if !hooks.is_empty() || run_update {
         sync_script_entity_maps(&mut state, &scripts, &hud_texts, &audio_res.sinks);
         let frame_cmds = state.run_script_hooks(
             hooks,
-            true,
-            dt,
+            run_update,
+            step_dt,
             &mut playlist,
             &mut scripts.script_host,
             &scripts.mods,
