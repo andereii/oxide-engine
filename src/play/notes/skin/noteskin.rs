@@ -6,6 +6,7 @@ use oxin_app::resolve_assets_dir;
 
 use crate::mods::ModRegistry;
 use crate::play::notes::data::NoteDirection;
+use crate::play::shaders::defs::FunkinBlendMode;
 use super::defaults::fallback_funkin_style;
 pub use super::skin_schema::{
     HoldCoverDirStyle, NoteskinFileRaw, PopupSkinConfig, StrumAnimNames, SustainAnimNames,
@@ -37,6 +38,9 @@ pub struct NoteStyle {
     pub splash_path: String,
     pub splash_scale: f32,
     pub splash_alpha: f32,
+    pub splash_fps: f32,
+    pub splash_fps_variance: f32,
+    pub splash_blend_mode: FunkinBlendMode,
     pub splash_offset: [f32; 2],
     pub splash_anims: [Vec<String>; 4],
     pub hold_cover_enabled: bool,
@@ -144,6 +148,13 @@ impl NoteStyle {
             style.splash_path = sp.path;
             style.splash_scale = sp.scale;
             style.splash_alpha = sp.alpha;
+            style.splash_fps = sp.frames.max(1.0);
+            style.splash_fps_variance = sp.frame_variance.max(0.0);
+            style.splash_blend_mode = sp
+                .blend_mode
+                .as_deref()
+                .map(FunkinBlendMode::parse)
+                .unwrap_or(FunkinBlendMode::Normal);
             style.splash_offset = sp.offset;
             for (i, dir) in dirs.iter().enumerate() {
                 if let Some(anims) = sp.animations.get(*dir) {

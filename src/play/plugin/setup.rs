@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptValue};
 use crate::ui::LoadingScreenState;
-use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::utils::constants::SCREEN_HEIGHT;
 
 use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
 use super::super::characters::{
@@ -148,9 +148,10 @@ pub(super) fn setup_play_scene(
 
     commands.spawn((
         Text2d::new(""),
-        TextFont { font_size: FontSize::Px(20.0), ..default() },
-        bevy::sprite::Anchor::BOTTOM_LEFT,
-        Transform::from_xyz(-SCREEN_WIDTH * 0.5 + 24.0, -SCREEN_HEIGHT * 0.5 + 20.0, 10.8),
+        TextFont { font_size: FontSize::Px(14.0), ..default() },
+        TextLayout::justify(Justify::Center),
+        bevy::sprite::Anchor::TOP_CENTER,
+        Transform::from_xyz(0.0, -SCREEN_HEIGHT * 0.5 + 50.0, 10.8),
         hud_render_layer(),
         HudTextVisual,
     ));

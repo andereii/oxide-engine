@@ -93,6 +93,12 @@ pub struct NoteSplashesSectionRaw {
     pub scale: f32,
     #[serde(default = "default_one")]
     pub alpha: f32,
+    #[serde(default = "default_hold_cover_fps")]
+    pub frames: f32,
+    #[serde(rename = "frameVariance", alias = "framerateVariance", default = "default_splash_fps_variance")]
+    pub frame_variance: f32,
+    #[serde(rename = "blendMode", alias = "blend", default)]
+    pub blend_mode: Option<String>,
     #[serde(rename = "Offset", default)]
     pub offset: [f32; 2],
     #[serde(default)]
@@ -287,4 +293,5 @@ pub struct HoldCoverDirStyle {
 fn default_one() -> f32 { 1.0 }
 fn default_half() -> f32 { 0.5 }
 fn default_hold_cover_fps() -> f32 { 24.0 }
+fn default_splash_fps_variance() -> f32 { 2.0 }
 fn default_miss_volume() -> f32 { 0.8 }

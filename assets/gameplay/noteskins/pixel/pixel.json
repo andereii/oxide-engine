@@ -75,7 +75,9 @@
       "path": "pixel-note-splash.png",
       "scale": 4.0,
       "alpha": 1.0,
-      "Offset": [27.5, 18.5],
+      "frames": 33,
+      "blendMode": "screen",
+      "Offset": [0.0, -3.5],
       "animations": {
         "left": ["purple1", "purple2", "purple3"],
         "down": ["blue1", "blue2", "blue3"],
@@ -87,7 +89,7 @@
       "scale": 6.0,
       "alpha": 1.0,
       "frames": 24,
-      "Offset": [29, -4],
+      "Offset": [27.5, 0.0],
       "directions": {
         "left": {
           "path": "pixel-note-hold-cover.png",
@@ -116,7 +118,7 @@
         "right": {
           "path": "pixel-note-hold-cover.png",
           "animations": {
-            "start": "holdCoverStartRed",
+            "start": "loop0000",
             "hold": "loop",
             "end": "explode"
           }

@@ -4,7 +4,7 @@ use bevy::sprite::Anchor;
 
 use crate::audio::{PcmSfxAudio, PcmSfxCache};
 use crate::utils::constants::{
-    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT, SCREEN_WIDTH,
+    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT,
 };
 
 use super::super::scene::PlayState;
@@ -98,25 +98,18 @@ pub(super) struct HudTextSyncCache {
 }
 
 fn compute_hud_text_layout(state: &PlayState) -> (String, Anchor, Vec3) {
-    if state.is_bot_play_mode && state.custom_score_text.is_none() {
-        let bg_y_flx = if state.player_strumline.is_downscroll {
-            SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_DOWNSCROLL
-        } else {
-            SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
-        };
-        let by = SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0);
-        (
-            state.score_text.clone(),
-            Anchor::TOP_CENTER,
-            Vec3::new(0.0, by, 10.8),
-        )
+    let bg_y_flx = if state.player_strumline.is_downscroll {
+        SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_DOWNSCROLL
     } else {
-        (
-            format!("{}  |  {}", state.score_text, state.status_message),
-            Anchor::BOTTOM_LEFT,
-            Vec3::new(-SCREEN_WIDTH * 0.5 + 24.0, -SCREEN_HEIGHT * 0.5 + 20.0, 10.8),
-        )
-    }
+        SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
+    };
+    let by = SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0);
+    let text = if state.is_bot_play_mode && state.custom_score_text.is_none() {
+        state.score_text.clone()
+    } else {
+        format!("{}  |  {}", state.score_text, state.status_message)
+    };
+    (text, Anchor::TOP_CENTER, Vec3::new(0.0, by, 10.8))
 }
 
 pub(super) fn sync_hud_text(

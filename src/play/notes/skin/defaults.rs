@@ -1,3 +1,4 @@
+use crate::play::shaders::defs::FunkinBlendMode;
 use crate::utils::constants::{CONFIRM_HOLD_TIME_S, COUNTDOWN_VOLUME};
 
 use super::noteskin::NoteStyle;
@@ -57,13 +58,16 @@ pub fn fallback_funkin_style() -> NoteStyle {
         splash_path: "note-splashes.png".to_string(),
         splash_scale: 0.9,
         splash_alpha: 1.0,
-        splash_offset: [50.0, 50.0],
+        splash_fps: 24.0,
+        splash_fps_variance: 2.0,
+        splash_blend_mode: FunkinBlendMode::Normal,
+        splash_offset: [0.0, -2.0],
         splash_anims,
         hold_cover_enabled: true,
         hold_cover_scale: 1.0,
         hold_cover_alpha: 1.0,
         hold_cover_fps: 24.0,
-        hold_cover_offset: [13.0, 75.0],
+        hold_cover_offset: [-11.0, 48.0],
         hold_cover_dirs,
         popup: PopupSkinConfig::fallback_funkin(),
         health_bar: UiSpriteStyle {

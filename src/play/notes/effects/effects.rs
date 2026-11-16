@@ -1,9 +1,12 @@
+use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureFormat;
 
 use crate::animations::AnimationController;
 use crate::play::scene::PlayState;
+use crate::play::shaders::defs::FunkinBlendMode;
 use crate::utils::ecs::{set_atlas_index, set_sprite_color, set_transform_full, set_visibility};
 
 use crate::play::notes::data::NoteDirection;
@@ -14,6 +17,7 @@ use crate::play::notes::strum::HoldCoverCmd;
 pub struct EffectsScratch {
     splashes: Vec<NoteDirection>,
     covers: Vec<HoldCoverCmd>,
+    screen_converted_images: HashSet<AssetId<Image>>,
 }
 
 #[derive(Component)]
@@ -42,6 +46,7 @@ pub struct HoldCoverVisual {
 pub fn sync_note_effects(
     mut state: ResMut<PlayState>,
     skin_assets: Option<Res<NoteskinAssets>>,
+    mut images: Option<ResMut<Assets<Image>>>,
     mut scratch: Local<EffectsScratch>,
     mut splashes: Query<(
         &mut NoteSplashVisual,
@@ -65,6 +70,17 @@ pub fn sync_note_effects(
         return;
     };
     let style = &assets.style;
+    if matches!(
+        style.splash_blend_mode,
+        FunkinBlendMode::Screen | FunkinBlendMode::Add
+    ) && let Some(splash_tex) = &assets.splash_texture
+        && !scratch.screen_converted_images.contains(&splash_tex.id())
+        && let Some(imgs) = images.as_deref_mut()
+        && let Some(mut img) = imgs.get_mut(splash_tex)
+    {
+        convert_screen_image_to_alpha(&mut img);
+        scratch.screen_converted_images.insert(splash_tex.id());
+    }
 
     for (mut vis, _, anim, _, mut visibility) in &mut splashes {
         if vis.active && anim.finished {
@@ -84,13 +100,13 @@ pub fn sync_note_effects(
             let mut picked = false;
             for (mut vis, mut sprite, mut anim, _, mut visibility) in &mut splashes {
                 if !vis.active {
-                    activate_splash(&mut vis, &mut sprite, &mut anim, &mut visibility, dir.index(), variants);
+                    activate_splash(&mut vis, &mut sprite, &mut anim, &mut visibility, dir.index(), variants, style.splash_fps, style.splash_fps_variance);
                     picked = true;
                     break;
                 }
             }
             if !picked && let Some((mut vis, mut sprite, mut anim, _, mut visibility)) = splashes.iter_mut().next() {
-                activate_splash(&mut vis, &mut sprite, &mut anim, &mut visibility, dir.index(), variants);
+                activate_splash(&mut vis, &mut sprite, &mut anim, &mut visibility, dir.index(), variants, style.splash_fps, style.splash_fps_variance);
             }
         }
     }
@@ -104,7 +120,8 @@ pub fn sync_note_effects(
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
-        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.splash_alpha));
+        let mod_alpha = p_strum.receptors.get(vis.lane).map_or(1.0, |r| r.mod_alpha);
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.splash_alpha * mod_alpha));
         apply_frame_transform(
             &mut transform,
             &anim,
@@ -144,7 +161,8 @@ pub fn sync_note_effects(
         if cov.phase == HoldCoverPhase::Hidden {
             continue;
         }
-        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha));
+        let mod_alpha = strum.receptors.get(cov.lane).map_or(1.0, |r| r.mod_alpha);
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha * mod_alpha));
         apply_frame_transform(
             &mut transform,
             &anim,
@@ -157,6 +175,7 @@ pub fn sync_note_effects(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn activate_splash(
     vis: &mut NoteSplashVisual,
     sprite: &mut Mut<'_, Sprite>,
@@ -164,13 +183,21 @@ fn activate_splash(
     visibility: &mut Mut<'_, Visibility>,
     lane: usize,
     variants: &[AnimClipFrames],
+    splash_fps: f32,
+    splash_fps_variance: f32,
 ) {
     let r1 = xorshift32(&mut vis.rng_state);
     let r2 = xorshift32(&mut vis.rng_state);
     let variant_idx = (r1 as usize) % variants.len();
-    let fps_delta = (r2 % 5) as f32 - 2.0;
+    let base_fps = splash_fps.max(1.0);
+    let var = splash_fps_variance.round().max(0.0) as u32;
+    let fps_delta = if var > 0 {
+        (r2 % (var * 2 + 1)) as f32 - var as f32
+    } else {
+        0.0
+    };
     let key = super::effect_pools::splash_clip_name(lane, variant_idx);
-    anim.time_scale = (24.0 + fps_delta).max(12.0) / 24.0;
+    anim.time_scale = (base_fps + fps_delta).max(12.0) / base_fps;
     anim.play(key.as_ref(), true, false, 0);
     sync_atlas_frame(sprite, anim);
     vis.lane = lane;
@@ -249,6 +276,62 @@ fn apply_frame_transform(
     );
 }
 
+/// Converts opaque black-keyed RGB spritesheets (`blendMode: "screen"` / `"add"`)
+/// into luminance-derived alpha in-memory so Bevy's HUD `Sprite` pipeline renders them
+/// without black fringe boxes and without modifying source image files on disk.
+fn convert_screen_image_to_alpha(img: &mut Image) {
+    let is_srgb = match img.texture_descriptor.format {
+        TextureFormat::Rgba8UnormSrgb => true,
+        TextureFormat::Rgba8Unorm => false,
+        _ => return,
+    };
+    let Some(data) = img.data.as_mut() else {
+        return;
+    };
+    for pixel in data.chunks_exact_mut(4) {
+        screen_pixel_to_alpha(pixel, is_srgb);
+    }
+}
+
+fn screen_pixel_to_alpha(pixel: &mut [u8], is_srgb: bool) {
+    if pixel[3] == 0 {
+        return;
+    }
+    if is_srgb {
+        let lin = LinearRgba::from(Color::srgba_u8(pixel[0], pixel[1], pixel[2], 255));
+        let peak = lin.red.max(lin.green).max(lin.blue).clamp(0.0, 1.0);
+        if peak <= 0.0 {
+            pixel[3] = 0;
+            return;
+        }
+        let inv = 1.0 / peak;
+        let out_bytes = Srgba::from(LinearRgba::new(
+            (lin.red * inv).clamp(0.0, 1.0),
+            (lin.green * inv).clamp(0.0, 1.0),
+            (lin.blue * inv).clamp(0.0, 1.0),
+            1.0,
+        ))
+        .to_u8_array();
+        pixel[0] = out_bytes[0];
+        pixel[1] = out_bytes[1];
+        pixel[2] = out_bytes[2];
+        pixel[3] = (f32::from(pixel[3]) * peak).round().clamp(0.0, 255.0) as u8;
+    } else {
+        let peak = pixel[0].max(pixel[1]).max(pixel[2]);
+        if peak == 0 {
+            pixel[3] = 0;
+            return;
+        }
+        let inv = 255.0 / f32::from(peak);
+        pixel[0] = (f32::from(pixel[0]) * inv).round().clamp(0.0, 255.0) as u8;
+        pixel[1] = (f32::from(pixel[1]) * inv).round().clamp(0.0, 255.0) as u8;
+        pixel[2] = (f32::from(pixel[2]) * inv).round().clamp(0.0, 255.0) as u8;
+        pixel[3] = ((f32::from(pixel[3]) * f32::from(peak)) / 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+    }
+}
+
 fn xorshift32(state: &mut u32) -> u32 {
     let mut x = *state;
     x ^= x << 13;
@@ -257,4 +340,58 @@ fn xorshift32(state: &mut u32) -> u32 {
     *state = x;
     x
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::animations::SparrowAtlas;
+    use crate::play::notes::skin::NoteStyle;
+
+    #[test]
+    fn pixel_noteskin_splashes_and_hold_covers_are_aligned() {
+        let style = NoteStyle::load("pixel").expect("pixel noteskin should load");
+        assert_eq!(style.splash_blend_mode, FunkinBlendMode::Screen);
+        assert!((style.splash_fps - 33.0).abs() <= 0.01);
+        assert!((style.splash_offset[0] - 0.0).abs() <= 0.01);
+        assert!((style.splash_offset[1] - (-3.5)).abs() <= 0.01);
+
+        for dir_cfg in &style.hold_cover_dirs {
+            assert_eq!(dir_cfg.start_anim, "loop0000");
+            assert_eq!(dir_cfg.hold_anim, "loop");
+            assert_eq!(dir_cfg.end_anim, "explode");
+        }
+
+        let hc_xml = SparrowAtlas::from_file(style.disk_xml(&style.hold_cover_dirs[0].path))
+            .expect("pixel-note-hold-cover.xml should parse");
+        let loop0 = hc_xml
+            .frames
+            .iter()
+            .find(|f| f.name == "loop0000")
+            .expect("loop0000 frame must exist");
+        let f_off = loop0.trim_center_offset();
+        // Inside the 36x32 trimmed tile, wave pixels sit at (-1.5, -3.0) from tile center;
+        // combining style.hold_cover_offset + f_off should keep the wave centered on lane_x
+        // and directly over the sustain clip edge at lane_y.
+        let wave_dx = (style.hold_cover_offset[0] + f_off[0] - 1.5) * style.hold_cover_scale;
+        let wave_dy = (-style.hold_cover_offset[1] + f_off[1] - 3.0) * style.hold_cover_scale;
+        assert!(wave_dx.abs() <= 2.0, "expected pixel wave centered horizontally, got dx={wave_dx}");
+        assert!(
+            (0.0..=6.0).contains(&wave_dy),
+            "expected pixel wave over sustain cut edge, got dy={wave_dy}"
+        );
+
+        let mut dark_fringe = [8u8, 8, 8, 255];
+        screen_pixel_to_alpha(&mut dark_fringe, true);
+        assert!(
+            dark_fringe[3] <= 2,
+            "near-black screen pixel should become almost transparent, got alpha={}",
+            dark_fringe[3]
+        );
+
+        let mut bright = [246u8, 255, 230, 255];
+        screen_pixel_to_alpha(&mut bright, true);
+        assert_eq!(bright, [246, 255, 230, 255]);
+    }
+}
+
 

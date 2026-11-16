@@ -51,6 +51,19 @@ pub enum FunkinBlendMode {
     Screen = 3,
 }
 
+impl FunkinBlendMode {
+    /// Parses a Funkin/Haxe blend mode identifier (`normal`, `add`, `multiply`, `screen`).
+    #[allow(dead_code)] // Used by oxide crate targets; shader_parity_tests imports defs.rs via #[path].
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "add" | "additive" => Self::Add,
+            "multiply" | "mult" => Self::Multiply,
+            "screen" => Self::Screen,
+            _ => Self::Normal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CharShaderRole {
     Player,

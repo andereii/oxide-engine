@@ -50,12 +50,13 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
             .first()
             .and_then(|v| v.indices.first().copied())
             .unwrap_or(0);
+        let splash_fps = style.splash_fps.max(1.0);
         for slot in 0..NOTE_SPLASH_CAP {
             let mut anim = AnimationController::default();
             for (lane, variants) in assets.splash_variants.iter().enumerate() {
                 for (v_idx, clip) in variants.iter().enumerate() {
                     let key = splash_clip_name(lane, v_idx);
-                    add_clip(&mut anim, key.as_ref(), clip, 24.0, false);
+                    add_clip(&mut anim, key.as_ref(), clip, splash_fps, false);
                 }
             }
             let mut sprite = Sprite::from_atlas_image(
@@ -68,7 +69,7 @@ pub fn spawn_effect_pools(commands: &mut Commands, assets: &NoteskinAssets) {
             sprite.color = Color::srgba(1.0, 1.0, 1.0, style.splash_alpha);
             commands.spawn((
                 sprite,
-                Transform::from_xyz(0.0, -900.0, 15.0).with_scale(Vec3::splat(style.splash_scale)),
+                Transform::from_xyz(0.0, -900.0, 15.1).with_scale(Vec3::splat(style.splash_scale)),
                 Visibility::Hidden,
                 anim,
                 hud_render_layer(),

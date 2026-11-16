@@ -1317,12 +1317,7 @@ fn builtin_mode_flag(name: &str) -> Option<u32> {
 }
 
 fn parse_blend_mode(raw: &str) -> FunkinBlendMode {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "add" | "additive" => FunkinBlendMode::Add,
-        "multiply" | "mult" => FunkinBlendMode::Multiply,
-        "screen" => FunkinBlendMode::Screen,
-        _ => FunkinBlendMode::Normal,
-    }
+    FunkinBlendMode::parse(raw)
 }
 
 fn apply_param_to_config(cfg: &mut SpriteShaderConfig, key: &str, values: [f32; 4]) {
