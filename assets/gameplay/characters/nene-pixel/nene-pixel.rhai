@@ -19,14 +19,14 @@ fn onCreate() {
     if target != "" {
         let tl = char_top_left(target);
         let gz = char_z(target);
-        let ax = tl[0] + 296.0;
-        let ay = tl[1] + 430.0;
+        let ax = tl[0] - 96.0;
+        let ay = tl[1] + 410.0;
 
         spawn_sparrow(
             "abot_pixel_head",
             "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-head",
-            ax - 325.0,
-            ay + 72.0,
+            ax - 165.0,
+            ay + 65.0,
             gz - 0.10,
             [
                 #{ name: "toleft", prefix: "toleft0", fps: 24.0, looped: false },
@@ -39,8 +39,8 @@ fn onCreate() {
         spawn_sparrow(
             "abot_pixel_speaker",
             "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-speaker",
-            ax - 78.0,
-            ay + 9.0,
+            ax - 150.0,
+            ay + 18.0,
             gz - 0.08,
             [#{ name: "idle", prefix: "bop", fps: 24.0, looped: false }]
         );
@@ -49,8 +49,8 @@ fn onCreate() {
         spawn_sprite_tl(
             "abot_pixel_back",
             "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-back.png",
-            ax - 55.0,
-            ay,
+            ax + 54.0,
+            ay + 30.0,
             gz - 0.06
         );
         prop_scale("abot_pixel_back", 6.1, 6.0);

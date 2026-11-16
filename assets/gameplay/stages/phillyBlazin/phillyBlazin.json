@@ -27,8 +27,8 @@
           "visible": true,
           "opacity": 1,
           "position": [
-            -237,
-            150
+            -282,
+          100
           ],
           "camera_Offset": [
             500,
@@ -46,8 +46,8 @@
           "visible": true,
           "opacity": 1,
           "position": [
-            -237,
-            100
+            0,
+            0
           ],
           "camera_Offset": [
             -350,

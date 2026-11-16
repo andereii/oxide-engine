@@ -4,6 +4,8 @@ mod systems;
 
 use bevy::prelude::*;
 
+pub use components::LoadingOverlayCamera;
+
 /// Configuration for the reusable Funkin loading screen overlay
 /// (`mic-stand.png` progress reveal + animated loading character).
 #[derive(Debug, Clone, Copy)]

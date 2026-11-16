@@ -104,11 +104,7 @@ fn compute_hud_text_layout(state: &PlayState) -> (String, Anchor, Vec3) {
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
     };
     let by = SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0);
-    let text = if state.is_bot_play_mode && state.custom_score_text.is_none() {
-        state.score_text.clone()
-    } else {
-        format!("{}  |  {}", state.score_text, state.status_message)
-    };
+    let text = state.score_text.clone();
     (text, Anchor::TOP_CENTER, Vec3::new(0.0, by, 10.8))
 }
 

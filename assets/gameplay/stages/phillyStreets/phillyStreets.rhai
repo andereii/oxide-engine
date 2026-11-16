@@ -1,79 +1,171 @@
-// Philly Streets stage script (ported from phillyStreets.hxc to oxide-engine Rhai)
+// Philly Streets stage script (ported from Funkin phillyStreets.hxc)
 
-fn reset_car_left(state) {
-    state.car_waiting = false;
-    state.car_interruptable = true;
-    prop_pos("phillyCars", 1200.0, 818.0);
-    prop_angle("phillyCars", 0.0);
-}
-
-fn reset_car_right(state) {
-    state.car2_interruptable = true;
-    prop_pos("phillyCars2", 1200.0, 818.0);
-    prop_angle("phillyCars2", 0.0);
-}
-
-fn finish_car1() {
-    let dur = rand_range(1.8, 3.0);
-    tween_prop("phillyCars", "x", 2795.0, dur, "sineIn");
-    tween_prop("phillyCars", "y", 1018.0, dur, "sineIn");
-    tween_prop("phillyCars", "angle", 18.0, dur, "sineIn");
-    after(dur + 0.2, "free_car1");
-}
-
-fn free_car1() {
-    this.car_interruptable = true;
-}
-
-fn free_car2() {
-    this.car2_interruptable = true;
-}
-
-fn on_car1_stopped() {
-    this.car_waiting = true;
-    if !this.lights_stop {
-        this.car_waiting = false;
-        finish_car1();
+fn new_car_state() {
+    #{
+        active: false,
+        delay: 0.0,
+        elapsed: 0.0,
+        duration: 1.0,
+        ease: "linear",
+        p0x: 1200.0, p0y: 818.0,
+        p1x: 1200.0, p1y: 818.0,
+        p2x: 1200.0, p2y: 818.0,
+        r0: 0.0, r1: 0.0,
+        extra_x: 0.0, extra_y: 0.0,
+        on_done: ""
     }
 }
 
-fn drive_car_normal(state) {
-    state.car_interruptable = false;
+fn variant_params(variant, is_lights) {
+    if variant == 1 {
+        return [0.0, 0.0, rand_range(1.0, 1.7)];
+    }
+    if variant == 2 {
+        let dur = if is_lights { rand_range(0.9, 1.5) } else { rand_range(0.6, 1.2) };
+        return [20.0, -15.0, dur];
+    }
+    if variant == 3 {
+        return [30.0, 50.0, rand_range(1.5, 2.5)];
+    }
+    [10.0, 60.0, rand_range(1.5, 2.5)]
+}
+
+fn eval_ease(u, ease) {
+    if ease == "cubeOut" {
+        let k = 1.0 - u;
+        return 1.0 - k * k * k;
+    }
+    if ease == "sineIn" {
+        return 1.0 - (u * 1.5707963267948966).cos();
+    }
+    u
+}
+
+fn make_finish_car1(prev_car) {
+    let ex = prev_car.extra_x;
+    let ey = prev_car.extra_y;
+    let ox = 306.6 + ex;
+    let oy = 168.3 + ey;
+    #{
+        active: true,
+        delay: rand_range(0.2, 1.2),
+        elapsed: 0.0,
+        duration: rand_range(1.8, 3.0),
+        ease: "sineIn",
+        p0x: 1950.0 - ox - 80.0, p0y: 980.0 - oy + 15.0,
+        p1x: 2400.0 - ox,        p1y: 980.0 - oy - 50.0,
+        p2x: 3102.0 - ox,        p2y: 1187.0 - oy + 40.0,
+        r0: -5.0, r1: 18.0,
+        extra_x: ex, extra_y: ey,
+        on_done: "free1"
+    }
+}
+
+fn make_car_normal() {
     let v = rand_int(1, 4);
     anim("phillyCars", "car" + v);
-    let dur = rand_range(1.0, 2.2);
-    prop_pos("phillyCars", 1263.4, 850.7);
+    let vp = variant_params(v, false);
+    let ex = vp[0];
+    let ey = vp[1];
+    let dur = vp[2];
+    let ox = 306.6 + ex;
+    let oy = 168.3 + ey;
+    let car = #{
+        active: true,
+        delay: 0.0,
+        elapsed: 0.0,
+        duration: dur,
+        ease: "linear",
+        p0x: 1570.0 - ox, p0y: 1049.0 - oy - 30.0,
+        p1x: 2400.0 - ox, p1y: 980.0 - oy - 50.0,
+        p2x: 3102.0 - ox, p2y: 1187.0 - oy + 40.0,
+        r0: -8.0, r1: 18.0,
+        extra_x: ex, extra_y: ey,
+        on_done: "free1"
+    };
+    prop_pos("phillyCars", car.p0x, car.p0y);
     prop_angle("phillyCars", -8.0);
-    tween_prop("phillyCars", "x", 2795.4, dur, "linear");
-    tween_prop("phillyCars", "y", 1018.7, dur, "linear");
-    tween_prop("phillyCars", "angle", 18.0, dur, "linear");
-    after(dur, "free_car1");
+    car
 }
 
-fn drive_car_lights(state) {
-    state.car_interruptable = false;
+fn make_car_lights() {
     let v = rand_int(1, 4);
     anim("phillyCars", "car" + v);
-    let dur = rand_range(1.0, 2.2);
-    prop_pos("phillyCars", 1173.4, 860.7);
+    let vp = variant_params(v, true);
+    let ex = vp[0];
+    let ey = vp[1];
+    let dur = vp[2];
+    let ox = 306.6 + ex;
+    let oy = 168.3 + ey;
+    let car = #{
+        active: true,
+        delay: 0.0,
+        elapsed: 0.0,
+        duration: dur,
+        ease: "cubeOut",
+        p0x: 1500.0 - ox - 20.0, p0y: 1049.0 - oy - 20.0,
+        p1x: 1770.0 - ox - 80.0, p1y: 994.0 - oy + 10.0,
+        p2x: 1950.0 - ox - 80.0, p2y: 980.0 - oy + 15.0,
+        r0: -7.0, r1: -5.0,
+        extra_x: ex, extra_y: ey,
+        on_done: "stopped1"
+    };
+    prop_pos("phillyCars", car.p0x, car.p0y);
     prop_angle("phillyCars", -7.0);
-    tween_prop("phillyCars", "x", 1563.4, dur, "cubeOut");
-    tween_prop("phillyCars", "y", 826.7, dur, "cubeOut");
-    tween_prop("phillyCars", "angle", -5.0, dur, "cubeOut");
-    after(dur, "on_car1_stopped");
+    car
 }
 
-fn drive_car_back(state) {
-    state.car2_interruptable = false;
+fn make_car_back() {
     let v = rand_int(1, 4);
     anim("phillyCars2", "car" + v);
-    let dur = rand_range(1.0, 2.2);
-    prop_pos("phillyCars2", 2795.4, 1018.7);
+    let vp = variant_params(v, false);
+    let ex = vp[0];
+    let ey = vp[1];
+    let dur = vp[2];
+    let ox = 306.6 + ex;
+    let oy = 168.3 + ey;
+    let car = #{
+        active: true,
+        delay: 0.0,
+        elapsed: 0.0,
+        duration: dur,
+        ease: "linear",
+        p0x: 3102.0 - ox, p0y: 1127.0 - oy + 60.0,
+        p1x: 2400.0 - ox, p1y: 980.0 - oy - 30.0,
+        p2x: 1570.0 - ox, p2y: 1049.0 - oy - 10.0,
+        r0: 18.0, r1: -8.0,
+        extra_x: ex, extra_y: ey,
+        on_done: "free2"
+    };
+    prop_pos("phillyCars2", car.p0x, car.p0y);
     prop_angle("phillyCars2", 18.0);
-    tween_prop("phillyCars2", "x", 1263.4, dur, "linear");
-    tween_prop("phillyCars2", "y", 870.7, dur, "linear");
-    tween_prop("phillyCars2", "angle", -8.0, dur, "linear");
-    after(dur, "free_car2");
+    car
+}
+
+fn step_car(car, prop_name, delta_s) {
+    if !car.active { return car; }
+    if car.delay > 0.0 {
+        car.delay -= delta_s;
+        if car.delay > 0.0 { return car; }
+        car.elapsed += -car.delay;
+        car.delay = 0.0;
+    } else {
+        car.elapsed += delta_s;
+    }
+    let u = car.elapsed / car.duration;
+    if u > 1.0 { u = 1.0; }
+    let t = eval_ease(u, car.ease);
+    let omt = 1.0 - t;
+    let x = omt * omt * car.p0x + 2.0 * omt * t * car.p1x + t * t * car.p2x;
+    let y = omt * omt * car.p0y + 2.0 * omt * t * car.p1y + t * t * car.p2y;
+    let ang = car.r0 + (car.r1 - car.r0) * t;
+    prop_pos(prop_name, x, y);
+    prop_angle(prop_name, ang);
+
+    if u >= 1.0 {
+        car.active = false;
+    }
+    car
 }
 
 fn onCreate() {
@@ -84,6 +176,12 @@ fn onCreate() {
     this.car_waiting = false;
     this.car_interruptable = true;
     this.car2_interruptable = true;
+    this.car1 = new_car_state();
+    this.car2 = new_car_state();
+    prop_pos("phillyCars", 1200.0, 818.0);
+    prop_angle("phillyCars", 0.0);
+    prop_pos("phillyCars2", 1200.0, 818.0);
+    prop_angle("phillyCars2", 0.0);
 
     let s = song();
     this.rain_start = 0.0;
@@ -97,9 +195,34 @@ fn onCreate() {
     }
 
     set_rain(3.6, this.rain_start, "#6680CC");
-    reset_car_left(this);
-    reset_car_right(this);
     anim("phillyTraffic", "togreen");
+}
+
+fn onUpdate() {
+    let delta_s = dt();
+    if delta_s <= 0.0 { return; }
+
+    if this.car1.active {
+        this.car1 = step_car(this.car1, "phillyCars", delta_s);
+        if !this.car1.active {
+            if this.car1.on_done == "free1" {
+                this.car_interruptable = true;
+            } else if this.car1.on_done == "stopped1" {
+                this.car_waiting = true;
+                if !this.lights_stop {
+                    this.car_waiting = false;
+                    this.car1 = make_finish_car1(this.car1);
+                }
+            }
+        }
+    }
+
+    if this.car2.active {
+        this.car2 = step_car(this.car2, "phillyCars2", delta_s);
+        if !this.car2.active && this.car2.on_done == "free2" {
+            this.car2_interruptable = true;
+        }
+    }
 }
 
 fn onBeatHit() {
@@ -107,15 +230,17 @@ fn onBeatHit() {
     let next_change = this.last_change + this.change_interval;
 
     if b != next_change && this.car_interruptable && this.cars_enabled && rand_int(0, 99) < 10 {
+        this.car_interruptable = false;
         if !this.lights_stop {
-            drive_car_normal(this);
+            this.car1 = make_car_normal();
         } else {
-            drive_car_lights(this);
+            this.car1 = make_car_lights();
         }
     }
 
     if b != next_change && this.car2_interruptable && !this.lights_stop && this.cars_enabled && rand_int(0, 99) < 10 {
-        drive_car_back(this);
+        this.car2_interruptable = false;
+        this.car2 = make_car_back();
     }
 
     if b == next_change {
@@ -129,7 +254,7 @@ fn onBeatHit() {
             this.change_interval = 30;
             if this.car_waiting {
                 this.car_waiting = false;
-                finish_car1();
+                this.car1 = make_finish_car1(this.car1);
             }
         }
     }
@@ -143,8 +268,15 @@ fn onSongRetry() {
     this.last_change = 0;
     this.change_interval = 8;
     this.lights_stop = false;
+    this.car_waiting = false;
+    this.car_interruptable = true;
+    this.car2_interruptable = true;
+    this.car1 = new_car_state();
+    this.car2 = new_car_state();
+    prop_pos("phillyCars", 1200.0, 818.0);
+    prop_angle("phillyCars", 0.0);
+    prop_pos("phillyCars2", 1200.0, 818.0);
+    prop_angle("phillyCars2", 0.0);
     anim("phillyTraffic", "togreen");
-    reset_car_left(this);
-    reset_car_right(this);
     set_rain(3.6, this.rain_start, "#6680CC");
 }

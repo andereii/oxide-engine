@@ -1,4 +1,4 @@
-﻿use std::collections::BTreeMap;
+use std::collections::BTreeMap;
 
 use crate::play::notes::strum::Strumline;
 use crate::scripting::{ScriptMutableState, ScriptNoteSnapshot, ScriptStateSnapshot};

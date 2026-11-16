@@ -70,6 +70,21 @@ pub struct Tallies {
     pub total_notes: u32,
 }
 
+impl Tallies {
+    /// Ported from Funkin's `Scoring.tallyCompletion` (`(sick + good - missed) / judged`),
+    /// evaluated against notes judged so far so live accuracy starts at `100.0%` and matches
+    /// `Scoring.tallyCompletion` by the end of the song.
+    pub fn accuracy_percent(&self) -> f64 {
+        let judged = self.sick + self.good + self.bad + self.shit + self.missed;
+        if judged == 0 {
+            return 100.0;
+        }
+        let raw = (f64::from(self.sick) + f64::from(self.good) - f64::from(self.missed))
+            / f64::from(judged);
+        raw.clamp(0.0, 1.0) * 100.0
+    }
+}
+
 pub fn judge_note(note_diff_ms: f64) -> Judgement {
     let abs_timing = note_diff_ms.abs();
     if abs_timing <= PBOT1_SICK_THRESHOLD {

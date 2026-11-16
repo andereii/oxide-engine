@@ -6,6 +6,7 @@ use crate::play::characters::{CharacterActor, CharacterRole};
 use crate::play::scene::PlayState;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual, StageResource};
 use crate::play::types::{PlayPhase, SongEventData};
+use crate::ui::LoadingOverlayCamera;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::defs::{
@@ -49,7 +50,10 @@ pub fn update_stage_shaders(
     >,
     dynamic_props: Query<(Entity, &DynamicScriptProp)>,
     actors: Query<&CharacterActor>,
-    mut cameras: Query<(Entity, Option<&mut RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
+    mut cameras: Query<
+        (Entity, Option<&mut RainCameraEffect>),
+        (With<Camera2d>, Without<HudCamera>, Without<LoadingOverlayCamera>),
+    >,
 ) {
     if state.needs_reset {
         let stage_id = state.chart.stage_id.clone();

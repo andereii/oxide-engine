@@ -25,7 +25,7 @@ pub(super) fn loading_render_layer() -> RenderLayers {
 }
 
 #[derive(Component)]
-pub(super) struct LoadingOverlayCamera;
+pub struct LoadingOverlayCamera;
 
 #[derive(Component)]
 pub(super) struct LoadingBgVisual;

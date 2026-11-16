@@ -1,4 +1,4 @@
-﻿use rhai::{Dynamic, Engine, EvalAltResult};
+use rhai::{Dynamic, Engine, EvalAltResult};
 
 use crate::scripting::api::{ScriptCommand, parse_hex_rgba};
 use crate::scripting::backend::context::{dyn_to_f64, dyn_to_usize, with_ctx};

@@ -1,3 +1,5 @@
 pub mod loading;
 
-pub use loading::{LoadingScreenConfig, LoadingScreenPlugin, LoadingScreenState};
+pub use loading::{
+    LoadingOverlayCamera, LoadingScreenConfig, LoadingScreenPlugin, LoadingScreenState,
+};

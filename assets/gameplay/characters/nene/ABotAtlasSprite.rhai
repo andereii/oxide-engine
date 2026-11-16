@@ -16,7 +16,7 @@ fn new_abot_state(owner_id) {
     }
 }
 
-fn spawn_abot(target, offset_x, offset_y) {
+fn spawn_abot_with_body(target, offset_x, offset_y, body_asset) {
     let tl = char_top_left(target);
     let gz = char_z(target);
     let ax = tl[0] + offset_x;
@@ -36,14 +36,19 @@ fn spawn_abot(target, offset_x, offset_y) {
         ]
     );
     play_anim_frame("abot_pupil", "lookRight", 14);
-    spawn_atlas("abot_body", "gameplay/characters/nene/abot-system", ax, ay, gz - 0.02, []);
+    spawn_atlas("abot_body", body_asset, ax, ay, gz - 0.02, []);
     play_anim_frame("abot_body", "idle", 1);
 
     [ax, ay, gz]
 }
 
+fn spawn_abot(target, offset_x, offset_y) {
+    spawn_abot_with_body(target, offset_x, offset_y, "gameplay/characters/nene/abot-system")
+}
+
 fn dance_abot() {
     play_anim_frame("abot_body", "idle", 1);
+    play_anim_frame("abot_body_underlay", "idle", 1);
 }
 
 fn move_pupils(state, dir) {

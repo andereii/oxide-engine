@@ -82,22 +82,22 @@ fn onSongRetry() {
     }
 }
 
-fn onNoteHit(ev) {
+fn handle_blazin_hit(state, ev) {
     let target = get_target();
-    if target == "" { return; }
+    if target == "" { return state; }
     let kind = ev.get("kind");
-    if kind == () || !kind.starts_with("weekend-1-") { return; }
+    if kind == () || !kind.starts_with("weekend-1-") { return state; }
 
     let judge = ev.get("judgement");
     if judge == () { judge = ""; }
     if is_poor_judgement(judge) && is_player_low_health() && rand_int(1, 100) <= 30 {
         play_uppercut_prep(target);
-        return;
+        return state;
     }
 
-    if this.cant_uppercut {
-        this.alternate = play_punch_high(this.alternate, target);
-        return;
+    if state.cant_uppercut {
+        state.alternate = play_punch_high(state.alternate, target);
+        return state;
     }
 
     if kind == "weekend-1-punchlow" { play_hit_low(target); }
@@ -109,10 +109,10 @@ fn onNoteHit(ev) {
     else if kind == "weekend-1-punchhighdodged" { play_dodge(target); }
     else if kind == "weekend-1-punchhighspin" { play_spin(target); }
     else if kind == "weekend-1-blockhigh" || kind == "weekend-1-blockspin" || kind == "weekend-1-dodgehigh" || kind == "weekend-1-dodgespin" || kind == "weekend-1-hithigh" || kind == "weekend-1-hitspin" {
-        this.alternate = play_punch_high(this.alternate, target);
+        state.alternate = play_punch_high(state.alternate, target);
     }
     else if kind == "weekend-1-blocklow" || kind == "weekend-1-dodgelow" || kind == "weekend-1-hitlow" {
-        this.alternate = play_punch_low(this.alternate, target);
+        state.alternate = play_punch_low(state.alternate, target);
     }
     else if kind == "weekend-1-picouppercutprep" {
         // Darnell keeps current prep/idle until uppercut resolves
@@ -126,7 +126,20 @@ fn onNoteHit(ev) {
     else if kind == "weekend-1-tauntforce" { play_pissed(target); }
     else if kind == "weekend-1-reversefakeout" { play_fakeout(target); }
 
-    this.cant_uppercut = false;
+    state.cant_uppercut = false;
+    state
+}
+
+fn onNoteHit(ev) {
+    let next = handle_blazin_hit(#{ alternate: this.alternate, cant_uppercut: this.cant_uppercut }, ev);
+    this.alternate = next.alternate;
+    this.cant_uppercut = next.cant_uppercut;
+}
+
+fn onOpponentNoteHit(ev) {
+    let next = handle_blazin_hit(#{ alternate: this.alternate, cant_uppercut: this.cant_uppercut }, ev);
+    this.alternate = next.alternate;
+    this.cant_uppercut = next.cant_uppercut;
 }
 
 fn onNoteMiss(ev) {

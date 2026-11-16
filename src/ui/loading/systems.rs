@@ -36,12 +36,17 @@ pub(super) fn sync_loading_screen(
     despawn_loading_entities(&mut commands, &mut runtime);
 
     let layer = loading_render_layer();
+    let clear_color = if state.config().transparent {
+        ClearColorConfig::None
+    } else {
+        ClearColorConfig::Custom(Color::BLACK)
+    };
     let cam = commands
         .spawn((
             Camera2d,
             Camera {
                 order: LOADING_CAMERA_ORDER,
-                clear_color: ClearColorConfig::None,
+                clear_color,
                 ..default()
             },
             Msaa::Off,

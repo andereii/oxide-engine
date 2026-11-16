@@ -8,8 +8,20 @@ fn viz_asset_path() {
     "gameplay/characters/nene/abot-viz"
 }
 
-fn viz_offsets() {
-    [50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0]
+fn viz_offsets_x(is_pixel) {
+    if is_pixel {
+        [0.0, 42.0, 48.0, 54.0, 60.0, 36.0, 42.0]
+    } else {
+        [0.0, 59.0, 56.0, 66.0, 54.0, 52.0, 51.0]
+    }
+}
+
+fn viz_offsets_y(is_pixel) {
+    if is_pixel {
+        [0.0, -12.0, -6.0, 0.0, 0.0, 6.0, 12.0]
+    } else {
+        [0.0, -8.0, -3.5, -0.4, 0.5, 4.7, 7.0]
+    }
 }
 
 fn new_viz_state(is_pixel) {
@@ -27,28 +39,33 @@ fn spawn_viz(ax, ay, gz, is_pixel) {
     } else {
         "gameplay/characters/nene/abot-viz"
     };
-    let base_x = if is_pixel { ax - 162.0 } else { ax + 207.0 };
-    let base_y = if is_pixel { ay + 16.0 } else { ay + 84.0 };
-    let step_x = if is_pixel { 36.0 } else { 50.0 };
+    let base_x = if is_pixel { ax + 66.0 } else { ax + 207.0 };
+    let base_y = if is_pixel { ay + 48.0 } else { ay + 84.0 };
+    let dx = viz_offsets_x(is_pixel);
+    let dy = viz_offsets_y(is_pixel);
+    let acc_x = 0.0;
+    let acc_y = 0.0;
 
-    let i = 1;
-    while i <= 7 {
-        let id = "abot_viz_" + i;
-        let x = base_x + (i - 1) * step_x;
+    let idx = 0;
+    while idx < 7 {
+        acc_x += dx[idx];
+        acc_y += dy[idx];
+        let bar_num = idx + 1;
+        let id = "abot_viz_" + bar_num;
         spawn_sparrow(
             id,
             asset,
-            x,
-            base_y,
+            base_x + acc_x,
+            base_y + acc_y,
             gz - 0.04,
-            [#{ name: "idle", prefix: "viz" + i, fps: 24.0, looped: false }]
+            [#{ name: "idle", prefix: "viz" + bar_num, fps: 24.0, looped: false }]
         );
         if is_pixel {
             prop_scale(id, 6.0, 6.0);
         }
         play_anim_frame(id, "idle", 5);
-        prop_alpha(id, 0.0);
-        i += 1;
+        prop_visible(id, false);
+        idx += 1;
     }
 }
 
@@ -58,6 +75,7 @@ fn start_viz(state) {
     let i = 1;
     while i <= 7 {
         prop_alpha("abot_viz_" + i, 1.0);
+        prop_visible("abot_viz_" + i, false);
         i += 1;
     }
     state
@@ -69,6 +87,7 @@ fn reset_viz(state) {
     let i = 1;
     while i <= 7 {
         prop_alpha("abot_viz_" + i, 0.0);
+        prop_visible("abot_viz_" + i, false);
         i += 1;
     }
     state
@@ -78,16 +97,21 @@ fn pulse_viz(state) {
     if !state.active { return; }
     let i = 1;
     while i <= 7 {
-        let frame = 5;
-        if i <= 2 {
-            // Low-frequency outer bass bars emphasize deeper excursions.
-            frame = rand_int(2, 4);
+        // Level in 0..=6 matching ABotVis.hx: 0 = hidden (silent), 1..=6 -> frame 5..=0.
+        let level = if i <= 2 {
+            rand_int(2, 5)
         } else if i <= 4 {
-            frame = rand_int(3, 5);
+            rand_int(1, 4)
         } else {
-            frame = if rand_int(0, 3) == 0 { rand_int(2, 3) } else { rand_int(4, 5) };
+            rand_int(0, 3)
+        };
+        let id = "abot_viz_" + i;
+        if level <= 0 {
+            prop_visible(id, false);
+        } else {
+            prop_visible(id, true);
+            play_anim_frame(id, "idle", 6 - level);
         }
-        play_anim_frame("abot_viz_" + i, "idle", frame);
         i += 1;
     }
 }

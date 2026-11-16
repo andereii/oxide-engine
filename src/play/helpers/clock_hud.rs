@@ -132,9 +132,16 @@ impl PlayState {
             }
             return;
         }
-        let key = (self.song_score.round() as i64, self.tallies.combo, self.tallies.missed, ((self.health / HEALTH_MAX) * 100.0).round() as i32);
+        let acc_tenths = (self.tallies.accuracy_percent() * 10.0).round() as i32;
+        let key = (self.song_score.round() as i64, self.tallies.combo, self.tallies.missed, acc_tenths);
         if self.last_hud_key == key { return; }
         self.last_hud_key = key;
-        self.score_text = format!("Score: {} | Combo: {} | Misses: {} | Health: {}%", key.0, key.1, key.2, key.3);
+        self.score_text = format!(
+            "Score: {} | Accuracy: {:.1}% | Misses: {} | Combo: {}",
+            key.0,
+            f64::from(acc_tenths) / 10.0,
+            key.2,
+            key.1,
+        );
     }
 }

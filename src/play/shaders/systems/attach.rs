@@ -6,6 +6,7 @@ use crate::play::camera::hud::HudCamera;
 use crate::play::characters::CharacterActor;
 use crate::play::scene::PlayState;
 use crate::play::stage::{StageCompositeProp, StagePropVisual};
+use crate::ui::LoadingOverlayCamera;
 
 use super::super::defs::{stage_character_initial_tint, stage_character_shader, stage_prop_shader};
 use super::super::material::FunkinSpriteMaterial;
@@ -26,7 +27,10 @@ pub fn attach_stage_and_character_shaders(
     props: Query<(Entity, &StagePropVisual, Option<&StageCompositeProp>), Without<ManagedSpriteShader>>,
     mut actors: Query<&mut CharacterActor>,
     char_shaders: Query<(), With<ManagedSpriteShader>>,
-    cameras: Query<(Entity, Option<&RainCameraEffect>), (With<Camera2d>, Without<HudCamera>)>,
+    cameras: Query<
+        (Entity, Option<&RainCameraEffect>),
+        (With<Camera2d>, Without<HudCamera>, Without<LoadingOverlayCamera>),
+    >,
 ) {
     let stage_id = state.chart.stage_id.clone();
     let song_id = state.chart.song_id.clone();
