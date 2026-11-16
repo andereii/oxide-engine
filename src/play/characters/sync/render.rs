@@ -85,6 +85,9 @@ pub(super) fn sync_actor_visuals(
                 }
             }
             hide_entities(&actor.piece_entities, parts);
+            if let Some(ref rt) = actor.composite_rt {
+                hide_entities(&[rt.quad_entity], parts);
+            }
         }
         Some(ClipVisual::Composite {
             source_idx,
@@ -97,26 +100,91 @@ pub(super) fn sync_actor_visuals(
                 .get(actor.controller.frame_cursor)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            sync_composite_parts(
-                actor,
-                source_idx,
-                pieces,
-                clip.bounds_min,
-                clip.bounds_size,
-                stage_matrix,
-                scale,
-                flip,
-                anim_off,
-                tint,
-                cam_scroll_x,
-                cam_scroll_y,
-                zoom,
-                parts,
-            );
+            if let Some(ref rt) = actor.composite_rt {
+                let rt_origin = [
+                    SCREEN_WIDTH * 0.5,
+                    SCREEN_HEIGHT * 0.5 + actor.idle_size[1] * scale[1] * 0.5,
+                ];
+                sync_composite_parts(
+                    actor,
+                    source_idx,
+                    pieces,
+                    clip.bounds_min,
+                    clip.bounds_size,
+                    stage_matrix,
+                    scale,
+                    flip,
+                    anim_off,
+                    Color::WHITE,
+                    0.0,
+                    0.0,
+                    1.0,
+                    Some((rt_origin, 0.0)),
+                    parts,
+                );
+                if let Ok((mut sprite, mut tf, mut vis, aff_opt)) = parts.get_mut(rt.quad_entity) {
+                    if let Some(mut aff) = aff_opt
+                        && aff.active
+                    {
+                        aff.active = false;
+                    }
+                    let world_cx = actor.slot.position[0]
+                        + actor.data.offsets[0] * (1.0 + scale[0])
+                        - anim_off[0] * scale[0]
+                        - cam_scroll_x * actor.slot.scroll_factor[0];
+                    let world_cy = actor.slot.position[1]
+                        + actor.data.offsets[1] * (1.0 + scale[1])
+                        - anim_off[1] * scale[1]
+                        - cam_scroll_y * actor.slot.scroll_factor[1]
+                        - actor.idle_size[1] * scale[1] * 0.5;
+                    let bx = (world_cx - SCREEN_WIDTH * 0.5) * zoom;
+                    let by = (SCREEN_HEIGHT * 0.5 - world_cy) * zoom;
+                    let z_base = actor
+                        .mod_z
+                        .unwrap_or_else(|| stage_layer_z(actor.slot.layer, 0));
+                    set_sprite_color(&mut sprite, tint);
+                    set_sprite_flip(&mut sprite, false, false);
+                    set_transform_full(
+                        &mut tf,
+                        Vec3::new(bx, by, z_base),
+                        Vec3::new(zoom, zoom, 1.0),
+                        Quat::IDENTITY,
+                    );
+                    set_visibility(
+                        &mut vis,
+                        if actor_visible {
+                            Visibility::Visible
+                        } else {
+                            Visibility::Hidden
+                        },
+                    );
+                }
+            } else {
+                sync_composite_parts(
+                    actor,
+                    source_idx,
+                    pieces,
+                    clip.bounds_min,
+                    clip.bounds_size,
+                    stage_matrix,
+                    scale,
+                    flip,
+                    anim_off,
+                    tint,
+                    cam_scroll_x,
+                    cam_scroll_y,
+                    zoom,
+                    None,
+                    parts,
+                );
+            }
         }
         None => {
             hide_entities(&[actor.sheet_entity], parts);
             hide_entities(&actor.piece_entities, parts);
+            if let Some(ref rt) = actor.composite_rt {
+                hide_entities(&[rt.quad_entity], parts);
+            }
         }
     }
 
@@ -239,20 +307,27 @@ fn sync_composite_parts(
     cam_scroll_x: f32,
     cam_scroll_y: f32,
     zoom: f32,
+    rt_override: Option<([f32; 2], f32)>,
     parts: &mut CharPartsQuery,
 ) {
     let Some(src) = actor.sources.get(source_idx) else {
         hide_entities(&actor.piece_entities, parts);
         return;
     };
-    let screen_fx = actor.slot.position[0]
-        + actor.data.offsets[0] * (1.0 + scale[0])
-        - anim_off[0] * scale[0]
-        - cam_scroll_x * actor.slot.scroll_factor[0];
-    let screen_fy = actor.slot.position[1]
-        + actor.data.offsets[1] * (1.0 + scale[1])
-        - anim_off[1] * scale[1]
-        - cam_scroll_y * actor.slot.scroll_factor[1];
+    let (screen_fx, screen_fy) = if let Some((rt_origin, _)) = rt_override {
+        (rt_origin[0], rt_origin[1])
+    } else {
+        (
+            actor.slot.position[0]
+                + actor.data.offsets[0] * (1.0 + scale[0])
+                - anim_off[0] * scale[0]
+                - cam_scroll_x * actor.slot.scroll_factor[0],
+            actor.slot.position[1]
+                + actor.data.offsets[1] * (1.0 + scale[1])
+                - anim_off[1] * scale[1]
+                - cam_scroll_y * actor.slot.scroll_factor[1],
+        )
+    };
     let top_left = [
         screen_fx - actor.idle_size[0] * scale[0] * 0.5,
         screen_fy - actor.idle_size[1] * scale[1],
@@ -292,9 +367,13 @@ fn sync_composite_parts(
             continue;
         };
         let ([bx, by], cols) = compose_flx_piece_bevy_affine(piece, &params);
-        let base_z = actor
-            .mod_z
-            .unwrap_or_else(|| stage_layer_z(actor.slot.layer, 0));
+        let base_z = if let Some((_, rt_z)) = rt_override {
+            rt_z
+        } else {
+            actor
+                .mod_z
+                .unwrap_or_else(|| stage_layer_z(actor.slot.layer, 0))
+        };
         let pos = Vec3::new(bx, by, composite_piece_z(base_z, i));
         let (tex, layout) = src.atlas_pair(piece.spritemap_idx);
         set_sprite_atlas(&mut sprite, tex, layout, piece.sprite_index);

@@ -142,6 +142,7 @@ pub(super) fn execute_song_reload(
         for &piece in &actor.piece_entities {
             commands.entity(piece).despawn();
         }
+        actor.despawn_composite_rt(commands);
         for &trail_ent in &actor.trail_entities {
             commands.entity(trail_ent).despawn();
         }

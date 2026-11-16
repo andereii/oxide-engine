@@ -135,6 +135,7 @@ pub fn spawn_single_character_with_underlay(
         script_anim_override: false,
         sheet_entity,
         piece_entities,
+        composite_rt: None,
         trail: None,
         trail_entities: Vec::new(),
         mirror_of,

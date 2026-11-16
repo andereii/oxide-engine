@@ -117,6 +117,16 @@ pub struct CharacterUnderlayConfig {
     pub offset: [f32; 2],
 }
 
+pub const COMPOSITE_RT_SIZE: u32 = 1600;
+
+#[derive(Clone, Debug)]
+pub struct CompositeRenderTarget {
+    pub image: Handle<Image>,
+    pub camera_entity: Entity,
+    pub quad_entity: Entity,
+    pub render_layer: usize,
+}
+
 #[derive(Component)]
 #[allow(dead_code)]
 pub struct CharacterActor {
@@ -144,12 +154,23 @@ pub struct CharacterActor {
     pub script_anim_override: bool,
     pub sheet_entity: Entity,
     pub piece_entities: Vec<Entity>,
+    pub composite_rt: Option<CompositeRenderTarget>,
     pub trail: Option<CharacterTrailState>,
     pub trail_entities: Vec<Entity>,
     pub mirror_of: Option<CharacterUnderlayConfig>,
 }
 
 impl CharacterActor {
+    pub fn despawn_composite_rt(&self, commands: &mut Commands) {
+        if let Some(ref rt) = self.composite_rt {
+            if rt.camera_entity != Entity::PLACEHOLDER {
+                commands.entity(rt.camera_entity).despawn();
+            }
+            if rt.quad_entity != Entity::PLACEHOLDER {
+                commands.entity(rt.quad_entity).despawn();
+            }
+        }
+    }
     pub fn reset_character(&mut self) {
         self.bopper.dance_every = self.data.dance_every;
         self.bopper.can_play_other_anims = true;

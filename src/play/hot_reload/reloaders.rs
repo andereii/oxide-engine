@@ -230,6 +230,7 @@ pub(super) fn reload_all_characters_domain(
         for &piece in &actor.piece_entities {
             commands.entity(piece).despawn();
         }
+        actor.despawn_composite_rt(commands);
         commands.entity(ent).despawn();
     }
     let new_chars = load_characters_resource(

@@ -27,7 +27,7 @@
           "visible": true,
           "opacity": 1,
           "position": [
-            -282,
+            -270,
           100
           ],
           "camera_Offset": [
@@ -46,7 +46,7 @@
           "visible": true,
           "opacity": 1,
           "position": [
-            0,
+            -90,
             0
           ],
           "camera_Offset": [
@@ -74,7 +74,7 @@
       "opacity": 1,
       "position": [
         -600,
-        -175
+        -250
       ],
       "flip": [
         false,
@@ -132,7 +132,7 @@
       "opacity": 1,
       "position": [
         -600,
-        -175
+        -160
       ],
       "flip": [
         false,
@@ -156,7 +156,7 @@
       "opacity": 1,
       "position": [
         -600,
-        -175
+        -160
       ],
       "flip": [
         false,
@@ -180,7 +180,7 @@
       "opacity": 1,
       "position": [
         -600,
-        -175
+        -160
       ],
       "flip": [
         false,
@@ -193,7 +193,7 @@
     }
   ],
   "name": "Philly (Blazin')",
-  "cameraZoom": 0.75,
+  "cameraZoom": 0.9,
   "coordMode": "topLeft",
   "scripts": true
 }

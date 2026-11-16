@@ -64,6 +64,7 @@ const MODE_SSERAFIM: u32     = 64u;
 const FLAG_USE_ALT_MASK: u32 = 256u;
 const FLAG_IS_CHAR: u32      = 512u;
 const FLAG_HAS_AUX_TEX: u32  = 1024u;
+const FLAG_PREMULTIPLIED_INPUT: u32 = 2048u;
 
 const EFFECT_TYPE_DREAMY: u32 = 0u;
 const EFFECT_TYPE_WAVY: u32 = 1u;
@@ -381,11 +382,19 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         }
         let rim = (1.0 - shadow_alpha * str) * intensity;
 
-        var color3 = apply_hsbc_effect(srgb_col.rgb);
+        var base_rgb = srgb_col.rgb;
+        if (extra_flags & FLAG_PREMULTIPLIED_INPUT) != 0u && srgb_col.a > 0.0 {
+            base_rgb = clamp(base_rgb / srgb_col.a, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        var color3 = apply_hsbc_effect(base_rgb);
         color3 += fx.drop_color_and_mask.xyz * rim;
         srgb_col = vec4<f32>(clamp(color3, vec3<f32>(0.0), vec3<f32>(1.0)), srgb_col.a);
     } else if (mode_flags & MODE_ADJUST_COLOR) != 0u {
-        let color3 = apply_hsbc_effect(srgb_col.rgb);
+        var base_rgb = srgb_col.rgb;
+        if (extra_flags & FLAG_PREMULTIPLIED_INPUT) != 0u && srgb_col.a > 0.0 {
+            base_rgb = clamp(base_rgb / srgb_col.a, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        let color3 = apply_hsbc_effect(base_rgb);
         srgb_col = vec4<f32>(clamp(color3, vec3<f32>(0.0), vec3<f32>(1.0)), srgb_col.a);
     }
 

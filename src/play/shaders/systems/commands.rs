@@ -41,14 +41,25 @@ fn collect_target_entities(
                     String::new(),
                 ));
             }
-            for &piece in &actor.piece_entities {
-                if piece != Entity::PLACEHOLDER {
+            if let Some(ref rt) = actor.composite_rt {
+                if rt.quad_entity != Entity::PLACEHOLDER {
                     out.push((
-                        piece,
+                        rt.quad_entity,
                         ShaderTargetKind::Character(role),
                         actor.id.clone(),
                         String::new(),
                     ));
+                }
+            } else {
+                for &piece in &actor.piece_entities {
+                    if piece != Entity::PLACEHOLDER {
+                        out.push((
+                            piece,
+                            ShaderTargetKind::Character(role),
+                            actor.id.clone(),
+                            String::new(),
+                        ));
+                    }
                 }
             }
         }

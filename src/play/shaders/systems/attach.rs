@@ -1,10 +1,17 @@
+use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureFormat;
 use bevy::sprite_render::SpriteMaterial;
 
 use crate::mods::ModRegistry;
 use crate::play::camera::hud::HudCamera;
+use crate::play::characters::behavior::{COMPOSITE_RT_SIZE, CompositeRenderTarget};
+use crate::play::characters::spawn::CharacterPartVisual;
 use crate::play::characters::CharacterActor;
 use crate::play::scene::PlayState;
+use crate::play::stage::schema::stage_layer_z;
 use crate::play::stage::{StageCompositeProp, StagePropVisual};
 use crate::ui::LoadingOverlayCamera;
 
@@ -16,12 +23,69 @@ use super::{
     load_aux_handle, to_char_shader_role,
 };
 
+fn ensure_character_composite_rt(
+    actor: &mut CharacterActor,
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    runtime: &mut StageShaderRuntime,
+) -> Entity {
+    if let Some(ref rt) = actor.composite_rt {
+        return rt.quad_entity;
+    }
+    let render_layer = runtime.next_rt_layer;
+    runtime.next_rt_layer = runtime.next_rt_layer.saturating_add(1);
+    let rt_image = images.add(Image::new_target_texture(
+        COMPOSITE_RT_SIZE,
+        COMPOSITE_RT_SIZE,
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    ));
+    let layer = RenderLayers::layer(render_layer);
+    for &piece_ent in &actor.piece_entities {
+        if piece_ent != Entity::PLACEHOLDER {
+            commands.entity(piece_ent).insert(layer.clone());
+        }
+    }
+    let cam_order = -10 - (render_layer as isize - 10);
+    let camera_entity = commands
+        .spawn((
+            Camera2d,
+            Camera {
+                order: cam_order,
+                target: RenderTarget::from(rt_image.clone()),
+                clear_color: ClearColorConfig::Custom(Color::NONE),
+                ..default()
+            },
+            Msaa::Off,
+            Tonemapping::None,
+            layer,
+        ))
+        .id();
+    let z_base = stage_layer_z(actor.slot.layer, 0);
+    let quad_entity = commands
+        .spawn((
+            Sprite::from_image(rt_image.clone()),
+            Transform::from_xyz(0.0, 0.0, z_base),
+            Visibility::Hidden,
+            CharacterPartVisual,
+        ))
+        .id();
+    actor.composite_rt = Some(CompositeRenderTarget {
+        image: rt_image,
+        camera_entity,
+        quad_entity,
+        render_layer,
+    });
+    quad_entity
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn attach_stage_and_character_shaders(
     mut commands: Commands,
     mut state: ResMut<PlayState>,
     mods: Res<ModRegistry>,
     asset_server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FunkinSpriteMaterial>>,
     mut runtime: ResMut<StageShaderRuntime>,
     props: Query<(Entity, &StagePropVisual, Option<&StageCompositeProp>), Without<ManagedSpriteShader>>,
@@ -87,28 +151,34 @@ pub fn attach_stage_and_character_shaders(
         }
         let aux_rel = aux_path_for_config(&cfg).map(str::to_string);
         let aux_tex = load_aux_handle(&mods, &asset_server, aux_rel.as_deref());
-        let handle = materials.add(FunkinSpriteMaterial::from_config(cfg, aux_tex));
 
-        let mut target_entities = Vec::with_capacity(1 + actor.piece_entities.len());
+        let mut target_entities = Vec::with_capacity(2);
         if actor.sheet_entity != Entity::PLACEHOLDER {
-            target_entities.push(actor.sheet_entity);
+            let handle = materials.add(FunkinSpriteMaterial::from_config(
+                cfg.clone(),
+                aux_tex.clone(),
+            ));
+            target_entities.push((actor.sheet_entity, handle));
         }
-        target_entities.extend(
-            actor
-                .piece_entities
-                .iter()
-                .copied()
-                .filter(|&e| e != Entity::PLACEHOLDER),
-        );
+        if !actor.piece_entities.is_empty() {
+            let quad_ent =
+                ensure_character_composite_rt(&mut actor, &mut commands, &mut images, &mut runtime);
+            let rt_handle = materials.add(FunkinSpriteMaterial::from_config_ex(
+                cfg,
+                aux_tex,
+                true,
+            ));
+            target_entities.push((quad_ent, rt_handle));
+        }
 
-        for entity in target_entities {
+        for (entity, handle) in target_entities {
             if char_shaders.contains(entity) {
                 continue;
             }
             commands.entity(entity).insert((
                 SpriteMaterial(handle.clone()),
                 ManagedSpriteShader {
-                    handle: handle.clone(),
+                    handle,
                     target: ShaderTargetKind::Character(role),
                     char_id: actor.id.clone(),
                     prop_name: String::new(),

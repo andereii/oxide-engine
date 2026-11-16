@@ -366,12 +366,18 @@ pub fn ensure_character_gameover_anims_loaded(
             .piece_entities
             .reserve(needed_pieces - actor.piece_entities.len());
         for i in actor.piece_entities.len()..needed_pieces {
-            actor.piece_entities.push(spawn_composite_piece_entity(
+            let ent = spawn_composite_piece_entity(
                 commands,
                 &actor.sources,
                 actor.slot.layer,
                 i,
-            ));
+            );
+            if let Some(ref rt) = actor.composite_rt {
+                commands
+                    .entity(ent)
+                    .insert(bevy::camera::visibility::RenderLayers::layer(rt.render_layer));
+            }
+            actor.piece_entities.push(ent);
         }
     }
 }

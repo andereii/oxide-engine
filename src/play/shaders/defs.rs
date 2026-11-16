@@ -11,6 +11,7 @@ pub const SHADER_MODE_SSERAFIM: u32 = 1 << 6;
 pub const SHADER_FLAG_USE_ALT_MASK: u32 = 1 << 8;
 pub const SHADER_FLAG_IS_CHAR: u32 = 1 << 9;
 pub const SHADER_FLAG_HAS_AUX_TEX: u32 = 1 << 10;
+pub const SHADER_FLAG_PREMULTIPLIED_INPUT: u32 = 1 << 11;
 
 pub const PHILLY_TRAIN_LIGHT_COLORS: [u32; 5] = [
     0xFF31A2FD,

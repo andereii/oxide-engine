@@ -272,6 +272,7 @@ pub struct StageShaderRuntime {
     pub rain_time_scale: f32,
     pub last_total_notes_hit: u32,
     pub tankman_alt_mask: bool,
+    pub next_rt_layer: usize,
     pub sserafim: SserafimRuntimeState,
 }
 
@@ -290,6 +291,7 @@ impl Default for StageShaderRuntime {
             rain_time_scale: 1.0,
             last_total_notes_hit: 0,
             tankman_alt_mask: false,
+            next_rt_layer: 10,
             sserafim: SserafimRuntimeState::default(),
         }
     }
@@ -308,6 +310,7 @@ impl StageShaderRuntime {
         self.rain_time_scale = 1.0;
         self.last_total_notes_hit = 0;
         self.tankman_alt_mask = false;
+        self.next_rt_layer = 10;
         self.sserafim.reset(stage_id == "sserafim");
     }
 }

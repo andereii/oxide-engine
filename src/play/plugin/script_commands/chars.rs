@@ -13,19 +13,18 @@ use super::super::{ScriptTickParams, actor_matches_target};
 fn despawn_actor_with_parts(
     commands: &mut Commands,
     ent: Entity,
-    sheet_ent: Entity,
-    pieces: &[Entity],
-    trails: &[Entity],
+    actor: &CharacterActor,
 ) {
-    if sheet_ent != Entity::PLACEHOLDER {
-        commands.entity(sheet_ent).despawn();
+    if actor.sheet_entity != Entity::PLACEHOLDER {
+        commands.entity(actor.sheet_entity).despawn();
     }
-    for &p_ent in pieces {
+    for &p_ent in &actor.piece_entities {
         if p_ent != Entity::PLACEHOLDER {
             commands.entity(p_ent).despawn();
         }
     }
-    for &t_ent in trails {
+    actor.despawn_composite_rt(commands);
+    for &t_ent in &actor.trail_entities {
         if t_ent != Entity::PLACEHOLDER {
             commands.entity(t_ent).despawn();
         }
@@ -259,13 +258,7 @@ pub(super) fn handle_char_cmd(
                     if let Some(cfg) = actor.mirror_of
                         && parent_specs.iter().any(|(r, _, _)| *r == cfg.parent_role)
                     {
-                        despawn_actor_with_parts(
-                            commands,
-                            ent,
-                            actor.sheet_entity,
-                            &actor.piece_entities,
-                            &actor.trail_entities,
-                        );
+                        despawn_actor_with_parts(commands, ent, &actor);
                     }
                 }
                 for (parent_role, underlay_slot, parent_flip_x) in parent_specs {
@@ -305,13 +298,7 @@ pub(super) fn handle_char_cmd(
                     if let Some(cfg) = actor.mirror_of
                         && roles.contains(&cfg.parent_role)
                     {
-                        despawn_actor_with_parts(
-                            commands,
-                            ent,
-                            actor.sheet_entity,
-                            &actor.piece_entities,
-                            &actor.trail_entities,
-                        );
+                        despawn_actor_with_parts(commands, ent, &actor);
                     }
                 }
             }
@@ -324,24 +311,15 @@ pub(super) fn handle_char_cmd(
                         ent,
                         actor.role,
                         actor.slot.clone(),
-                        actor.sheet_entity,
-                        actor.piece_entities.clone(),
-                        actor.trail_entities.clone(),
                     ));
                 }
             }
-            for (ent, role_enum, slot, sheet_ent, pieces, trails) in replacement_specs {
+            for (ent, role_enum, slot) in replacement_specs {
                 for (u_ent, u_actor) in scripts.actors.iter() {
                     if let Some(cfg) = u_actor.mirror_of
                         && cfg.parent_role == role_enum
                     {
-                        despawn_actor_with_parts(
-                            commands,
-                            u_ent,
-                            u_actor.sheet_entity,
-                            &u_actor.piece_entities,
-                            &u_actor.trail_entities,
-                        );
+                        despawn_actor_with_parts(commands, u_ent, &u_actor);
                     }
                 }
                 if let Ok(loaded) = load_single_character(
@@ -355,7 +333,9 @@ pub(super) fn handle_char_cmd(
                     if let Some(tr) = scripts.preload.as_deref_mut() {
                         tr.register_character(&loaded);
                     }
-                    despawn_actor_with_parts(commands, ent, sheet_ent, &pieces, &trails);
+                    if let Ok((_, actor)) = scripts.actors.get(ent) {
+                        despawn_actor_with_parts(commands, ent, &actor);
+                    }
                     spawn_single_character(commands, &loaded);
                 }
             }

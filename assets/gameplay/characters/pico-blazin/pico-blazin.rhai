@@ -11,47 +11,59 @@ fn do_alternate(state) {
     if state.alternate { "1" } else { "2" }
 }
 
+fn move_to_back(target) { set_char_z(target, -300.0); }
+fn move_to_front(target) { set_char_z(target, -200.0); }
+
 fn play_block(target) {
+    move_to_back(target);
     play_anim(target, "block");
     shake(0.002, 0.1);
 }
 
-fn play_cringe(target) { play_anim(target, "cringe"); }
-fn play_dodge(target) { play_anim(target, "dodge"); }
-fn play_idle(target) { play_anim(target, "idle"); }
-fn play_fakeout(target) { play_anim(target, "fakeout"); }
-fn play_uppercut_prep(target) { play_anim(target, "uppercutPrep"); }
+fn play_cringe(target) { move_to_back(target); play_anim(target, "cringe"); }
+fn play_dodge(target) { move_to_back(target); play_anim(target, "dodge"); }
+fn play_idle(target) { move_to_back(target); play_anim(target, "idle"); }
+fn play_fakeout(target) { move_to_back(target); play_anim(target, "fakeout"); }
+fn play_uppercut_prep(target) { move_to_front(target); play_anim(target, "uppercutPrep"); }
 fn play_uppercut(target, hit) {
+    move_to_front(target);
     play_anim(target, "uppercut");
     if hit { shake(0.005, 0.25); }
 }
 fn play_uppercut_hit(target) {
+    move_to_back(target);
     play_anim(target, "uppercutHit");
     shake(0.005, 0.25);
 }
 fn play_hit_high(target) {
+    move_to_back(target);
     play_anim(target, "hitHigh");
     shake(0.0025, 0.15);
 }
 fn play_hit_low(target) {
+    move_to_back(target);
     play_anim(target, "hitLow");
     shake(0.0025, 0.15);
 }
 fn play_hit_spin(target) {
+    move_to_back(target);
     play_anim(target, "hitSpin");
     shake(0.0025, 0.15);
 }
 fn play_punch_high(alt, target) {
+    move_to_front(target);
     let next = !alt;
     play_anim(target, "punchHigh" + if next { "1" } else { "2" });
     next
 }
 fn play_punch_low(alt, target) {
+    move_to_front(target);
     let next = !alt;
     play_anim(target, "punchLow" + if next { "1" } else { "2" });
     next
 }
 fn play_taunt_cond(target) {
+    move_to_back(target);
     if char_anim(target) == "fakeout" {
         play_anim(target, "taunt");
     } else {

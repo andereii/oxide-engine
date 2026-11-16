@@ -52,6 +52,18 @@ fn update_scrolling_sky(offset_x) {
     offset_x
 }
 
+fn tint_blazin_abot() {
+    prop_tint("abot_eye_whites", "#FF888888");
+    prop_tint("abot_stereo_bg", "#FF888888");
+    prop_tint("abot_pupil", "#FF888888");
+    prop_tint("abot_body", "#FF888888");
+    let vi = 1;
+    while vi <= 7 {
+        prop_tint("abot_viz_" + vi, "#FF888888");
+        vi += 1;
+    }
+}
+
 fn onCreate() {
     this.lightning_timer = 3.0;
     this.lightning_active = true;
@@ -74,21 +86,14 @@ fn onCreate() {
     char_tint("bf", "#FFDEDEDE");
     char_tint("dad", "#FFDEDEDE");
     char_tint("gf", "#FF888888");
-    prop_tint("abot_eye_whites", "#FF888888");
-    prop_tint("abot_stereo_bg", "#FF888888");
-    prop_tint("abot_pupil", "#FF888888");
-    prop_tint("abot_body", "#FF888888");
-    let vi = 1;
-    while vi <= 7 {
-        prop_tint("abot_viz_" + vi, "#FF888888");
-        vi += 1;
-    }
+    tint_blazin_abot();
 
     set_rain(3.6, 0.5, "#6680CC", true);
     init_blazin_camera();
 }
 
 fn onCountdownStart() {
+    tint_blazin_abot();
     init_blazin_camera();
 }
 

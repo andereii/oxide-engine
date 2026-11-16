@@ -226,9 +226,19 @@ pub(super) fn tick_play_state(
     );
     if is_paused && !audio_res.sync.was_paused {
         audio_res.audio.pause(&mut audio_res.sinks);
+        for (ent, _) in &hud_texts.tagged_sounds {
+            if let Ok(sink) = audio_res.sinks.get_mut(ent) {
+                sink.pause();
+            }
+        }
         audio_res.sync.was_paused = true;
     } else if !is_paused && audio_res.sync.was_paused {
         audio_res.audio.resume(&mut audio_res.sinks);
+        for (ent, _) in &hud_texts.tagged_sounds {
+            if let Ok(sink) = audio_res.sinks.get_mut(ent) {
+                sink.play();
+            }
+        }
         audio_res.sync.was_paused = false;
     }
 

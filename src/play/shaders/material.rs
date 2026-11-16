@@ -9,8 +9,8 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2dKey, Material2dPipeline, MaterialExtension2d};
 
 use super::defs::{
-    FunkinBlendMode, SHADER_FLAG_HAS_AUX_TEX, SHADER_FLAG_IS_CHAR, SHADER_FLAG_USE_ALT_MASK,
-    SpriteShaderConfig,
+    FunkinBlendMode, SHADER_FLAG_HAS_AUX_TEX, SHADER_FLAG_IS_CHAR,
+    SHADER_FLAG_PREMULTIPLIED_INPUT, SHADER_FLAG_USE_ALT_MASK, SpriteShaderConfig,
 };
 
 #[derive(Clone, Copy, ShaderType, Debug, Reflect, PartialEq)]
@@ -61,7 +61,12 @@ impl Default for FunkinSpriteUniform {
 }
 
 impl FunkinSpriteUniform {
-    pub fn from_config(cfg: &SpriteShaderConfig, time_s: f32, has_aux_tex: bool) -> Self {
+    pub fn from_config(
+        cfg: &SpriteShaderConfig,
+        time_s: f32,
+        has_aux_tex: bool,
+        premultiplied_input: bool,
+    ) -> Self {
         let mut extra_flags = cfg.wiggle.effect_type as u32;
         if cfg.drop_shadow.use_alt_mask {
             extra_flags |= SHADER_FLAG_USE_ALT_MASK;
@@ -71,6 +76,9 @@ impl FunkinSpriteUniform {
         }
         if has_aux_tex {
             extra_flags |= SHADER_FLAG_HAS_AUX_TEX;
+        }
+        if premultiplied_input {
+            extra_flags |= SHADER_FLAG_PREMULTIPLIED_INPUT;
         }
 
         let hm = cfg.adjust.hue_matrix();
@@ -155,6 +163,7 @@ pub struct FunkinSpriteMaterial {
     #[reflect(ignore)]
     pub custom_shader: Option<Handle<Shader>>,
     pub time_s: f32,
+    pub premultiplied_input: bool,
 }
 
 impl From<&FunkinSpriteMaterial> for FunkinSpriteMaterialKey {
@@ -172,19 +181,37 @@ impl From<&FunkinSpriteMaterial> for FunkinSpriteMaterialKey {
 
 impl FunkinSpriteMaterial {
     pub fn from_config(config: SpriteShaderConfig, aux_texture: Option<Handle<Image>>) -> Self {
-        let uniform = FunkinSpriteUniform::from_config(&config, 0.0, aux_texture.is_some());
+        Self::from_config_ex(config, aux_texture, false)
+    }
+
+    pub fn from_config_ex(
+        config: SpriteShaderConfig,
+        aux_texture: Option<Handle<Image>>,
+        premultiplied_input: bool,
+    ) -> Self {
+        let uniform = FunkinSpriteUniform::from_config(
+            &config,
+            0.0,
+            aux_texture.is_some(),
+            premultiplied_input,
+        );
         Self {
             uniform,
             aux_texture,
             config,
             custom_shader: None,
             time_s: 0.0,
+            premultiplied_input,
         }
     }
 
     pub fn sync_uniform(&mut self) {
-        self.uniform =
-            FunkinSpriteUniform::from_config(&self.config, self.time_s, self.aux_texture.is_some());
+        self.uniform = FunkinSpriteUniform::from_config(
+            &self.config,
+            self.time_s,
+            self.aux_texture.is_some(),
+            self.premultiplied_input,
+        );
     }
 }
 
