@@ -68,12 +68,10 @@ pub struct StageResource {
     pub props: Vec<ResolvedStageProp>,
 }
 
-pub fn load_stage_resource(
+pub fn begin_stage_load(
     mods: &ModRegistry,
     stage_id: &str,
-    asset_server: &AssetServer,
-    layouts: &mut Assets<TextureAtlasLayout>,
-) -> Result<StageResource, String> {
+) -> Result<(StageResource, Vec<StagePropData>), String> {
     let json_path = mods
         .resolve_file(&format!("{STAGES_ASSET_PATH}/{stage_id}/{stage_id}.json"))
         .or_else(|| mods.resolve_file(&format!("stages/{stage_id}/{stage_id}.json")))
@@ -95,15 +93,9 @@ pub fn load_stage_resource(
         .map(|(i, p)| (p.layer, i, p))
         .collect();
     indexed.sort_by_key(|(layer, idx, _)| (*layer, *idx));
+    let ordered_props: Vec<StagePropData> = indexed.into_iter().map(|(_, _, data)| data).collect();
 
-    let mut props = Vec::with_capacity(indexed.len());
-    for (_, _, data) in indexed {
-        if let Some(visual) = resolve_prop_visual(mods, stage_id, &data, asset_server, layouts) {
-            props.push(ResolvedStageProp { data, visual });
-        }
-    }
-
-    Ok(StageResource {
+    let stage = StageResource {
         stage_id: stage_id.to_string(),
         json_path,
         scripts: parsed.scripts,
@@ -111,8 +103,36 @@ pub fn load_stage_resource(
         camera_zoom: parsed.camera_zoom,
         coord_mode: parsed.coord_mode,
         characters: parsed.characters,
-        props,
-    })
+        props: Vec::with_capacity(ordered_props.len()),
+    };
+    Ok((stage, ordered_props))
+}
+
+pub fn resolve_stage_prop(
+    mods: &ModRegistry,
+    stage_id: &str,
+    data: StagePropData,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) -> Option<ResolvedStageProp> {
+    resolve_prop_visual(mods, stage_id, &data, asset_server, layouts)
+        .map(|visual| ResolvedStageProp { data, visual })
+}
+
+#[allow(dead_code)]
+pub fn load_stage_resource(
+    mods: &ModRegistry,
+    stage_id: &str,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) -> Result<StageResource, String> {
+    let (mut stage, ordered_props) = begin_stage_load(mods, stage_id)?;
+    for data in ordered_props {
+        if let Some(prop) = resolve_stage_prop(mods, stage_id, data, asset_server, layouts) {
+            stage.props.push(prop);
+        }
+    }
+    Ok(stage)
 }
 
 /// If a stage JSON enables `"scripts": true`, discover sidecar script files

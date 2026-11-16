@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -6,7 +7,7 @@ use crate::ui::{LoadingScreenConfig, LoadingScreenState};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::characters::{
-    load_characters_resource, spawn_characters,
+    CharacterRole, CharactersResource, LoadedCharacter, load_single_character, spawn_characters,
 };
 use super::super::hud::countdown::load_countdown_assets;
 use super::super::hud::healthbar::spawn_health_bar;
@@ -16,7 +17,10 @@ use super::super::notes::render::{load_noteskin_assets, spawn_strumline_and_pool
 use super::super::playlist::PlayStatePlaylist;
 use super::super::preload::PlayPreloadTracker;
 use super::super::scene::PlayState;
-use super::super::stage::{StageResource, load_stage_resource, spawn_stage_props};
+use super::super::stage::schema::{StageCharacterSlot, StagePropData};
+use super::super::stage::{
+    StageResource, begin_stage_load, resolve_stage_prop, spawn_stage_props,
+};
 use super::hud_audio::prewarm_sfx_handles;
 use super::script_commands::apply_ecs_script_commands;
 use super::setup::{load_and_init_scripts, seed_stage_and_chars_into_state};
@@ -30,10 +34,12 @@ pub(crate) enum PlayLoadStep {
     WaitLoadingUi,
     HudAndNoteskin,
     WaitHudAndNoteskin,
-    Stage,
-    WaitStage,
-    Characters,
-    WaitCharacters,
+    StageBegin,
+    StageNextProp,
+    WaitStageProp,
+    CharactersBegin,
+    CharacterNext,
+    WaitCharacter,
     Audio,
     Scripts,
     WaitAll,
@@ -47,6 +53,11 @@ pub(crate) enum PlayLoadStep {
 pub(crate) struct PlayLoadPipeline {
     pub(crate) step: PlayLoadStep,
     loaded_stage: Option<StageResource>,
+    pending_props: VecDeque<StagePropData>,
+    total_props: usize,
+    pending_chars: VecDeque<(String, CharacterRole, StageCharacterSlot)>,
+    loaded_chars: Vec<LoadedCharacter>,
+    total_chars: usize,
     stage_script_source: Option<(String, PathBuf)>,
     char_script_sources: Vec<(String, PathBuf)>,
 }
@@ -55,6 +66,11 @@ impl PlayLoadPipeline {
     fn reset_for_load(&mut self) {
         self.step = PlayLoadStep::WaitLoadingUi;
         self.loaded_stage = None;
+        self.pending_props.clear();
+        self.total_props = 0;
+        self.pending_chars.clear();
+        self.loaded_chars.clear();
+        self.total_chars = 0;
         self.stage_script_source = None;
         self.char_script_sources.clear();
     }
@@ -103,30 +119,36 @@ pub(crate) fn step_play_load_pipeline(
             pipeline.step = PlayLoadStep::WaitHudAndNoteskin;
         }
         PlayLoadStep::WaitHudAndNoteskin => {
-            if step_assets_ready(scripts, loading_screen, 0.0, 0.2) {
+            if step_assets_ready(scripts, loading_screen, 0.0, 0.15) {
                 pipeline.step = if state.is_minimal_mode {
                     PlayLoadStep::Audio
                 } else {
-                    PlayLoadStep::Stage
+                    PlayLoadStep::StageBegin
                 };
             }
         }
-        PlayLoadStep::Stage => {
-            load_stage_step(commands, state, scripts, pipeline);
-            pipeline.step = PlayLoadStep::WaitStage;
+        PlayLoadStep::StageBegin => {
+            begin_stage_step(state, scripts, pipeline);
         }
-        PlayLoadStep::WaitStage => {
-            if step_assets_ready(scripts, loading_screen, 0.2, 0.45) {
-                pipeline.step = PlayLoadStep::Characters;
+        PlayLoadStep::StageNextProp => {
+            load_next_stage_prop_step(commands, scripts, pipeline);
+        }
+        PlayLoadStep::WaitStageProp => {
+            let frac = stage_progress_fraction(pipeline);
+            if step_assets_ready(scripts, loading_screen, frac.0, frac.1) {
+                pipeline.step = PlayLoadStep::StageNextProp;
             }
         }
-        PlayLoadStep::Characters => {
-            load_characters_step(commands, state, scripts, pipeline);
-            pipeline.step = PlayLoadStep::WaitCharacters;
+        PlayLoadStep::CharactersBegin => {
+            begin_characters_step(state, pipeline);
         }
-        PlayLoadStep::WaitCharacters => {
-            if step_assets_ready(scripts, loading_screen, 0.45, 0.7) {
-                pipeline.step = PlayLoadStep::Audio;
+        PlayLoadStep::CharacterNext => {
+            load_next_character_step(commands, state, scripts, pipeline);
+        }
+        PlayLoadStep::WaitCharacter => {
+            let frac = character_progress_fraction(pipeline);
+            if step_assets_ready(scripts, loading_screen, frac.0, frac.1) {
+                pipeline.step = PlayLoadStep::CharacterNext;
             }
         }
         PlayLoadStep::Audio => {
@@ -183,6 +205,28 @@ fn step_assets_ready(
     progress.loaded_assets >= progress.total_assets
 }
 
+fn stage_progress_fraction(pipeline: &PlayLoadPipeline) -> (f32, f32) {
+    if pipeline.total_props == 0 {
+        return (0.15, 0.40);
+    }
+    let done = pipeline.total_props.saturating_sub(pipeline.pending_props.len());
+    let span = 0.25 / pipeline.total_props as f32;
+    let start = 0.15 + span * done.saturating_sub(1) as f32;
+    let end = 0.15 + span * done as f32;
+    (start, end)
+}
+
+fn character_progress_fraction(pipeline: &PlayLoadPipeline) -> (f32, f32) {
+    if pipeline.total_chars == 0 {
+        return (0.40, 0.70);
+    }
+    let done = pipeline.total_chars.saturating_sub(pipeline.pending_chars.len());
+    let span = 0.30 / pipeline.total_chars as f32;
+    let start = 0.40 + span * done.saturating_sub(1) as f32;
+    let end = 0.40 + span * done as f32;
+    (start, end)
+}
+
 fn load_hud_and_noteskin_step(
     commands: &mut Commands,
     state: &mut PlayState,
@@ -235,20 +279,14 @@ fn load_hud_and_noteskin_step(
     }
 }
 
-fn load_stage_step(
-    commands: &mut Commands,
+fn begin_stage_step(
     state: &mut PlayState,
-    scripts: &mut ScriptTickParams,
+    scripts: &ScriptTickParams,
     pipeline: &mut PlayLoadPipeline,
 ) {
     let stage_id = state.chart.stage_id.clone();
-    match load_stage_resource(
-        &scripts.mods,
-        &stage_id,
-        &scripts.asset_server,
-        &mut scripts.layouts,
-    ) {
-        Ok(stage) => {
+    match begin_stage_load(&scripts.mods, &stage_id) {
+        Ok((stage, ordered_props)) => {
             state.camera.stage_zoom = f64::from(stage.camera_zoom);
             if state.camera.follow_point == [0.0, 0.0] {
                 state.camera.follow_point = [
@@ -257,60 +295,142 @@ fn load_stage_step(
                 ];
             }
             state.reset_camera(true, true, true);
-            spawn_stage_props(commands, &stage);
             if stage.scripts {
                 pipeline.stage_script_source =
                     Some((stage.stage_id.clone(), stage.json_path.clone()));
             }
-            if let Some(tr) = scripts.preload.as_deref_mut() {
-                tr.register_stage(&stage);
-            }
+            pipeline.total_props = ordered_props.len();
+            pipeline.pending_props = ordered_props.into();
             pipeline.loaded_stage = Some(stage);
+            pipeline.step = PlayLoadStep::StageNextProp;
         }
         Err(err) => {
             state.status_message = format!("Stage error: {err}");
             pipeline.loaded_stage = None;
+            pipeline.pending_props.clear();
+            pipeline.step = PlayLoadStep::CharactersBegin;
         }
     }
 }
 
-fn load_characters_step(
+fn load_next_stage_prop_step(
+    commands: &mut Commands,
+    scripts: &mut ScriptTickParams,
+    pipeline: &mut PlayLoadPipeline,
+) {
+    let Some(prop_data) = pipeline.pending_props.pop_front() else {
+        if let Some(ref stage) = pipeline.loaded_stage {
+            spawn_stage_props(commands, stage);
+        }
+        pipeline.step = PlayLoadStep::CharactersBegin;
+        return;
+    };
+
+    if let Some(ref mut stage) = pipeline.loaded_stage
+        && let Some(resolved) = resolve_stage_prop(
+            &scripts.mods,
+            &stage.stage_id,
+            prop_data,
+            &scripts.asset_server,
+            &mut scripts.layouts,
+        )
+    {
+        if let Some(tr) = scripts.preload.as_deref_mut() {
+            tr.register_stage_prop(&resolved);
+        }
+        stage.props.push(resolved);
+    }
+    pipeline.step = PlayLoadStep::WaitStageProp;
+}
+
+fn begin_characters_step(state: &PlayState, pipeline: &mut PlayLoadPipeline) {
+    let slots = pipeline.loaded_stage.as_ref().map(|s| &s.characters);
+    let meta = &state.chart.characters;
+
+    let groups = [
+        (
+            &meta.spectator,
+            CharacterRole::Spectator,
+            slots
+                .map(|s| s.spectator.clone())
+                .unwrap_or_else(StageCharacterSlot::default_for_spectator),
+        ),
+        (
+            &meta.opponents,
+            CharacterRole::Opponent,
+            slots
+                .map(|s| s.opponent.clone())
+                .unwrap_or_else(StageCharacterSlot::default_for_opponent),
+        ),
+        (
+            &meta.players,
+            CharacterRole::Player,
+            slots
+                .map(|s| s.player.clone())
+                .unwrap_or_else(StageCharacterSlot::default_for_player),
+        ),
+    ];
+
+    pipeline.pending_chars.clear();
+    pipeline.loaded_chars.clear();
+    for (ids, role, slot) in groups {
+        for char_id in ids {
+            pipeline
+                .pending_chars
+                .push_back((char_id.clone(), role, slot.clone()));
+        }
+    }
+    pipeline.total_chars = pipeline.pending_chars.len();
+    pipeline.step = PlayLoadStep::CharacterNext;
+}
+
+fn load_next_character_step(
     commands: &mut Commands,
     state: &mut PlayState,
     scripts: &mut ScriptTickParams,
     pipeline: &mut PlayLoadPipeline,
 ) {
-    let chars = load_characters_resource(
+    let Some((char_id, role, slot)) = pipeline.pending_chars.pop_front() else {
+        let chars = CharactersResource {
+            characters: std::mem::take(&mut pipeline.loaded_chars),
+        };
+        seed_stage_and_chars_into_state(state, pipeline.loaded_stage.as_ref(), &chars);
+        spawn_characters(commands, &chars);
+        spawn_health_bar(
+            &scripts.mods,
+            commands,
+            Some(&chars),
+            &state.player_strumline.note_style,
+            &scripts.asset_server,
+            &mut scripts.layouts,
+        );
+        commands.insert_resource(chars);
+        if let Some(stage) = pipeline.loaded_stage.take() {
+            commands.insert_resource(stage);
+        }
+        pipeline.step = PlayLoadStep::Audio;
+        return;
+    };
+
+    if let Ok(loaded) = load_single_character(
         &scripts.mods,
-        &state.chart.characters,
-        pipeline.loaded_stage.as_ref(),
+        &char_id,
+        role,
+        slot,
         &scripts.asset_server,
         &mut scripts.layouts,
-    );
-    for c in &chars.characters {
-        if c.data.script {
+    ) {
+        if loaded.data.script {
             pipeline
                 .char_script_sources
-                .push((c.id.clone(), c.json_path.clone()));
+                .push((loaded.id.clone(), loaded.json_path.clone()));
         }
+        if let Some(tr) = scripts.preload.as_deref_mut() {
+            tr.register_character(&loaded);
+        }
+        pipeline.loaded_chars.push(loaded);
     }
-    seed_stage_and_chars_into_state(state, pipeline.loaded_stage.as_ref(), &chars);
-    spawn_characters(commands, &chars);
-    spawn_health_bar(
-        &scripts.mods,
-        commands,
-        Some(&chars),
-        &state.player_strumline.note_style,
-        &scripts.asset_server,
-        &mut scripts.layouts,
-    );
-    if let Some(tr) = scripts.preload.as_deref_mut() {
-        tr.register_characters(&chars);
-    }
-    commands.insert_resource(chars);
-    if let Some(stage) = pipeline.loaded_stage.take() {
-        commands.insert_resource(stage);
-    }
+    pipeline.step = PlayLoadStep::WaitCharacter;
 }
 
 fn load_audio_step(

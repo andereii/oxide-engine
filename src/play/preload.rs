@@ -4,12 +4,12 @@ use bevy::asset::{LoadState, UntypedAssetId, UntypedHandle};
 use bevy::prelude::*;
 
 use crate::audio::SongAudioPlayer;
-use crate::play::characters::CharactersResource;
+use crate::play::characters::{CharactersResource, LoadedCharacter};
 use crate::play::hud::countdown::CountdownAssets;
 use crate::play::hud::popups::PopupAssets;
 use crate::play::notes::render::NoteskinAssets;
 use crate::play::stage::StageResource;
-use crate::play::stage::loader::StagePropKind;
+use crate::play::stage::loader::{ResolvedStageProp, StagePropKind};
 
 /// Snapshot of asynchronous preload completion reported for HUD/loading-screen consumers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -58,31 +58,41 @@ impl PlayPreloadTracker {
         }
     }
 
+    pub fn register_stage_prop(&mut self, prop: &ResolvedStageProp) {
+        match &prop.visual {
+            StagePropKind::StaticImage { texture, .. }
+            | StagePropKind::AnimatedAtlas { texture, .. } => {
+                self.register_handle(texture.clone());
+            }
+            StagePropKind::CompositeAtlas { textures, .. } => {
+                for (tex, _) in textures {
+                    self.register_handle(tex.clone());
+                }
+            }
+            StagePropKind::SolidColor { .. } => {}
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn register_stage(&mut self, stage: &StageResource) {
         for prop in &stage.props {
-            match &prop.visual {
-                StagePropKind::StaticImage { texture, .. }
-                | StagePropKind::AnimatedAtlas { texture, .. } => {
-                    self.register_handle(texture.clone());
-                }
-                StagePropKind::CompositeAtlas { textures, .. } => {
-                    for (tex, _) in textures {
-                        self.register_handle(tex.clone());
-                    }
-                }
-                StagePropKind::SolidColor { .. } => {}
+            self.register_stage_prop(prop);
+        }
+    }
+
+    pub fn register_character(&mut self, loaded: &LoadedCharacter) {
+        for src in &loaded.sources {
+            self.register_handle(src.texture.clone());
+            for (extra_tex, _) in &src.extra_layers {
+                self.register_handle(extra_tex.clone());
             }
         }
     }
 
+    #[allow(dead_code)]
     pub fn register_characters(&mut self, chars: &CharactersResource) {
         for loaded in &chars.characters {
-            for src in &loaded.sources {
-                self.register_handle(src.texture.clone());
-                for (extra_tex, _) in &src.extra_layers {
-                    self.register_handle(extra_tex.clone());
-                }
-            }
+            self.register_character(loaded);
         }
     }
 
