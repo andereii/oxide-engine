@@ -34,6 +34,7 @@ pub struct LoadingScreenState {
     config: LoadingScreenConfig,
     progress: f32,
     generation: u64,
+    ui_ready: bool,
 }
 
 impl LoadingScreenState {
@@ -41,15 +42,25 @@ impl LoadingScreenState {
         self.active = true;
         self.config = config;
         self.progress = 0.0;
+        self.ui_ready = false;
         self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn hide(&mut self) {
         self.active = false;
+        self.ui_ready = false;
     }
 
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    pub fn is_ui_ready(&self) -> bool {
+        self.ui_ready
+    }
+
+    pub(super) fn set_ui_ready(&mut self, ready: bool) {
+        self.ui_ready = ready;
     }
 
     pub fn set_progress(&mut self, progress: f32) {
@@ -78,8 +89,11 @@ impl Plugin for LoadingScreenPlugin {
             .init_resource::<components::LoadingScreenRuntime>()
             .add_systems(
                 Update,
+                systems::sync_loading_screen.before(crate::animations::sprite::step_animations),
+            )
+            .add_systems(
+                Update,
                 (
-                    systems::sync_loading_screen,
                     systems::sync_loading_mic_and_bar,
                     systems::sync_loading_character,
                 )

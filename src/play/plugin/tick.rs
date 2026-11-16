@@ -380,6 +380,7 @@ pub(super) fn tick_play_state(
 
     if state.phase == PlayPhase::Loading {
         step_play_load_pipeline(
+            time.delta_secs(),
             &mut commands,
             &mut state,
             &mut playlist,

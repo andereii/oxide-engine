@@ -95,19 +95,18 @@ pub(super) fn sync_loading_screen(
         let char_data = pick_and_load_character(mods.as_deref(), &asset_server, &mut layouts);
         if let Some(loaded) = char_data {
             let initial_idx = loaded.controller.current_atlas_index().unwrap_or(0);
-            let mut sprite = Sprite::from_atlas_image(
-                loaded.texture.clone(),
-                TextureAtlas {
-                    layout: loaded.layout.clone(),
-                    index: initial_idx,
-                },
-            );
-            sprite.color = Color::WHITE;
             let ent = commands
                 .spawn((
-                    sprite,
+                    Sprite::from_atlas_image(
+                        loaded.texture.clone(),
+                        TextureAtlas {
+                            layout: loaded.layout.clone(),
+                            index: initial_idx,
+                        },
+                    ),
                     Transform::from_xyz(loaded.base_center_x, loaded.base_center_y, CHARACTER_Z)
                         .with_scale(Vec3::splat(loaded.scale)),
+                    Visibility::Hidden,
                     loaded.controller.clone(),
                     layer,
                     LoadingCharacterVisual {
@@ -128,7 +127,7 @@ pub(super) fn sync_loading_screen(
 pub(super) fn sync_loading_mic_and_bar(
     time: Res<Time>,
     images: Res<Assets<Image>>,
-    state: Res<LoadingScreenState>,
+    mut state: ResMut<LoadingScreenState>,
     mut runtime: ResMut<LoadingScreenRuntime>,
     mut mic_query: Query<(&mut Transform, &mut Visibility), With<LoadingMicStandVisual>>,
     mut bar_query: Query<
@@ -136,7 +135,14 @@ pub(super) fn sync_loading_mic_and_bar(
         (With<LoadingProgressBarVisual>, Without<LoadingMicStandVisual>),
     >,
 ) {
-    if !state.is_active() || !state.config().show_progress {
+    if !state.is_active() {
+        return;
+    }
+
+    if !state.config().show_progress {
+        if !state.config().show_character {
+            state.set_ui_ready(true);
+        }
         return;
     }
 
@@ -156,8 +162,6 @@ pub(super) fn sync_loading_mic_and_bar(
 
         let bar_w = mic_w + BAR_PAD;
         let bar_h = mic_h + BAR_PAD;
-        let bar_base_x = (SCREEN_WIDTH * 0.5 - MIC_STAND_MARGIN_RIGHT - mic_w) + bar_w * 0.5;
-        let bar_cy = (-SCREEN_HEIGHT * 0.5 + MIC_STAND_MARGIN_BOTTOM) + bar_h * 0.5;
 
         for (mut tf, mut vis) in &mut mic_query {
             tf.translation = Vec3::new(mic_cx, mic_cy, MIC_STAND_Z);
@@ -165,14 +169,18 @@ pub(super) fn sync_loading_mic_and_bar(
         }
         for (mut sprite, mut tf, mut vis) in &mut bar_query {
             sprite.custom_size = Some(Vec2::new(bar_w, bar_h));
-            tf.translation = Vec3::new(bar_base_x, bar_cy, BAR_Z);
+            tf.translation = Vec3::new(mic_cx, mic_cy, BAR_Z);
             *vis = Visibility::Visible;
         }
 
         runtime.mic_width = mic_w;
-        runtime.bar_base_x = bar_base_x;
-        runtime.bar_current_x = bar_base_x;
+        runtime.bar_base_x = mic_cx;
+        runtime.bar_current_x = mic_cx;
         runtime.mic_layout_done = true;
+    }
+
+    if !state.config().show_character {
+        state.set_ui_ready(true);
     }
 
     let target_x = runtime.bar_base_x + runtime.mic_width * state.progress();
@@ -186,19 +194,34 @@ pub(super) fn sync_loading_mic_and_bar(
 }
 
 pub(super) fn sync_loading_character(
-    state: Res<LoadingScreenState>,
+    images: Res<Assets<Image>>,
+    mut state: ResMut<LoadingScreenState>,
+    runtime: Res<LoadingScreenRuntime>,
     mut query: Query<(
         &LoadingCharacterVisual,
         &AnimationController,
         &mut Sprite,
         &mut Transform,
+        &mut Visibility,
     )>,
 ) {
     if !state.is_active() || !state.config().show_character {
         return;
     }
 
-    for (vis, anim, mut sprite, mut tf) in &mut query {
+    let char_img_ready = runtime
+        .cached_char
+        .as_ref()
+        .is_none_or(|c| images.get(&c.texture).is_some());
+    if !char_img_ready {
+        return;
+    }
+
+    if !state.config().show_progress || runtime.mic_layout_done {
+        state.set_ui_ready(true);
+    }
+
+    for (vis, anim, mut sprite, mut tf, mut visibility) in &mut query {
         if let Some(idx) = anim.current_atlas_index() {
             set_atlas_index(&mut sprite, idx);
         }
@@ -211,6 +234,7 @@ pub(super) fn sync_loading_character(
         } else {
             Quat::IDENTITY
         };
+        *visibility = Visibility::Visible;
     }
 }
 

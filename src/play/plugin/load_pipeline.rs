@@ -22,10 +22,12 @@ use super::script_commands::apply_ecs_script_commands;
 use super::setup::{load_and_init_scripts, seed_stage_and_chars_into_state};
 use super::{AudioTickParams, ScriptHudAndTextParams, ScriptTickParams};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) enum PlayLoadStep {
     #[default]
     Idle,
+    /// Wait for the loading screen UI assets (`mic-stand.png` + character) to appear first.
+    WaitLoadingUi,
     HudAndNoteskin,
     WaitHudAndNoteskin,
     Stage,
@@ -35,6 +37,8 @@ pub(crate) enum PlayLoadStep {
     Audio,
     Scripts,
     WaitAll,
+    /// Brief hold at 100% so the progress bar finishes sliding before starting the countdown.
+    HoldComplete(f32),
 }
 
 /// Phased loader for `PlayScene` that staggers heavy asset decoding across frames
@@ -49,7 +53,7 @@ pub(crate) struct PlayLoadPipeline {
 
 impl PlayLoadPipeline {
     fn reset_for_load(&mut self) {
-        self.step = PlayLoadStep::HudAndNoteskin;
+        self.step = PlayLoadStep::WaitLoadingUi;
         self.loaded_stage = None;
         self.stage_script_source = None;
         self.char_script_sources.clear();
@@ -77,6 +81,7 @@ pub(crate) fn begin_play_scene_load(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn step_play_load_pipeline(
+    dt: f32,
     commands: &mut Commands,
     state: &mut PlayState,
     playlist: &mut PlayStatePlaylist,
@@ -88,6 +93,11 @@ pub(crate) fn step_play_load_pipeline(
 ) {
     match pipeline.step {
         PlayLoadStep::Idle => {}
+        PlayLoadStep::WaitLoadingUi => {
+            if loading_screen.is_ui_ready() {
+                pipeline.step = PlayLoadStep::HudAndNoteskin;
+            }
+        }
         PlayLoadStep::HudAndNoteskin => {
             load_hud_and_noteskin_step(commands, state, audio_res, scripts);
             pipeline.step = PlayLoadStep::WaitHudAndNoteskin;
@@ -137,6 +147,18 @@ pub(crate) fn step_play_load_pipeline(
                 loading_screen,
                 pipeline,
             );
+        }
+        PlayLoadStep::HoldComplete(remaining) => {
+            let next = remaining - dt.min(0.1);
+            if next <= 0.0 {
+                pipeline.step = PlayLoadStep::Idle;
+                loading_screen.hide();
+                state.start_countdown();
+                audio_res.sync.was_countdown = true;
+                audio_res.sync.was_paused = false;
+            } else {
+                pipeline.step = PlayLoadStep::HoldComplete(next);
+            }
         }
     }
 }
@@ -372,10 +394,7 @@ fn finish_or_poll_all(
         progress.total_assets,
     );
     if progress.is_complete() {
-        pipeline.step = PlayLoadStep::Idle;
-        loading_screen.hide();
-        state.start_countdown();
-        audio_res.sync.was_countdown = true;
-        audio_res.sync.was_paused = false;
+        loading_screen.set_progress(1.0);
+        pipeline.step = PlayLoadStep::HoldComplete(0.35);
     }
 }

@@ -51,7 +51,10 @@ pub fn spawn_hud_camera(commands: &mut Commands) {
 pub fn sync_hud_camera(
     state: Res<PlayState>,
     mut hud_cam: Query<(&mut Projection, &mut Transform), With<HudCamera>>,
-    mut world_cam: Query<&mut Transform, (With<Camera2d>, Without<HudCamera>)>,
+    mut world_cam: Query<
+        &mut Transform,
+        (With<Camera2d>, With<IsDefaultUiCamera>, Without<HudCamera>),
+    >,
     mut flashes: Query<(&CameraFlashOverlay, &mut Sprite, &mut Visibility)>,
 ) {
     let target_scale = 1.0 / (state.camera.hud_zoom.max(0.05) as f32);
