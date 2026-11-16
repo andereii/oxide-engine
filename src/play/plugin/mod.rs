@@ -2,6 +2,7 @@ mod capture;
 mod hud_audio;
 mod input;
 mod load_pipeline;
+mod reload;
 mod script_commands;
 pub(crate) mod setup;
 mod tick;

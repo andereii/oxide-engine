@@ -1,3 +1,4 @@
+mod blend_alpha;
 pub mod effect_pools;
 pub mod effects;
 

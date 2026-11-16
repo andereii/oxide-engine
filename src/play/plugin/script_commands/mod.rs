@@ -1,5 +1,7 @@
-mod chars_hud_audio;
-mod props_text;
+mod chars;
+mod hud_audio;
+mod props;
+mod text;
 
 use std::collections::HashMap;
 
@@ -11,9 +13,11 @@ use crate::scripting::{LogLevel, ScriptCommand};
 
 use super::super::shaders::systems::{ShaderScriptCommand, parse_wiggle_effect_type};
 use super::{AudioTickParams, ScriptHudAndTextParams, ScriptTickParams};
-use chars_hud_audio::handle_char_hud_audio_cmd;
-pub(crate) use props_text::ScriptSparrowData;
-use props_text::{build_prop_index_ci, handle_prop_text_cmd};
+use chars::handle_char_cmd;
+use hud_audio::handle_hud_audio_cmd;
+pub(crate) use props::ScriptSparrowData;
+use props::{build_prop_index_ci, handle_prop_cmd};
+use text::handle_text_cmd;
 
 pub(crate) fn apply_ecs_script_commands(
     commands: &mut Commands,
@@ -46,11 +50,8 @@ pub(crate) fn apply_ecs_script_commands(
             | ScriptCommand::SetPropZ { .. }
             | ScriptCommand::SetPropSize { .. }
             | ScriptCommand::SetPropVelocity { .. }
-            | ScriptCommand::AddPropAnim { .. }
-            | ScriptCommand::SpawnText { .. }
-            | ScriptCommand::SetText { .. }
-            | ScriptCommand::SetTextStyle { .. } => {
-                handle_prop_text_cmd(
+            | ScriptCommand::AddPropAnim { .. } => {
+                handle_prop_cmd(
                     cmd,
                     commands,
                     &scripts.asset_server,
@@ -59,10 +60,14 @@ pub(crate) fn apply_ecs_script_commands(
                     scripts.preload.as_deref_mut(),
                     &mut scripts.props,
                     &scripts.sparrows,
-                    &mut hud_texts.texts,
                     &mut prop_index,
                     &mut pending_spawned,
                 );
+            }
+            ScriptCommand::SpawnText { .. }
+            | ScriptCommand::SetText { .. }
+            | ScriptCommand::SetTextStyle { .. } => {
+                handle_text_cmd(cmd, commands, &mut hud_texts.texts);
             }
             ScriptCommand::SetShaderAdjustColor {
                 target,
@@ -168,15 +173,22 @@ pub(crate) fn apply_ecs_script_commands(
                     target: target.clone(),
                 });
             }
+            ScriptCommand::SetBarColors { .. }
+            | ScriptCommand::SetIcon { .. }
+            | ScriptCommand::SetIconScale { .. }
+            | ScriptCommand::SetIconBop { .. }
+            | ScriptCommand::PlaySfx { .. }
+            | ScriptCommand::PlaySound { .. }
+            | ScriptCommand::StopSound(_)
+            | ScriptCommand::PauseSound { .. }
+            | ScriptCommand::SetSoundParam { .. }
+            | ScriptCommand::SeekSong(_)
+            | ScriptCommand::TakeScreenshot(_)
+            | ScriptCommand::LoadSong { .. } => {
+                handle_hud_audio_cmd(cmd, commands, audio_res, scripts, hud_texts);
+            }
             _ => {
-                handle_char_hud_audio_cmd(
-                    cmd,
-                    commands,
-                    audio_res,
-                    scripts,
-                    hud_texts,
-                    &pending_spawned,
-                );
+                handle_char_cmd(cmd, commands, scripts, &pending_spawned);
             }
         }
     }
