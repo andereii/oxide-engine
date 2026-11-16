@@ -1,28 +1,27 @@
+mod character;
 mod components;
 mod systems;
 
 use bevy::prelude::*;
 
-/// Configuration for the reusable black loading screen overlay.
+/// Configuration for the reusable Funkin loading screen overlay
+/// (`mic-stand.png` progress reveal + animated loading character).
 #[derive(Debug, Clone, Copy)]
 pub struct LoadingScreenConfig {
     /// Whether the background should be transparent instead of solid black.
     pub transparent: bool,
-    /// Delay in seconds before the throbber begins fading in.
-    pub delay_secs: f32,
-    /// Fade-in duration in seconds for the throbber.
-    pub fade_in_secs: f32,
-    /// Whether to display the bottom-right spinning throbber.
-    pub show_throbber: bool,
+    /// Whether to display the `mic-stand.png` progress reveal bar.
+    pub show_progress: bool,
+    /// Whether to display a randomly selected loading character (`ui/loading/characters`).
+    pub show_character: bool,
 }
 
 impl Default for LoadingScreenConfig {
     fn default() -> Self {
         Self {
             transparent: false,
-            delay_secs: 1.0,
-            fade_in_secs: 0.2,
-            show_throbber: true,
+            show_progress: true,
+            show_character: true,
         }
     }
 }
@@ -57,7 +56,6 @@ impl LoadingScreenState {
         self.progress = progress.clamp(0.0, 1.0);
     }
 
-    #[allow(dead_code)]
     pub fn progress(&self) -> f32 {
         self.progress
     }
@@ -80,7 +78,13 @@ impl Plugin for LoadingScreenPlugin {
             .init_resource::<components::LoadingScreenRuntime>()
             .add_systems(
                 Update,
-                (systems::sync_loading_screen, systems::animate_loading_throbber).chain(),
+                (
+                    systems::sync_loading_screen,
+                    systems::sync_loading_mic_and_bar,
+                    systems::sync_loading_character,
+                )
+                    .chain()
+                    .after(crate::animations::sprite::step_animations),
             );
     }
 }

@@ -93,7 +93,7 @@ pub(crate) fn step_play_load_pipeline(
             pipeline.step = PlayLoadStep::WaitHudAndNoteskin;
         }
         PlayLoadStep::WaitHudAndNoteskin => {
-            if assets_ready(scripts.preload.as_deref_mut(), &scripts.asset_server) {
+            if step_assets_ready(scripts, loading_screen, 0.0, 0.2) {
                 pipeline.step = if state.is_minimal_mode {
                     PlayLoadStep::Audio
                 } else {
@@ -106,7 +106,7 @@ pub(crate) fn step_play_load_pipeline(
             pipeline.step = PlayLoadStep::WaitStage;
         }
         PlayLoadStep::WaitStage => {
-            if assets_ready(scripts.preload.as_deref_mut(), &scripts.asset_server) {
+            if step_assets_ready(scripts, loading_screen, 0.2, 0.45) {
                 pipeline.step = PlayLoadStep::Characters;
             }
         }
@@ -115,7 +115,7 @@ pub(crate) fn step_play_load_pipeline(
             pipeline.step = PlayLoadStep::WaitCharacters;
         }
         PlayLoadStep::WaitCharacters => {
-            if assets_ready(scripts.preload.as_deref_mut(), &scripts.asset_server) {
+            if step_assets_ready(scripts, loading_screen, 0.45, 0.7) {
                 pipeline.step = PlayLoadStep::Audio;
             }
         }
@@ -141,11 +141,23 @@ pub(crate) fn step_play_load_pipeline(
     }
 }
 
-fn assets_ready(preload: Option<&mut PlayPreloadTracker>, asset_server: &AssetServer) -> bool {
-    let Some(tr) = preload else {
+fn step_assets_ready(
+    scripts: &mut ScriptTickParams,
+    loading_screen: &mut LoadingScreenState,
+    min_frac: f32,
+    max_frac: f32,
+) -> bool {
+    let Some(tr) = scripts.preload.as_deref_mut() else {
+        loading_screen.set_progress(max_frac);
         return true;
     };
-    let progress = tr.poll(asset_server, false);
+    let progress = tr.poll(&scripts.asset_server, false);
+    let local = if progress.total_assets == 0 {
+        1.0
+    } else {
+        (progress.loaded_assets as f32 / progress.total_assets as f32).clamp(0.0, 1.0)
+    };
+    loading_screen.set_progress(min_frac + (max_frac - min_frac) * local);
     progress.loaded_assets >= progress.total_assets
 }
 
@@ -352,7 +364,7 @@ fn finish_or_poll_all(
         return;
     };
     let progress = preload.poll(&scripts.asset_server, audio_res.audio.is_ready());
-    loading_screen.set_progress(progress.fraction());
+    loading_screen.set_progress(0.7 + 0.3 * progress.fraction());
     state.status_message = format!(
         "Loading... {:.0}% ({}/{})",
         progress.fraction() * 100.0,
