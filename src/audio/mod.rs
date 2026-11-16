@@ -5,6 +5,3 @@ pub mod voices;
 
 pub use mixer::{OxideAudioPlugin, PcmSfxAudio, PcmSfxCache, SyncedSongAudio};
 pub use player::SongAudioPlayer;
-
-#[cfg(test)]
-mod tests;

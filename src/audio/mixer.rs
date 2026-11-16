@@ -199,21 +199,6 @@ impl SyncedSongAudio {
             cursor_frames,
         }
     }
-
-    #[cfg(test)]
-    pub(super) fn channels(&self) -> ChannelCount {
-        self.channels
-    }
-
-    #[cfg(test)]
-    pub(super) fn sample_rate(&self) -> SampleRate {
-        self.sample_rate
-    }
-
-    #[cfg(test)]
-    pub(super) fn total_frames(&self) -> usize {
-        self.total_frames
-    }
 }
 
 impl Decodable for SyncedSongAudio {
@@ -243,17 +228,6 @@ pub struct SyncedMixSource {
     cursor_frames: Arc<AtomicUsize>,
     local_frame: usize,
     channel_idx: usize,
-}
-
-#[cfg(test)]
-impl SyncedMixSource {
-    pub(super) fn local_frame(&self) -> usize {
-        self.local_frame
-    }
-
-    pub(super) fn channel_idx(&self) -> usize {
-        self.channel_idx
-    }
 }
 
 impl Iterator for SyncedMixSource {

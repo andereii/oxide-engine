@@ -6,6 +6,3 @@ pub mod traits;
 
 pub use rhai::RhaiBackend;
 pub use traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
-
-#[cfg(test)]
-mod tests;

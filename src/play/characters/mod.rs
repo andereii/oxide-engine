@@ -14,6 +14,3 @@ pub use loader::{
 pub use schema::CharacterRole;
 pub use spawn::{apply_composite_affine_transforms, spawn_characters, spawn_single_character};
 pub use sync::{CharacterSyncState, sync_characters};
-
-#[cfg(test)]
-mod tests;

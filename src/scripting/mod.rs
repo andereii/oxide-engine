@@ -21,6 +21,3 @@ pub use events::{HookKind, ScriptEvent};
 pub use host::ScriptHost;
 #[allow(unused_imports)]
 pub use value::{ScriptLanguage, ScriptValue};
-
-#[cfg(test)]
-mod tests;

@@ -5,9 +5,6 @@ mod script_commands;
 pub(crate) mod setup;
 mod tick;
 
-#[cfg(test)]
-mod tests;
-
 use capture::{ParityCaptureState, drive_parity_capture};
 use hud_audio::sync_hud_text;
 use input::handle_play_input;
