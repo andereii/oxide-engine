@@ -472,6 +472,8 @@ pub(super) fn tick_play_state(
             &mut scripts,
             &mut hud_texts,
             &reload_cleanup,
+            &mut loading_screen,
+            &mut load_pipeline,
         );
         return;
     }

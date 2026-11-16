@@ -163,7 +163,7 @@ fn try_load_entry(
     if !add_sparrow_animation(&atlas, &indices, &mut controller, &anim) {
         return None;
     }
-    controller.play(DEFAULT_ANIM_NAME, true);
+    controller.play(DEFAULT_ANIM_NAME, true, false, 0);
 
     let (frame_w, frame_h) = atlas
         .frames
