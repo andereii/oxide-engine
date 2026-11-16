@@ -29,6 +29,10 @@ pub struct FunkinSpriteUniform {
     pub rain_b_and_ss_hsbc: Vec4,
     pub ss_params: Vec4,
     pub ss_light: Vec4,
+    pub custom_0: Vec4,
+    pub custom_1: Vec4,
+    pub custom_2: Vec4,
+    pub custom_3: Vec4,
 }
 
 impl Default for FunkinSpriteUniform {
@@ -48,6 +52,10 @@ impl Default for FunkinSpriteUniform {
             rain_b_and_ss_hsbc: Vec4::new(0.8, 0.0, 0.0, 0.0),
             ss_params: Vec4::ZERO,
             ss_light: Vec4::ONE,
+            custom_0: Vec4::ZERO,
+            custom_1: Vec4::ZERO,
+            custom_2: Vec4::ZERO,
+            custom_3: Vec4::ZERO,
         }
     }
 }
@@ -120,13 +128,18 @@ impl FunkinSpriteUniform {
                 cfg.sserafim.light_color[2],
                 0.0,
             ),
+            custom_0: Vec4::from_array(cfg.custom_params[0]),
+            custom_1: Vec4::from_array(cfg.custom_params[1]),
+            custom_2: Vec4::from_array(cfg.custom_params[2]),
+            custom_3: Vec4::from_array(cfg.custom_params[3]),
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Default, Debug, Reflect)]
 pub struct FunkinSpriteMaterialKey {
     pub blend_mode: FunkinBlendMode,
+    pub custom_shader_uuid: Option<[u8; 16]>,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
@@ -139,13 +152,20 @@ pub struct FunkinSpriteMaterial {
     pub aux_texture: Option<Handle<Image>>,
     #[reflect(ignore)]
     pub config: SpriteShaderConfig,
+    #[reflect(ignore)]
+    pub custom_shader: Option<Handle<Shader>>,
     pub time_s: f32,
 }
 
 impl From<&FunkinSpriteMaterial> for FunkinSpriteMaterialKey {
     fn from(material: &FunkinSpriteMaterial) -> Self {
+        let custom_shader_uuid = material.custom_shader.as_ref().and_then(|h| match h.id() {
+            bevy::asset::AssetId::Uuid { uuid } => Some(*uuid.as_bytes()),
+            bevy::asset::AssetId::Index { .. } => None,
+        });
         Self {
             blend_mode: material.config.blend_mode,
+            custom_shader_uuid,
         }
     }
 }
@@ -157,6 +177,7 @@ impl FunkinSpriteMaterial {
             uniform,
             aux_texture,
             config,
+            custom_shader: None,
             time_s: 0.0,
         }
     }
@@ -184,9 +205,14 @@ impl MaterialExtension2d for FunkinSpriteMaterial {
         _layout: &MeshVertexBufferLayoutRef,
         key: Material2dKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        if let Some(fragment) = descriptor.fragment.as_mut()
-            && let Some(Some(target)) = fragment.targets.first_mut()
-        {
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            if let Some(uuid_bytes) = key.bind_group_data.custom_shader_uuid {
+                fragment.shader = Handle::Uuid(
+                    bevy::asset::uuid::Uuid::from_bytes(uuid_bytes),
+                    std::marker::PhantomData,
+                );
+            }
+            if let Some(Some(target)) = fragment.targets.first_mut() {
             target.blend = Some(match key.bind_group_data.blend_mode {
                 FunkinBlendMode::Normal => BlendState::ALPHA_BLENDING,
                 FunkinBlendMode::Add => BlendState {
@@ -214,6 +240,7 @@ impl MaterialExtension2d for FunkinSpriteMaterial {
                     alpha: BlendComponent::OVER,
                 },
             });
+            }
         }
         Ok(())
     }

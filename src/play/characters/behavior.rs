@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use crate::animations::atlas_composite::CompositeClip;
-use crate::animations::{AnimationController, Bopper};
+use crate::animations::{AnimationController, BaseAnimationData, Bopper};
 use crate::play::notes::CharNoteSignal;
 use crate::play::notes::data::{NoteDirection, NoteKindManager};
 use crate::play::stage::schema::StageCharacterSlot;
@@ -12,6 +12,7 @@ use super::schema::{CharacterData, CharacterRole};
 
 #[derive(Debug, Clone)]
 pub struct SheetSource {
+    pub asset_key: String,
     pub texture: Handle<Image>,
     pub layout: Handle<TextureAtlasLayout>,
     pub extra_layers: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
@@ -51,6 +52,7 @@ pub struct CharacterActor {
     pub bopper: Bopper,
     pub sources: Vec<SheetSource>,
     pub clips: HashMap<String, ClipVisual>,
+    pub deferred_gameover_anims: Vec<BaseAnimationData>,
     pub idle_size: [f32; 2],
     pub facing_flip_x: bool,
     pub camera_focus_point: [f64; 2],
@@ -62,6 +64,7 @@ pub struct CharacterActor {
     pub sampler_applied: bool,
     pub mod_tint: [f32; 4],
     pub mod_visible: bool,
+    pub mod_z: Option<f32>,
     pub script_anim_override: bool,
     pub sheet_entity: Entity,
     pub piece_entities: Vec<Entity>,

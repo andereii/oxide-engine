@@ -42,6 +42,11 @@ impl PlayState {
         let Some(sprite) = NoteSprite::from_data(data) else {
             return;
         };
+        let spawned_id = sprite.data.id;
+        let spawned_dir = sprite.lane.index();
+        let spawned_time = sprite.data.time_ms;
+        let spawned_len = sprite.data.sustain_length_ms;
+        let spawned_kind = sprite.data.kind.clone().unwrap_or_default();
         if is_player {
             if sprite.data.scoreable {
                 self.tallies.total_notes += 1;
@@ -58,6 +63,16 @@ impl PlayState {
                 .sort_by(|a, b| a.data.time_ms.total_cmp(&b.data.time_ms));
             self.opponent_strumline.active_start_index = 0;
         }
+        self.pending_hooks.push((
+            HookKind::NoteSpawn,
+            ScriptEvent::new(HookKind::NoteSpawn)
+                .with_field("id", spawned_id as i64)
+                .with_field("dir", spawned_dir as i64)
+                .with_field("time", spawned_time)
+                .with_field("length", spawned_len)
+                .with_field("kind", spawned_kind)
+                .with_field("is_player", is_player),
+        ));
     }
     pub fn generate_song(&mut self) {
         self.song_events = self.chart.events.clone();
@@ -256,19 +271,29 @@ impl PlayState {
                         note.data.kind.clone(),
                     )
                 };
+                let prev_combo = self.tallies.combo;
+                let prev_max_combo = self.tallies.max_combo;
                 self.player_strumline.hit_note(idx, true);
                 self.pending_hooks.push((
                     HookKind::NoteHit,
                     ScriptEvent::new(HookKind::NoteHit)
                         .with_field("id", note_id as i64)
+                        .with_field("note_idx", idx as i64)
                         .with_field("dir", lane.index() as i64)
                         .with_field("time", strum_time_ms)
                         .with_field("length", full_length_ms)
                         .with_field("kind", note_kind.clone().unwrap_or_default())
                         .with_field("judgement", Judgement::Sick.as_str())
                         .with_field("score", 0.0_f64)
+                        .with_field("health_change", 0.0_f64)
                         .with_field("combo", self.tallies.combo as i64)
-                        .with_field("is_hold", is_hold),
+                        .with_field("combo_before", prev_combo as i64)
+                        .with_field("max_combo_before", prev_max_combo as i64)
+                        .with_field("is_hold", is_hold)
+                        .with_field("is_player", true)
+                        .with_field("scoreable", scoreable)
+                        .with_field("does_notesplash", false)
+                        .with_field("play_anim", true),
                 ));
                 self.player_strumline.pending_char_events.push(CharNoteSignal::Hit {
                     direction: lane,
@@ -319,6 +344,7 @@ impl PlayState {
                     )
                 };
                 let prev_combo = self.tallies.combo;
+                let prev_max_combo = self.tallies.max_combo;
                 let prev_health = self.health;
                 let prev_score = self.song_score;
                 self.on_note_miss(HEALTH_MISS_BONUS);
@@ -337,7 +363,10 @@ impl PlayState {
                         .with_field("kind", miss_kind.unwrap_or_default())
                         .with_field("health_change", health_delta)
                         .with_field("score_change", score_delta)
-                        .with_field("combo_before", prev_combo as i64),
+                        .with_field("combo_before", prev_combo as i64)
+                        .with_field("max_combo_before", prev_max_combo as i64)
+                        .with_field("play_sound", true)
+                        .with_field("play_anim", true),
                 ));
                 self.player_strumline.pending_char_events.push(CharNoteSignal::Miss {
                     direction: miss_dir,
@@ -366,9 +395,12 @@ impl PlayState {
         let rem = (hold_end_ms - self.conductor.song_position_ms).clamp(0.0, full_length_ms);
         let is_combo_break = judgement.is_combo_break();
         let prev_combo = self.tallies.combo;
+        let prev_max_combo = self.tallies.max_combo;
+        let prev_health = self.health;
+        let does_notesplash = matches!(judgement, Judgement::Sick) && self.player_strumline.show_notesplash;
 
         self.player_strumline.hit_note(note_idx, !is_combo_break);
-        if matches!(judgement, Judgement::Sick) && self.player_strumline.show_notesplash {
+        if does_notesplash {
             self.player_strumline.pending_splashes.push(lane);
         }
 
@@ -392,11 +424,12 @@ impl PlayState {
         if scoreable {
             self.tallies.total_notes_hit += 1;
             self.apply_score(score, judgement, judgement.health_change(), is_combo_break);
-            if !matches!(judgement, Judgement::Miss) {
+            if !matches!(judgement, Judgement::Miss) && self.popups_visible {
                 let combo = (self.tallies.combo >= COMBO_POPUP_THRESHOLD).then_some(self.tallies.combo);
                 self.pending_popups.push(PopupEvent { judgement: Some(judgement), combo });
             }
         }
+        let health_delta = self.health - prev_health;
         self.player_strumline.pending_char_events.push(CharNoteSignal::Hit {
             direction: lane,
             note_kind: note_kind.clone(),
@@ -407,14 +440,23 @@ impl PlayState {
             HookKind::NoteHit,
             ScriptEvent::new(HookKind::NoteHit)
                 .with_field("id", note_id as i64)
+                .with_field("note_idx", note_idx as i64)
                 .with_field("dir", lane.index() as i64)
                 .with_field("time", strum_time_ms)
                 .with_field("length", full_length_ms)
                 .with_field("kind", note_kind.unwrap_or_default())
                 .with_field("judgement", judgement.as_str())
-                .with_field("score", score)
+                .with_field("score", if scoreable { score } else { 0.0 })
+                .with_field("health_change", health_delta)
                 .with_field("combo", self.tallies.combo as i64)
-                .with_field("is_hold", is_hold),
+                .with_field("combo_before", prev_combo as i64)
+                .with_field("max_combo_before", prev_max_combo as i64)
+                .with_field("is_hold", is_hold)
+                .with_field("is_player", true)
+                .with_field("diff_ms", note_diff)
+                .with_field("scoreable", scoreable)
+                .with_field("does_notesplash", does_notesplash)
+                .with_field("play_anim", true),
         ));
     }
 }

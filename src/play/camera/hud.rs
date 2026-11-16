@@ -83,21 +83,25 @@ pub fn sync_hud_camera(
     }
 
     for (overlay, mut sprite, mut vis) in &mut flashes {
-        let (timer, dur, color) = if overlay.hud {
+        let (timer, dur, color, fade_in) = if overlay.hud {
             (
                 state.camera.hud_flash_timer_s,
                 state.camera.hud_flash_duration_s,
                 state.camera.hud_flash_color,
+                state.camera.hud_flash_fade_in,
             )
         } else {
             (
                 state.camera.flash_timer_s,
                 state.camera.flash_duration_s,
                 state.camera.flash_color,
+                state.camera.flash_fade_in,
             )
         };
         if timer > 0.0 && dur > 0.0 {
-            let alpha = ((timer / dur) as f32 * color[3]).clamp(0.0, 1.0);
+            let progress = (1.0 - (timer / dur)) as f32;
+            let t = if fade_in { progress } else { 1.0 - progress };
+            let alpha = (t * color[3]).clamp(0.0, 1.0);
             sprite.color = Color::srgba(color[0], color[1], color[2], alpha);
             if *vis != Visibility::Visible {
                 *vis = Visibility::Visible;

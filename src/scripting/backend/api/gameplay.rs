@@ -1,8 +1,66 @@
 use rhai::{Dynamic, Engine, EvalAltResult};
 
-use crate::scripting::api::{ScriptCommand, TweenProp, TweenTarget, parse_hex_rgba};
+use crate::scripting::api::ScriptCommand;
 use crate::scripting::backend::context::{dyn_to_f64, dyn_to_usize, with_ctx};
 use crate::scripting::value::ScriptValue;
+
+fn register_tagged_sound_fns(engine: &mut Engine, name: &str) {
+    engine.register_fn(name, |tag: &str, path: &str| {
+        with_ctx(|c| {
+            c.snapshot.sound_volumes.insert(tag.to_string(), 1.0);
+            c.commands.push(ScriptCommand::PlaySound {
+                tag: tag.to_string(),
+                path: path.to_string(),
+                volume: 1.0,
+                looped: false,
+                pitch: 1.0,
+            });
+        })
+    });
+    engine.register_fn(name, |tag: &str, path: &str, vol: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let volume = dyn_to_f64(&vol)? as f32;
+        with_ctx(|c| {
+            c.snapshot.sound_volumes.insert(tag.to_string(), volume);
+            c.commands.push(ScriptCommand::PlaySound {
+                tag: tag.to_string(),
+                path: path.to_string(),
+                volume,
+                looped: false,
+                pitch: 1.0,
+            });
+        })
+    });
+    engine.register_fn(name, |tag: &str, path: &str, vol: Dynamic, looped: bool| -> Result<(), Box<EvalAltResult>> {
+        let volume = dyn_to_f64(&vol)? as f32;
+        with_ctx(|c| {
+            c.snapshot.sound_volumes.insert(tag.to_string(), volume);
+            c.commands.push(ScriptCommand::PlaySound {
+                tag: tag.to_string(),
+                path: path.to_string(),
+                volume,
+                looped,
+                pitch: 1.0,
+            });
+        })
+    });
+    engine.register_fn(
+        name,
+        |tag: &str, path: &str, vol: Dynamic, looped: bool, pitch: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let volume = dyn_to_f64(&vol)? as f32;
+            let pitch = (dyn_to_f64(&pitch)? as f32).max(0.05);
+            with_ctx(|c| {
+                c.snapshot.sound_volumes.insert(tag.to_string(), volume);
+                c.commands.push(ScriptCommand::PlaySound {
+                    tag: tag.to_string(),
+                    path: path.to_string(),
+                    volume,
+                    looped,
+                    pitch,
+                });
+            })
+        },
+    );
+}
 
 pub fn register_gameplay_api(engine: &mut Engine) {
     engine.register_fn("hp", || with_ctx(|c| c.mutable.health));
@@ -38,14 +96,58 @@ pub fn register_gameplay_api(engine: &mut Engine) {
     });
 
     engine.register_fn("combo", || with_ctx(|c| i64::from(c.snapshot.combo)));
+    engine.register_fn("max_combo", || with_ctx(|c| i64::from(c.snapshot.max_combo)));
     engine.register_fn("misses", || with_ctx(|c| i64::from(c.snapshot.misses)));
+    engine.register_fn("sicks", || with_ctx(|c| i64::from(c.snapshot.sick)));
+    engine.register_fn("goods", || with_ctx(|c| i64::from(c.snapshot.good)));
+    engine.register_fn("bads", || with_ctx(|c| i64::from(c.snapshot.bad)));
+    engine.register_fn("shits", || with_ctx(|c| i64::from(c.snapshot.shit)));
+    engine.register_fn("hit_count", || with_ctx(|c| i64::from(c.snapshot.hit_notes)));
     engine.register_fn("note_count", || with_ctx(|c| c.snapshot.note_count as i64));
+    engine.register_fn("acc", || with_ctx(|c| c.snapshot.accuracy()));
+    engine.register_fn("rank", || with_ctx(|c| c.snapshot.rank_name().to_string()));
+    engine.register_fn("deaths", || with_ctx(|c| i64::from(c.snapshot.deaths)));
 
     engine.register_fn("botplay", || with_ctx(|c| c.mutable.botplay));
     engine.register_fn("set_botplay", |enabled: bool| {
         with_ctx(|c| {
             c.mutable.botplay = enabled;
             c.mutable.dirty_botplay = true;
+        })
+    });
+    engine.register_fn("practice", || with_ctx(|c| c.mutable.practice_mode));
+    engine.register_fn("set_practice", |enabled: bool| {
+        with_ctx(|c| {
+            c.mutable.practice_mode = enabled;
+            c.mutable.dirty_practice = true;
+        })
+    });
+    engine.register_fn("ghost_tap", || with_ctx(|c| c.mutable.ghost_tap));
+    engine.register_fn("set_ghost_tap", |enabled: bool| {
+        with_ctx(|c| {
+            c.mutable.ghost_tap = enabled;
+            c.mutable.dirty_ghost_tap = true;
+        })
+    });
+    engine.register_fn("paused", || with_ctx(|c| c.snapshot.paused));
+    engine.register_fn("in_cutscene", || with_ctx(|c| c.mutable.in_cutscene));
+    engine.register_fn("set_cutscene", |enabled: bool| {
+        with_ctx(|c| {
+            c.mutable.in_cutscene = enabled;
+            c.mutable.dirty_cutscene = true;
+        })
+    });
+    engine.register_fn("can_pause", || with_ctx(|c| c.mutable.can_pause));
+    engine.register_fn("set_can_pause", |enabled: bool| {
+        with_ctx(|c| {
+            c.mutable.can_pause = enabled;
+            c.mutable.dirty_can_pause = true;
+        })
+    });
+    engine.register_fn("lock_keys", |disabled: bool| {
+        with_ctx(|c| {
+            c.mutable.keys_disabled = disabled;
+            c.mutable.dirty_keys_disabled = true;
         })
     });
 
@@ -78,7 +180,13 @@ pub fn register_gameplay_api(engine: &mut Engine) {
         })
     });
 
-    engine.register_fn("downscroll", || with_ctx(|c| c.snapshot.downscroll));
+    engine.register_fn("downscroll", || with_ctx(|c| c.mutable.downscroll));
+    engine.register_fn("set_downscroll", |enabled: bool| {
+        with_ctx(|c| {
+            c.mutable.downscroll = enabled;
+            c.mutable.dirty_downscroll = true;
+        })
+    });
     engine.register_fn("middlescroll", || with_ctx(|c| c.mutable.middlescroll));
     engine.register_fn("set_middlescroll", |enabled: bool| {
         with_ctx(|c| {
@@ -109,6 +217,12 @@ pub fn register_gameplay_api(engine: &mut Engine) {
         with_ctx(|c| c.commands.push(ScriptCommand::SetHudVisible(visible)))
     });
 
+    engine.register_fn("get_inst_vol", || with_ctx(|c| c.snapshot.inst_vol));
+    engine.register_fn("get_vocals_vol", || {
+        with_ctx(|c| (c.snapshot.p_vocal_vol + c.snapshot.o_vocal_vol) * 0.5)
+    });
+    engine.register_fn("get_p_vocal_vol", || with_ctx(|c| c.snapshot.p_vocal_vol));
+    engine.register_fn("get_o_vocal_vol", || with_ctx(|c| c.snapshot.o_vocal_vol));
     engine.register_fn("inst_vol", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
         let vol = dyn_to_f64(&v)? as f32;
         with_ctx(|c| {
@@ -193,168 +307,150 @@ pub fn register_gameplay_api(engine: &mut Engine) {
             });
         })
     });
+
+    // Tagged audio channels
+    register_tagged_sound_fns(engine, "play_snd");
+    register_tagged_sound_fns(engine, "sound");
+    for name in ["stop_snd", "stop_sound"] {
+        engine.register_fn(name, |tag: &str| {
+            with_ctx(|c| {
+                c.snapshot.active_sounds.retain(|s| s != tag);
+                c.snapshot.sound_volumes.remove(tag);
+                c.commands.push(ScriptCommand::StopSound(tag.to_string()));
+            })
+        });
+    }
+    engine.register_fn("pause_snd", |tag: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::PauseSound {
+                tag: tag.to_string(),
+                paused: true,
+            });
+        })
+    });
+    engine.register_fn("resume_snd", |tag: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::PauseSound {
+                tag: tag.to_string(),
+                paused: false,
+            });
+        })
+    });
+    engine.register_fn("snd_vol", |tag: &str, v: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let vol = dyn_to_f64(&v)? as f32;
+        with_ctx(|c| {
+            c.snapshot.sound_volumes.insert(tag.to_string(), vol);
+            c.commands.push(ScriptCommand::SetSoundParam {
+                tag: tag.to_string(),
+                volume: Some(vol),
+                pitch: None,
+            });
+        })
+    });
+    engine.register_fn("snd_pitch", |tag: &str, p: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let pitch = (dyn_to_f64(&p)? as f32).max(0.05);
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetSoundParam {
+                tag: tag.to_string(),
+                volume: None,
+                pitch: Some(pitch),
+            });
+        })
+    });
+    engine.register_fn("snd_playing", |tag: &str| {
+        with_ctx(|c| c.snapshot.active_sounds.iter().any(|s| s == tag))
+    });
+
+    // Flow, countdown & playlist
     engine.register_fn("end_song", || with_ctx(|c| c.commands.push(ScriptCommand::EndSong)));
     engine.register_fn("restart_song", || with_ctx(|c| c.commands.push(ScriptCommand::RestartSong)));
     engine.register_fn("pause_song", || with_ctx(|c| c.commands.push(ScriptCommand::PauseSong)));
-}
-
-pub fn register_camera_api(engine: &mut Engine) {
-    engine.register_fn("cam_zoom", || with_ctx(|c| c.mutable.cam_zoom));
-    engine.register_fn("set_zoom", |z: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let val = dyn_to_f64(&z)?;
-        with_ctx(|c| {
-            c.mutable.cam_zoom = val;
-            c.mutable.dirty_cam_zoom = true;
-        })
+    engine.register_fn("resume_song", || with_ctx(|c| c.commands.push(ScriptCommand::ResumeSong)));
+    engine.register_fn("seek", |ms: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let ms = dyn_to_f64(&ms)?.max(0.0);
+        with_ctx(|c| c.commands.push(ScriptCommand::SeekSong(ms)))
     });
-    engine.register_fn("zoom", |z: Dynamic, secs: Dynamic, ease: &str| -> Result<(), Box<EvalAltResult>> {
-        let target = dyn_to_f64(&z)?;
-        let dur = dyn_to_f64(&secs)?;
+    engine.register_fn("countdown", |action: &str| {
         with_ctx(|c| {
-            c.commands.push(ScriptCommand::TweenCameraZoom {
-                target,
-                duration_s: dur.max(0.0),
-                ease: ease.to_string(),
-            });
-        })
-    });
-    engine.register_fn("zoom", |z: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let target = dyn_to_f64(&z)?;
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::TweenCameraZoom {
-                target,
-                duration_s: dur.max(0.0),
-                ease: "quadOut".to_string(),
+            c.commands.push(ScriptCommand::ControlCountdown {
+                action: action.to_string(),
             });
         })
     });
 
-    engine.register_fn("hud_zoom", || with_ctx(|c| c.mutable.hud_zoom));
-    engine.register_fn("set_hud_zoom", |z: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let val = dyn_to_f64(&z)?;
+    engine.register_fn("story_mode", || with_ctx(|c| c.snapshot.story_mode));
+    engine.register_fn("set_story_mode", |enabled: bool| {
         with_ctx(|c| {
-            c.mutable.hud_zoom = val;
-            c.mutable.dirty_hud_zoom = true;
+            c.snapshot.story_mode = enabled;
+            c.commands.push(ScriptCommand::SetPlaylist {
+                story_mode: Some(enabled),
+                songs: None,
+                score: None,
+            });
         })
     });
-
-    engine.register_fn("cam_pos", || {
-        with_ctx(|c| vec![Dynamic::from(c.mutable.cam_x), Dynamic::from(c.mutable.cam_y)])
-    });
-    engine.register_fn("set_cam", |x: Dynamic, y: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let x = dyn_to_f64(&x)?;
-        let y = dyn_to_f64(&y)?;
+    engine.register_fn("playlist", || {
         with_ctx(|c| {
-            c.mutable.cam_x = x;
-            c.mutable.cam_y = y;
-            c.mutable.dirty_cam_pos = true;
+            c.snapshot
+                .playlist_songs
+                .iter()
+                .cloned()
+                .map(Dynamic::from)
+                .collect::<rhai::Array>()
         })
     });
-    engine.register_fn("pan_cam", |x: Dynamic, y: Dynamic, secs: Dynamic, ease: &str| -> Result<(), Box<EvalAltResult>> {
-        let x = dyn_to_f64(&x)?;
-        let y = dyn_to_f64(&y)?;
-        let dur = dyn_to_f64(&secs)?;
+    engine.register_fn("set_playlist", |songs: rhai::Array| {
+        let list: Vec<String> = songs
+            .into_iter()
+            .filter_map(|v| v.into_string().ok())
+            .collect();
         with_ctx(|c| {
-            c.commands.push(ScriptCommand::TweenCameraPos {
-                x,
-                y,
-                duration_s: dur.max(0.0),
-                ease: ease.to_string(),
+            c.snapshot.playlist_songs = list.clone();
+            c.commands.push(ScriptCommand::SetPlaylist {
+                story_mode: None,
+                songs: Some(list),
+                score: None,
+            });
+        })
+    });
+    engine.register_fn("campaign_score", || with_ctx(|c| i64::from(c.snapshot.campaign_score)));
+    engine.register_fn("set_campaign_score", |score: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let score = dyn_to_f64(&score)? as i32;
+        with_ctx(|c| {
+            c.snapshot.campaign_score = score;
+            c.commands.push(ScriptCommand::SetPlaylist {
+                story_mode: None,
+                songs: None,
+                score: Some(score),
             });
         })
     });
 
-    engine.register_fn("focus", |target: &str| {
+    engine.register_fn("load_song", |song_id: &str| {
         with_ctx(|c| {
-            c.commands
-                .push(ScriptCommand::FocusCameraTarget(target.to_string()))
-        })
-    });
-    engine.register_fn("focus_at", |x: Dynamic, y: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let x = dyn_to_f64(&x)?;
-        let y = dyn_to_f64(&y)?;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::TweenCameraPos {
-                x,
-                y,
-                duration_s: 0.4,
-                ease: "quadOut".to_string(),
+            c.commands.push(ScriptCommand::LoadSong {
+                song_id: song_id.to_string(),
+                difficulty: None,
+                variation: None,
             });
         })
     });
-
-    engine.register_fn("cam_bop", |game_delta: Dynamic, hud_delta: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let g = dyn_to_f64(&game_delta)?;
-        let h = dyn_to_f64(&hud_delta)?;
+    engine.register_fn("load_song", |song_id: &str, diff: &str| {
         with_ctx(|c| {
-            c.commands.push(ScriptCommand::CameraBop {
-                game_delta: g,
-                hud_delta: h,
+            c.commands.push(ScriptCommand::LoadSong {
+                song_id: song_id.to_string(),
+                difficulty: Some(diff.to_string()),
+                variation: None,
             });
         })
     });
-    engine.register_fn("set_bop", |intensity: Dynamic, rate: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let i = dyn_to_f64(&intensity)?;
-        let r = dyn_to_f64(&rate)?;
+    engine.register_fn("load_song", |song_id: &str, diff: &str, var: &str| {
         with_ctx(|c| {
-            c.commands.push(ScriptCommand::SetCameraBopConfig {
-                intensity: i,
-                rate: r,
-            });
-        })
-    });
-
-    engine.register_fn("cam_angle", || with_ctx(|c| f64::from(c.mutable.cam_angle_deg)));
-    engine.register_fn("set_cam_angle", |deg: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let val = dyn_to_f64(&deg)? as f32;
-        with_ctx(|c| {
-            c.mutable.cam_angle_deg = val;
-            c.mutable.dirty_cam_angle = true;
-        })
-    });
-    engine.register_fn("cam_turn", |deg: Dynamic, secs: Dynamic, ease: &str| -> Result<(), Box<EvalAltResult>> {
-        let target = dyn_to_f64(&deg)?;
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| c.push_tween(TweenTarget::Camera, TweenProp::Angle, target, dur, ease))
-    });
-    engine.register_fn("cam_turn", |deg: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let target = dyn_to_f64(&deg)?;
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| c.push_tween(TweenTarget::Camera, TweenProp::Angle, target, dur, "quadOut"))
-    });
-
-    engine.register_fn("shake", |intensity: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let i = dyn_to_f64(&intensity)? as f32;
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::CameraShake {
-                intensity: i,
-                duration_s: dur.max(0.0),
-                hud: false,
-            });
-        })
-    });
-    engine.register_fn("hud_shake", |intensity: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let i = dyn_to_f64(&intensity)? as f32;
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::CameraShake {
-                intensity: i,
-                duration_s: dur.max(0.0),
-                hud: true,
-            });
-        })
-    });
-    engine.register_fn("flash", |hex: &str, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::CameraFlash {
-                color: parse_hex_rgba(hex),
-                duration_s: dur.max(0.0),
-                hud: true,
+            c.commands.push(ScriptCommand::LoadSong {
+                song_id: song_id.to_string(),
+                difficulty: Some(diff.to_string()),
+                variation: Some(var.to_string()),
             });
         })
     });
 }
-

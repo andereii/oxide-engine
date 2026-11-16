@@ -109,26 +109,20 @@ pub fn spawn_health_icons(
     spawn_single_icon(commands, mods, 0, p1_char.map(|c| c.id.as_str()), p1_char.and_then(|c| c.data.health_icon.as_ref()), asset_server, layouts);
 }
 
-fn spawn_single_icon(
-    commands: &mut Commands,
+fn load_icon_visual_bundle(
     mods: &ModRegistry,
-    player_id: u8,
-    char_id: Option<&str>,
-    data: Option<&HealthIconData>,
+    icon_id: &str,
+    is_pixel: bool,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+) -> (
+    Handle<Image>,
+    Handle<TextureAtlasLayout>,
+    AnimationController,
+    bool,
+    [f32; 2],
+    Option<Handle<Image>>,
 ) {
-    let requested_id = data.and_then(|d| d.id.as_deref()).or(char_id).unwrap_or(DEFAULT_HEALTH_ICON);
-    let icon_id = if icon_png_exists(mods, requested_id) { requested_id } else { DEFAULT_HEALTH_ICON };
-    let is_pixel = data.and_then(|d| d.is_pixel).unwrap_or(false);
-    let should_bop = true;
-    let scale = data.and_then(|d| d.scale).unwrap_or(1.0);
-    let icon_offset = data.and_then(|d| d.offsets).unwrap_or([0.0, 0.0]);
-    let mut flip_x = data.and_then(|d| d.flip_x).unwrap_or(false);
-    if player_id == 0 {
-        flip_x = !flip_x;
-    }
-
     let xml_rel = format!("gameplay/characters/{icon_id}/icon-{icon_id}.xml");
     let png_rel = format!("gameplay/characters/{icon_id}/icon-{icon_id}.png");
     let png_asset = mods.resolve_asset_server_path(&png_rel).unwrap_or(png_rel);
@@ -160,6 +154,60 @@ fn spawn_single_icon(
         };
 
     anim.play("idle", true, false, 0);
+    (texture, layout_handle, anim, is_legacy_style, base_frame_size, legacy_image)
+}
+
+pub fn apply_icon_char_id(
+    icon: &mut HealthIcon,
+    anim: &mut AnimationController,
+    sprite: &mut Sprite,
+    char_id: &str,
+    mods: &ModRegistry,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) {
+    let icon_id = if icon_png_exists(mods, char_id) { char_id } else { DEFAULT_HEALTH_ICON };
+    let (texture, layout_handle, next_anim, is_legacy, base_frame_size, legacy_image) =
+        load_icon_visual_bundle(mods, icon_id, icon.is_pixel, asset_server, layouts);
+    *anim = next_anim;
+    icon.character_id = icon_id.to_string();
+    icon.is_legacy_style = is_legacy;
+    icon.base_frame_size = base_frame_size;
+    icon.legacy_image = legacy_image;
+    icon.legacy_layout_ready = false;
+    icon.snap_to_target_size();
+
+    let init_idx = anim.current_atlas_index().unwrap_or(0);
+    sprite.image = texture;
+    sprite.texture_atlas = Some(TextureAtlas {
+        layout: layout_handle,
+        index: init_idx,
+    });
+}
+
+fn spawn_single_icon(
+    commands: &mut Commands,
+    mods: &ModRegistry,
+    player_id: u8,
+    char_id: Option<&str>,
+    data: Option<&HealthIconData>,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) {
+    let requested_id = data.and_then(|d| d.id.as_deref()).or(char_id).unwrap_or(DEFAULT_HEALTH_ICON);
+    let icon_id = if icon_png_exists(mods, requested_id) { requested_id } else { DEFAULT_HEALTH_ICON };
+    let is_pixel = data.and_then(|d| d.is_pixel).unwrap_or(false);
+    let should_bop = true;
+    let scale = data.and_then(|d| d.scale).unwrap_or(1.0);
+    let icon_offset = data.and_then(|d| d.offsets).unwrap_or([0.0, 0.0]);
+    let mut flip_x = data.and_then(|d| d.flip_x).unwrap_or(false);
+    if player_id == 0 {
+        flip_x = !flip_x;
+    }
+
+    let (texture, layout_handle, anim, is_legacy_style, base_frame_size, legacy_image) =
+        load_icon_visual_bundle(mods, icon_id, is_pixel, asset_server, layouts);
+
     let init_idx = anim.current_atlas_index().unwrap_or(0);
     let mut sprite = Sprite::from_atlas_image(texture, TextureAtlas { layout: layout_handle, index: init_idx });
     sprite.flip_x = flip_x;

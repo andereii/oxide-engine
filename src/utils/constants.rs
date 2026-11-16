@@ -87,8 +87,6 @@ pub const SUSTAIN_MIN_REMAINING_MS: f64 = 10.0;
 pub const VWOOSH_DURATION_S: f64 = 0.5;
 pub const SCREEN_WIDTH: f32 = 1280.0;
 pub const SCREEN_HEIGHT: f32 = 720.0;
-pub const RESYNC_THRESHOLD_MS: f64 = 40.0;
-pub const RESYNC_COOLDOWN_S: f64 = 0.5;
 pub const CONDUCTOR_DRIFT_THRESHOLD_MS: f64 = 65.0;
 #[allow(dead_code)]
 pub const MUSIC_EASE_RATIO: f64 = 42.0;

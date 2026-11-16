@@ -116,4 +116,6 @@ pub trait ScriptBackend: Send + Sync {
     fn watched_module_paths(&self) -> Vec<PathBuf> {
         Vec::new()
     }
+
+    fn invalidate_caches(&self) {}
 }

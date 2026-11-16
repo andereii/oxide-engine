@@ -97,6 +97,15 @@ impl CharacterData {
     }
 }
 
+/// Returns `true` when an animation belongs exclusively to the Game Over sequence
+/// and differs from the character's `starting_anim`.
+pub fn is_gameover_only_anim(anim_name: &str, starting_anim: &str) -> bool {
+    anim_name != starting_anim
+        && (anim_name.starts_with("firstDeath")
+            || anim_name.starts_with("deathLoop")
+            || anim_name.starts_with("deathConfirm"))
+}
+
 impl Default for CharacterData {
     fn default() -> Self {
         Self {

@@ -13,12 +13,13 @@ use crate::utils::constants::{
     RHAI_MAX_STRING_SIZE, SCRIPT_EXT_RHAI,
 };
 
+use super::api::camera_hud::register_camera_hud_api;
 use super::api::core::{register_core_and_song_api, register_math_and_rng_api};
-use super::api::gameplay::{register_camera_api, register_gameplay_api};
+use super::api::gameplay::register_gameplay_api;
+use super::api::notes::register_notes_api;
 use super::api::shaders::register_shader_api;
-use super::api::stage::{
-    register_character_and_modchart_api, register_props_tweens_timers_and_store_api,
-};
+use super::api::stage::{register_character_api, register_props_api};
+use super::api::text_tweens::register_text_tweens_timers_and_store_api;
 use super::context::{RhaiEvent, register_event_type, with_tls_context};
 use super::rhai_resolver::{SharedVfsModuleResolver, VfsModuleResolver, vfs_rel_for_script};
 use super::traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
@@ -39,9 +40,11 @@ fn build_configured_engine(resolver: Option<Arc<VfsModuleResolver>>) -> Arc<Engi
     register_event_type(&mut engine);
     register_core_and_song_api(&mut engine);
     register_gameplay_api(&mut engine);
-    register_camera_api(&mut engine);
-    register_character_and_modchart_api(&mut engine);
-    register_props_tweens_timers_and_store_api(&mut engine);
+    register_camera_hud_api(&mut engine);
+    register_character_api(&mut engine);
+    register_props_api(&mut engine);
+    register_notes_api(&mut engine);
+    register_text_tweens_timers_and_store_api(&mut engine);
     register_math_and_rng_api(&mut engine);
     register_shader_api(&mut engine);
 
@@ -93,6 +96,12 @@ impl ScriptBackend for RhaiBackend {
             .as_ref()
             .map(|r| r.cached_paths())
             .unwrap_or_default()
+    }
+
+    fn invalidate_caches(&self) {
+        if let Some(res) = &self.resolver {
+            res.clear_caches();
+        }
     }
 
     fn compile(&self, source: ScriptSource) -> Result<Box<dyn ScriptInstance>, ScriptError> {
@@ -151,15 +160,8 @@ impl RhaiScriptInstance {
         ctx.current_script_id = self.id.clone();
         ctx.current_mod_id = self.mod_id.clone();
 
-        let owned_ctx = std::mem::replace(
-            ctx,
-            ScriptContext::new(
-                ctx.snapshot.clone(),
-                ctx.registry.clone(),
-                ctx.store.clone(),
-                ctx.rng_state,
-            ),
-        );
+        let placeholder = ctx.empty_placeholder();
+        let owned_ctx = std::mem::replace(ctx, placeholder);
         let engine = &self.engine;
         let ast = &self.ast;
         let rhai_scope = &mut self.rhai_scope;
@@ -232,15 +234,8 @@ impl ScriptInstance for RhaiScriptInstance {
         ctx.current_mod_id = self.mod_id.clone();
 
         let shared_event = RhaiEvent::from_event(event.clone());
-        let owned_ctx = std::mem::replace(
-            ctx,
-            ScriptContext::new(
-                ctx.snapshot.clone(),
-                ctx.registry.clone(),
-                ctx.store.clone(),
-                ctx.rng_state,
-            ),
-        );
+        let placeholder = ctx.empty_placeholder();
+        let owned_ctx = std::mem::replace(ctx, placeholder);
 
         let engine = &self.engine;
         let ast = &self.ast;
@@ -285,15 +280,8 @@ impl ScriptInstance for RhaiScriptInstance {
         ctx.current_script_id = self.id.clone();
         ctx.current_mod_id = self.mod_id.clone();
 
-        let owned_ctx = std::mem::replace(
-            ctx,
-            ScriptContext::new(
-                ctx.snapshot.clone(),
-                ctx.registry.clone(),
-                ctx.store.clone(),
-                ctx.rng_state,
-            ),
-        );
+        let placeholder = ctx.empty_placeholder();
+        let owned_ctx = std::mem::replace(ctx, placeholder);
 
         let engine = &self.engine;
         let ast = &self.ast;

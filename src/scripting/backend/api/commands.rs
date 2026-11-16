@@ -62,6 +62,35 @@ pub enum ScriptCommand {
         duration_s: f64,
         hud: bool,
     },
+    CameraFade {
+        color: [f32; 4],
+        duration_s: f64,
+        fade_in: bool,
+        hud: bool,
+    },
+    ResetCamera {
+        zoom: bool,
+        tweens: bool,
+        snap: bool,
+    },
+    CancelCameraTweens,
+    CharDance {
+        target: String,
+        force: bool,
+    },
+    SetCharFlip {
+        target: String,
+        flip_x: bool,
+        flip_y: bool,
+    },
+    SetCharZ {
+        target: String,
+        z: f32,
+    },
+    SwapChar {
+        role: String,
+        char_id: String,
+    },
     PlayAnim {
         target: String,
         anim: String,
@@ -158,6 +187,161 @@ pub enum ScriptCommand {
     SetPropVisible {
         id: String,
         visible: bool,
+    },
+    SetPropFlip {
+        id: String,
+        flip_x: bool,
+        flip_y: bool,
+    },
+    SetPropScroll {
+        id: String,
+        sx: f32,
+        sy: f32,
+    },
+    SetPropZ {
+        id: String,
+        z: f32,
+    },
+    SetPropSize {
+        id: String,
+        w: f32,
+        h: f32,
+    },
+    SetPropVelocity {
+        id: String,
+        vx: f32,
+        vy: f32,
+        ax: f32,
+        ay: f32,
+    },
+    AddPropAnim {
+        id: String,
+        anim: BaseAnimationData,
+    },
+    SpawnText {
+        id: String,
+        text: String,
+        pos: [f32; 2],
+        z: f32,
+        size: f32,
+        color: [f32; 4],
+        font: Option<String>,
+        align: String,
+        hud: bool,
+    },
+    SetText {
+        id: String,
+        text: String,
+    },
+    SetTextStyle {
+        id: String,
+        size: Option<f32>,
+        color: Option<[f32; 4]>,
+        align: Option<String>,
+    },
+    KillNote {
+        id: usize,
+    },
+    ModifyNote {
+        id: usize,
+        time_ms: Option<f64>,
+        dir: Option<usize>,
+        length_ms: Option<f64>,
+        kind: Option<String>,
+        scoreable: Option<bool>,
+    },
+    StrumAnim {
+        lane: usize,
+        state: String,
+    },
+    SpawnSplash {
+        lane: usize,
+    },
+    SetNotesplashVisible(bool),
+    SetStrumStyle {
+        side: String,
+        scale: f32,
+        spacing: f32,
+    },
+    VwooshNotes {
+        side: String,
+        fade_in: bool,
+    },
+    SetBarColors {
+        opp: [f32; 4],
+        ply: [f32; 4],
+    },
+    SetIcon {
+        side: String,
+        char_id: String,
+    },
+    SetIconScale {
+        side: String,
+        scale: f32,
+    },
+    SetIconBop {
+        side: String,
+        enabled: bool,
+        every: i32,
+        angle_deg: f32,
+    },
+    SpawnPopup {
+        judgement: String,
+        combo: Option<u32>,
+    },
+    SetPopupsConfig {
+        visible: Option<bool>,
+        offset: Option<[f32; 2]>,
+    },
+    ControlCountdown {
+        action: String,
+    },
+    SeekSong(f64),
+    ResumeSong,
+    PlaySound {
+        tag: String,
+        path: String,
+        volume: f32,
+        looped: bool,
+        pitch: f32,
+    },
+    StopSound(String),
+    PauseSound {
+        tag: String,
+        paused: bool,
+    },
+    SetSoundParam {
+        tag: String,
+        volume: Option<f32>,
+        pitch: Option<f32>,
+    },
+    SetBlendMode {
+        target: String,
+        mode: String,
+    },
+    SetCustomShader {
+        target: String,
+        path: String,
+    },
+    SetShaderParam {
+        target: String,
+        key: String,
+        values: [f32; 4],
+    },
+    SetShaderTex {
+        target: String,
+        path: String,
+    },
+    TakeScreenshot(Option<String>),
+    SetPlaylist {
+        story_mode: Option<bool>,
+        songs: Option<Vec<String>>,
+        score: Option<i32>,
+    },
+    LoadSong {
+        song_id: String,
+        difficulty: Option<String>,
+        variation: Option<String>,
     },
     SetAudioVolumes {
         inst: Option<f32>,

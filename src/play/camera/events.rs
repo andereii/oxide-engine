@@ -5,7 +5,7 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::play::scene::PlayState;
+use crate::play::scene::{PlayState, SongEventRevertSnapshot};
 use crate::play::types::SongEventData;
 use crate::scripting::{HookKind, ScriptEvent, ScriptValue};
 use crate::utils::constants::{DEFAULT_BOP_INTENSITY, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE};
@@ -109,58 +109,96 @@ impl PlayState {
             }
         }
         for event in due {
+            let seq = self.next_song_event_seq;
+            self.next_song_event_seq = self.next_song_event_seq.wrapping_add(1);
+            let snapshot = self.capture_song_event_revert();
+            self.pending_song_event_reverts.insert(seq, snapshot);
+
             self.pending_shader_events.push(event.clone());
             self.pending_hooks.push((
                 HookKind::SongEvent,
                 ScriptEvent::new(HookKind::SongEvent)
+                    .with_field("event_idx", seq as i64)
                     .with_field("name", event.kind.clone())
                     .with_field("kind", event.kind.clone())
                     .with_field("time", event.time_ms)
                     .with_field("value", ScriptValue::from_json(&event.raw_value)),
             ));
-            let target_lower = event.strumline_target.to_ascii_lowercase();
-            let apply_player = target_lower != "opponent";
-            let apply_opponent = target_lower != "player";
-            match event.kind.as_str() {
-                "FocusCamera" => self.apply_focus_camera_event(&event),
-                "ZoomCamera" => self.apply_zoom_camera_event(&event),
-                "SetCameraBop" => {
-                    self.camera.bop_intensity = (DEFAULT_BOP_INTENSITY - 1.0) * event.bop_intensity + 1.0;
-                    self.camera.hud_zoom_intensity = (DEFAULT_BOP_INTENSITY - 1.0) * event.bop_intensity * 2.0;
-                    self.camera.zoom_rate = event.bop_rate;
-                    self.camera.zoom_rate_offset = event.bop_offset;
-                }
-                "ScrollSpeed" => {
-                    if let Some(raw_speed) = event.scroll_speed {
-                        let base = if event.absolute { 1.0 } else { self.chart.scroll_speed };
-                        let target_speed = raw_speed * base;
-                        let start_scroll = event.use_start.then_some(event.start_scroll).flatten().map(|s| s * base);
-                        let duration_s = event
-                            .duration_steps
-                            .map(|steps| steps * self.conductor.step_length_ms() / 1000.0)
-                            .unwrap_or(event.duration_s);
-                        let ease = EaseKind::from_name(&event.ease, &event.ease_dir);
-                        self.tween_scroll_speed_eased(target_speed, duration_s, ease, start_scroll, apply_player, apply_opponent);
-                    }
-                }
-                "RenderDistance" => {
-                    for (apply, strum) in [
-                        (apply_player, &mut self.player_strumline),
-                        (apply_opponent, &mut self.opponent_strumline),
-                    ] {
-                        if !apply {
-                            continue;
-                        }
-                        if event.use_default_render_distance {
-                            strum.use_custom_render_distance = false;
-                        } else if let Some(ms) = event.render_distance_ms {
-                            strum.use_custom_render_distance = true;
-                            strum.custom_render_distance_ms = ms;
-                        }
-                    }
-                }
-                _ => {}
+            self.apply_due_song_event(&event);
+        }
+    }
+
+    pub fn capture_song_event_revert(&self) -> SongEventRevertSnapshot {
+        SongEventRevertSnapshot {
+            camera: self.camera.clone(),
+            player_scroll: self.player_strumline.scroll_speed,
+            opponent_scroll: self.opponent_strumline.scroll_speed,
+            scroll_tweens: self.scroll_speed_tweens.clone(),
+            player_custom_dist: (
+                self.player_strumline.use_custom_render_distance,
+                self.player_strumline.custom_render_distance_ms,
+            ),
+            opponent_custom_dist: (
+                self.opponent_strumline.use_custom_render_distance,
+                self.opponent_strumline.custom_render_distance_ms,
+            ),
+        }
+    }
+
+    pub fn restore_song_event_revert(&mut self, snap: SongEventRevertSnapshot) {
+        self.camera = snap.camera;
+        self.player_strumline.scroll_speed = snap.player_scroll;
+        self.opponent_strumline.scroll_speed = snap.opponent_scroll;
+        self.scroll_speed_tweens = snap.scroll_tweens;
+        self.player_strumline.use_custom_render_distance = snap.player_custom_dist.0;
+        self.player_strumline.custom_render_distance_ms = snap.player_custom_dist.1;
+        self.opponent_strumline.use_custom_render_distance = snap.opponent_custom_dist.0;
+        self.opponent_strumline.custom_render_distance_ms = snap.opponent_custom_dist.1;
+    }
+
+    pub fn apply_due_song_event(&mut self, event: &SongEventData) {
+        let target_lower = event.strumline_target.to_ascii_lowercase();
+        let apply_player = target_lower != "opponent";
+        let apply_opponent = target_lower != "player";
+        match event.kind.as_str() {
+            "FocusCamera" => self.apply_focus_camera_event(event),
+            "ZoomCamera" => self.apply_zoom_camera_event(event),
+            "SetCameraBop" => {
+                self.camera.bop_intensity = (DEFAULT_BOP_INTENSITY - 1.0) * event.bop_intensity + 1.0;
+                self.camera.hud_zoom_intensity = (DEFAULT_BOP_INTENSITY - 1.0) * event.bop_intensity * 2.0;
+                self.camera.zoom_rate = event.bop_rate;
+                self.camera.zoom_rate_offset = event.bop_offset;
             }
+            "ScrollSpeed" => {
+                if let Some(raw_speed) = event.scroll_speed {
+                    let base = if event.absolute { 1.0 } else { self.chart.scroll_speed };
+                    let target_speed = raw_speed * base;
+                    let start_scroll = event.use_start.then_some(event.start_scroll).flatten().map(|s| s * base);
+                    let duration_s = event
+                        .duration_steps
+                        .map(|steps| steps * self.conductor.step_length_ms() / 1000.0)
+                        .unwrap_or(event.duration_s);
+                    let ease = EaseKind::from_name(&event.ease, &event.ease_dir);
+                    self.tween_scroll_speed_eased(target_speed, duration_s, ease, start_scroll, apply_player, apply_opponent);
+                }
+            }
+            "RenderDistance" => {
+                for (apply, strum) in [
+                    (apply_player, &mut self.player_strumline),
+                    (apply_opponent, &mut self.opponent_strumline),
+                ] {
+                    if !apply {
+                        continue;
+                    }
+                    if event.use_default_render_distance {
+                        strum.use_custom_render_distance = false;
+                    } else if let Some(ms) = event.render_distance_ms {
+                        strum.use_custom_render_distance = true;
+                        strum.custom_render_distance_ms = ms;
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy::prelude::Resource;
 
@@ -21,6 +22,7 @@ pub struct ScriptHost {
     timers: Vec<ScriptTimer>,
     next_timer_id: u64,
     rng_state: u64,
+    cached_registry: Option<(u64, usize, Arc<ModRegistry>)>,
     pub compile_errors: Vec<String>,
     pub runtime_errors: Vec<String>,
 }
@@ -40,6 +42,7 @@ impl ScriptHost {
             timers: Vec::new(),
             next_timer_id: 1,
             rng_state: 0x517C_C1B7_2722_0A95,
+            cached_registry: None,
             compile_errors: Vec::new(),
             runtime_errors: Vec::new(),
         }
@@ -112,10 +115,26 @@ impl ScriptHost {
         self.timers.clear();
         self.compile_errors.clear();
         self.runtime_errors.clear();
+        self.cached_registry = None;
+        for backend in self.backends.values() {
+            backend.invalidate_caches();
+        }
     }
 
     pub fn script_count(&self) -> usize {
         self.instances.len()
+    }
+
+    /// Returns `true` if any loaded script instance defines a handler for `hook`.
+    pub fn has_hook_listeners(&self, hook: &HookKind) -> bool {
+        self.instances.iter().any(|inst| inst.has_hook(hook))
+    }
+
+    /// Returns `true` if any active tweens, timers, or `Update` hook listeners need per-frame work.
+    pub fn has_frame_update_work(&self) -> bool {
+        !self.tweens.is_empty()
+            || !self.timers.is_empty()
+            || self.has_hook_listeners(&HookKind::Update)
     }
 
     pub fn script_ids(&self) -> Vec<&str> {
@@ -186,19 +205,25 @@ impl ScriptHost {
         let dt = dt_s.max(0.0);
 
         // Advance active property tweens and emit corresponding updates.
+        let mut finished_cbs: Vec<(String, String)> = Vec::new();
         for tween in &mut self.tweens {
             tween.elapsed_s += dt;
             let val = tween.sample();
             emit_tween_value(&tween.target, tween.prop, val, ctx);
+            if tween.is_finished()
+                && let Some(cb) = &tween.on_complete
+            {
+                finished_cbs.push(cb.clone());
+            }
         }
         self.tweens.retain(|t| !t.is_finished());
 
         // Advance timers and fire ready callbacks.
-        let mut ready_calls: Vec<(String, String)> = Vec::new();
+        let mut ready_calls: Vec<(String, String, Vec<ScriptValue>)> = Vec::new();
         for timer in &mut self.timers {
             timer.remaining_s -= dt;
             if timer.remaining_s <= 0.0 {
-                ready_calls.push((timer.script_id.clone(), timer.fn_name.clone()));
+                ready_calls.push((timer.script_id.clone(), timer.fn_name.clone(), timer.args.clone()));
                 if let Some(left) = &mut timer.repeats_left {
                     *left = left.saturating_sub(1);
                 }
@@ -208,18 +233,11 @@ impl ScriptHost {
         self.timers
             .retain(|t| t.repeats_left.is_none_or(|left| left > 0));
 
-        for (script_id, fn_name) in ready_calls {
-            if let Some(inst) = self.instances.iter_mut().find(|i| i.id() == script_id)
-                && let Err(err) = inst.call_fn(&fn_name, &[], ctx)
-            {
-                let msg = err.to_string();
-                self.runtime_errors.push(msg.clone());
-                ctx.commands.push(ScriptCommand::Log {
-                    level: LogLevel::Error,
-                    mod_id: inst.mod_id().to_string(),
-                    message: msg,
-                });
-            }
+        for (script_id, fn_name) in finished_cbs {
+            self.call_fn_on_script(&script_id, &fn_name, &[], ctx);
+        }
+        for (script_id, fn_name, args) in ready_calls {
+            self.call_fn_on_script(&script_id, &fn_name, &args, ctx);
         }
         self.absorb_context_requests(ctx, 0);
     }
@@ -249,18 +267,34 @@ impl ScriptHost {
         out
     }
 
-    pub fn make_context(
-        &self,
-        snapshot: ScriptStateSnapshot,
-        registry: &ModRegistry,
-        store: &ModStore,
-    ) -> ScriptContext {
-        ScriptContext::new(snapshot, registry.clone(), store.clone(), self.rng_state)
+    fn get_or_cache_registry(&mut self, registry: &ModRegistry) -> Arc<ModRegistry> {
+        let key = (registry.reload_count, registry.mods.len());
+        if let Some((reload_count, mods_len, cached)) = &self.cached_registry
+            && *reload_count == key.0
+            && *mods_len == key.1
+            && cached.assets_dir == registry.assets_dir
+            && cached.mods_dir == registry.mods_dir
+        {
+            return Arc::clone(cached);
+        }
+        let arc = Arc::new(registry.clone());
+        self.cached_registry = Some((key.0, key.1, Arc::clone(&arc)));
+        arc
     }
 
-    pub fn finalize_context(&mut self, ctx: ScriptContext, store: &mut ModStore) -> ScriptContext {
+    pub fn make_context(
+        &mut self,
+        snapshot: ScriptStateSnapshot,
+        registry: &ModRegistry,
+        store: &mut ModStore,
+    ) -> ScriptContext {
+        let reg_arc = self.get_or_cache_registry(registry);
+        ScriptContext::new(snapshot, reg_arc, std::mem::take(store), self.rng_state)
+    }
+
+    pub fn finalize_context(&mut self, mut ctx: ScriptContext, store: &mut ModStore) -> ScriptContext {
         self.rng_state = ctx.rng_state;
-        *store = ctx.store.clone();
+        *store = std::mem::take(&mut ctx.store);
         ctx
     }
 
@@ -269,11 +303,20 @@ impl ScriptHost {
             let targets = std::mem::take(&mut ctx.cancel_tween_targets);
             self.tweens.retain(|t| !targets.contains(&t.target));
         }
+        if !ctx.cancel_tween_props.is_empty() {
+            let props = std::mem::take(&mut ctx.cancel_tween_props);
+            self.tweens
+                .retain(|t| !props.iter().any(|(tgt, p)| *tgt == t.target && *p == t.prop));
+        }
 
         let drained: Vec<PropertyTween> = ctx.new_tweens.drain(..).collect();
+        let mut instant_cbs: Vec<(String, String)> = Vec::new();
         for new_tween in drained {
             if new_tween.duration_s <= 0.0 {
                 emit_tween_value(&new_tween.target, new_tween.prop, new_tween.end, ctx);
+                if let Some(cb) = new_tween.on_complete {
+                    instant_cbs.push(cb);
+                }
                 continue;
             }
             self.tweens
@@ -296,7 +339,12 @@ impl ScriptHost {
                 interval_s: req.interval_s,
                 remaining_s: req.interval_s,
                 repeats_left: req.repeats_left,
+                args: req.args,
             });
+        }
+
+        for (script_id, fn_name) in instant_cbs {
+            self.call_fn_on_script(&script_id, &fn_name, &[], ctx);
         }
 
         self.flush_pending_custom_hooks(ctx, depth);
@@ -361,6 +409,10 @@ fn emit_tween_value(target: &TweenTarget, prop: TweenProp, val: f64, ctx: &mut S
             ctx.mutable.cam_angle_deg = val as f32;
             ctx.mutable.dirty_cam_angle = true;
         }
+        (TweenTarget::Camera, TweenProp::HudAngle) => {
+            ctx.mutable.hud_angle_deg = val as f32;
+            ctx.mutable.dirty_hud_angle = true;
+        }
         (TweenTarget::Scroll, TweenProp::Scroll) => {
             ctx.mutable.scroll_speed = val;
             ctx.mutable.dirty_scroll_speed = true;
@@ -423,6 +475,83 @@ fn emit_tween_value(target: &TweenTarget, prop: TweenProp, val: f64, ctx: &mut S
                 }
                 TweenProp::Alpha => {
                     ctx.snapshot.prop_alphas.insert(id.clone(), v.clamp(0.0, 1.0));
+                }
+                TweenProp::Z => {
+                    ctx.snapshot.prop_z.insert(id.clone(), v);
+                }
+                TweenProp::VelX => {
+                    let vy = ctx.snapshot.prop_velocities.get(id).map_or(0.0, |vel| vel[1]);
+                    ctx.snapshot.prop_velocities.insert(id.clone(), [v, vy]);
+                }
+                TweenProp::VelY => {
+                    let vx = ctx.snapshot.prop_velocities.get(id).map_or(0.0, |vel| vel[0]);
+                    ctx.snapshot.prop_velocities.insert(id.clone(), [vx, v]);
+                }
+                _ => {}
+            }
+            ctx.commands.push(ScriptCommand::SetPropNumber {
+                id: id.clone(),
+                prop,
+                value: v,
+            });
+        }
+        (TweenTarget::Char(id), prop) => {
+            let v = val as f32;
+            match prop {
+                TweenProp::X => {
+                    let y = ctx.snapshot.char_positions.get(id).map_or(0.0, |p| p[1]);
+                    ctx.snapshot.char_positions.insert(id.clone(), [v, y]);
+                    ctx.commands.push(ScriptCommand::SetCharacterPos { target: id.clone(), x: v, y });
+                }
+                TweenProp::Y => {
+                    let x = ctx.snapshot.char_positions.get(id).map_or(0.0, |p| p[0]);
+                    ctx.snapshot.char_positions.insert(id.clone(), [x, v]);
+                    ctx.commands.push(ScriptCommand::SetCharacterPos { target: id.clone(), x, y: v });
+                }
+                TweenProp::ScaleX => {
+                    let sy = ctx.snapshot.char_scales.get(id).map_or(1.0, |s| s[1]);
+                    ctx.snapshot.char_scales.insert(id.clone(), [v, sy]);
+                    ctx.commands.push(ScriptCommand::SetCharacterScale { target: id.clone(), sx: v, sy });
+                }
+                TweenProp::ScaleY => {
+                    let sx = ctx.snapshot.char_scales.get(id).map_or(1.0, |s| s[0]);
+                    ctx.snapshot.char_scales.insert(id.clone(), [sx, v]);
+                    ctx.commands.push(ScriptCommand::SetCharacterScale { target: id.clone(), sx, sy: v });
+                }
+                TweenProp::Alpha => {
+                    let a = v.clamp(0.0, 1.0);
+                    ctx.snapshot.char_alphas.insert(id.clone(), a);
+                    ctx.commands.push(ScriptCommand::SetCharacterAlpha { target: id.clone(), alpha: a });
+                }
+                TweenProp::Z => {
+                    ctx.snapshot.char_z.insert(id.clone(), v);
+                    ctx.commands.push(ScriptCommand::SetCharZ { target: id.clone(), z: v });
+                }
+                _ => {}
+            }
+        }
+        (TweenTarget::Sound(tag), TweenProp::Volume) => {
+            let v = (val as f32).clamp(0.0, 2.0);
+            ctx.snapshot.sound_volumes.insert(tag.clone(), v);
+            ctx.commands.push(ScriptCommand::SetSoundParam {
+                tag: tag.clone(),
+                volume: Some(v),
+                pitch: None,
+            });
+        }
+        (TweenTarget::Text(id), prop) => {
+            let v = val as f32;
+            match prop {
+                TweenProp::X => {
+                    let y = ctx.snapshot.text_positions.get(id).map_or(0.0, |p| p[1]);
+                    ctx.snapshot.text_positions.insert(id.clone(), [v, y]);
+                }
+                TweenProp::Y => {
+                    let x = ctx.snapshot.text_positions.get(id).map_or(0.0, |p| p[0]);
+                    ctx.snapshot.text_positions.insert(id.clone(), [x, v]);
+                }
+                TweenProp::Alpha => {
+                    ctx.snapshot.text_alphas.insert(id.clone(), v.clamp(0.0, 1.0));
                 }
                 _ => {}
             }

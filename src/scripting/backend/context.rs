@@ -14,24 +14,32 @@ thread_local! {
 pub(super) fn with_tls_context<R>(ctx: ScriptContext, f: impl FnOnce() -> R) -> (ScriptContext, R) {
     struct ResetOnDrop {
         previous: Option<ScriptContext>,
+        completed: bool,
     }
 
     impl Drop for ResetOnDrop {
         fn drop(&mut self) {
-            if let Some(prev) = self.previous.take() {
-                ACTIVE_CTX.with(|slot| {
-                    *slot.borrow_mut() = Some(prev);
-                });
+            if self.completed {
+                return;
             }
+            ACTIVE_CTX.with(|slot| {
+                if let Ok(mut borrow) = slot.try_borrow_mut() {
+                    *borrow = self.previous.take();
+                }
+            });
         }
     }
 
     let previous = ACTIVE_CTX.with(|slot| slot.borrow_mut().replace(ctx));
-    let mut guard = ResetOnDrop { previous };
+    let mut guard = ResetOnDrop {
+        previous,
+        completed: false,
+    };
     let result = f();
     let returned = ACTIVE_CTX
         .with(|slot| slot.borrow_mut().take())
         .expect("script TLS context should remain present");
+    guard.completed = true;
     if let Some(prev) = guard.previous.take() {
         ACTIVE_CTX.with(|slot| {
             *slot.borrow_mut() = Some(prev);
@@ -81,6 +89,24 @@ pub(super) fn dyn_to_usize(val: &Dynamic) -> Result<usize, Box<EvalAltResult>> {
     usize::try_from(i).map_err(|_| runtime_err(format!("expected non-negative index, got {i}")))
 }
 
+fn event_key_alias(key: &str) -> Option<&'static str> {
+    match key {
+        "note_kind" => Some("kind"),
+        "kind" => Some("note_kind"),
+        "hold_len" | "len" => Some("length"),
+        "length" => Some("len"),
+        "lane" => Some("dir"),
+        "dir" => Some("lane"),
+        "rem_ms" => Some("remaining_ms"),
+        "remaining_ms" => Some("rem_ms"),
+        "splash" => Some("does_notesplash"),
+        "does_notesplash" => Some("splash"),
+        "play_sfx" => Some("play_sound"),
+        "play_sound" => Some("play_sfx"),
+        _ => None,
+    }
+}
+
 #[derive(Clone)]
 pub struct RhaiEvent {
     inner: Arc<Mutex<ScriptEvent>>,
@@ -126,20 +152,17 @@ impl RhaiEvent {
     }
 
     pub fn has(&mut self, key: &str) -> bool {
-        self.with_inner(|e| e.data.contains_key(key))
+        self.with_inner(|e| {
+            e.data.contains_key(key)
+                || event_key_alias(key).is_some_and(|a| e.data.contains_key(a))
+        })
     }
 
     pub fn get(&mut self, key: &str) -> Dynamic {
         self.with_inner(|e| {
-            let alias = match key {
-                "note_kind" => Some("kind"),
-                "hold_len" => Some("length"),
-                "lane" => Some("dir"),
-                _ => None,
-            };
             e.data
                 .get(key)
-                .or_else(|| alias.and_then(|k| e.data.get(k)))
+                .or_else(|| event_key_alias(key).and_then(|k| e.data.get(k)))
                 .cloned()
                 .map(ScriptValue::into_rhai)
                 .unwrap_or(Dynamic::UNIT)
@@ -148,7 +171,12 @@ impl RhaiEvent {
 
     pub fn set(&mut self, key: &str, value: Dynamic) {
         let converted = ScriptValue::from_rhai(&value);
-        self.with_inner(|e| e.set(key.to_string(), converted));
+        self.with_inner(|e| {
+            if let Some(alias) = event_key_alias(key) {
+                e.set(alias.to_string(), converted.clone());
+            }
+            e.set(key.to_string(), converted);
+        });
     }
 }
 
@@ -168,9 +196,11 @@ pub(super) fn register_event_type(engine: &mut Engine) {
     engine.register_indexer_set(|ev: &mut RhaiEvent, key: &str, val: Dynamic| ev.set(key, val));
 
     for prop in [
-        "id", "dir", "note_kind", "length", "hold_len", "combo", "is_hold", "remaining_ms",
-        "health_change", "score_change", "score", "hp", "step", "beat", "measure", "dt", "name",
-        "value", "data", "source", "judgement", "lane", "char_id", "time", "count", "is_player",
+        "id", "dir", "note_kind", "length", "len", "hold_len", "combo", "is_hold", "remaining_ms",
+        "rem_ms", "health_change", "score_change", "score", "hp", "step", "beat", "measure", "dt",
+        "name", "value", "data", "source", "judgement", "lane", "char_id", "time", "count",
+        "is_player", "diff_ms", "splash", "does_notesplash", "play_sfx", "play_sound", "play_anim",
+        "scoreable", "break_combo", "side", "key", "ctrl", "gitaroo", "notes", "events", "instant",
     ] {
         engine.register_get(prop, move |ev: &mut RhaiEvent| -> Dynamic { ev.get(prop) });
         engine.register_set(prop, move |ev: &mut RhaiEvent, val: Dynamic| ev.set(prop, val));

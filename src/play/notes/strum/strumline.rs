@@ -70,6 +70,7 @@ pub struct Strumline {
     pub pending_splashes: Vec<NoteDirection>,
     pub pending_hold_covers: Vec<HoldCoverCmd>,
     pub pending_char_events: Vec<CharNoteSignal>,
+    pub pending_incoming_notes: Vec<usize>,
     pub vwoosh_tweens: Vec<VwooshTween>,
 }
 
@@ -109,6 +110,7 @@ impl Strumline {
             pending_splashes: Vec::new(),
             pending_hold_covers: Vec::new(),
             pending_char_events: Vec::new(),
+            pending_incoming_notes: Vec::new(),
             vwoosh_tweens: Vec::new(),
         }
     }
@@ -177,6 +179,7 @@ impl Strumline {
         self.pending_splashes.clear();
         self.pending_hold_covers.clear();
         self.pending_char_events.clear();
+        self.pending_incoming_notes.clear();
         self.vwoosh_tweens.clear();
         self.lag_state = ScrollLagState::default();
         self.scroll_speed = self.base_scroll_speed;
@@ -203,6 +206,44 @@ impl Strumline {
         self.active_holds = [None; KEY_COUNT];
         self.lag_state = ScrollLagState::default();
         for dir in NoteDirection::ALL {
+            self.pending_hold_covers.push(HoldCoverCmd::Kill(dir));
+        }
+    }
+
+    pub fn seek_to(&mut self, seek_ms: f64) {
+        let cutoff_ms = seek_ms - 50.0;
+        for note in &mut self.notes {
+            if note.data.time_ms < cutoff_ms {
+                note.killed = true;
+                note.has_missed = true;
+                note.handled_miss = true;
+                note.hold_killed = true;
+            } else {
+                note.has_been_hit = false;
+                note.has_missed = false;
+                note.handled_miss = false;
+                note.too_early = false;
+                note.may_hit = false;
+                note.killed = false;
+                note.desaturated = false;
+                note.hold_hit = false;
+                note.hold_dropped = false;
+                note.hold_handled_miss = false;
+                note.hold_killed = false;
+                note.hold_remaining_ms = note.data.sustain_length_ms.max(0.0);
+            }
+        }
+        self.active_start_index = self
+            .notes
+            .iter()
+            .position(|n| !n.killed)
+            .unwrap_or(self.notes.len());
+        self.next_note_index = self.active_start_index;
+        self.active_holds = [None; KEY_COUNT];
+        self.pending_incoming_notes.clear();
+        self.lag_state = ScrollLagState::default();
+        for dir in NoteDirection::ALL {
+            self.play_static(dir);
             self.pending_hold_covers.push(HoldCoverCmd::Kill(dir));
         }
     }

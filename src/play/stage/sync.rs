@@ -15,17 +15,27 @@ use crate::utils::conductor::advance_step_range;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::ecs::{
     set_atlas_index, set_sprite_atlas, set_sprite_color, set_sprite_flip, set_transform_full,
-    set_visibility,
+    set_transform_pos_scale, set_visibility,
 };
 
 use super::loader::{StagePropKind, StageResource};
 use super::paths::parse_hex_color;
-use super::schema::{StageCoordMode, stage_layer_z};
+use super::schema::{StageCoordMode, composite_piece_z, stage_layer_z};
 
 #[derive(Component)]
 pub struct DynamicScriptProp {
     pub id: String,
     pub hud: bool,
+}
+
+#[derive(Component)]
+pub struct DynamicScriptText {
+    pub id: String,
+    pub hud: bool,
+    pub base_position: [f32; 2],
+    pub scroll_factor: [f32; 2],
+    pub z_layer: f32,
+    pub visible: bool,
 }
 
 #[derive(Component)]
@@ -58,6 +68,8 @@ pub struct StagePropVisual {
     pub visible: bool,
     pub coord_mode: StageCoordMode,
     pub raw_size: [f32; 2],
+    pub velocity: [f32; 2],
+    pub acceleration: [f32; 2],
 }
 
 #[derive(Resource, Default)]
@@ -186,7 +198,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                                     index: 0,
                                 },
                             ),
-                            Transform::from_xyz(0.0, 0.0, z_layer + (i as f32) * 1e-6),
+                            Transform::from_xyz(0.0, 0.0, composite_piece_z(z_layer, i)),
                             Visibility::Hidden,
                             StageCompositePiece,
                             CompositeAffine2d::default(),
@@ -247,10 +259,11 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
 }
 
 pub fn sync_stage_props(
+    time: Res<Time>,
     state: Res<PlayState>,
     mut sync_state: ResMut<StageSyncState>,
     mut animated_props: Query<(
-        &StagePropVisual,
+        &mut StagePropVisual,
         &mut Sprite,
         &mut Transform,
         &mut Visibility,
@@ -264,8 +277,9 @@ pub fn sync_stage_props(
 ) {
     let paused = matches!(
         state.phase,
-        PlayPhase::Paused(_) | PlayPhase::GameOver | PlayPhase::Ended
+        PlayPhase::Loading | PlayPhase::Paused(_) | PlayPhase::GameOver | PlayPhase::Ended
     );
+    let dt = if paused { 0.0 } else { time.delta_secs().min(0.1) };
     let current_step = state.conductor.current_step;
     let step_range = advance_step_range(
         &mut sync_state.last_step,
@@ -279,7 +293,7 @@ pub fn sync_stage_props(
     let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
 
     for (
-        vis,
+        mut vis,
         mut sprite,
         mut transform,
         mut visibility,
@@ -290,6 +304,12 @@ pub fn sync_stage_props(
         frame_sizes_opt,
     ) in &mut animated_props
     {
+        if dt > 0.0 && (vis.velocity != [0.0, 0.0] || vis.acceleration != [0.0, 0.0]) {
+            vis.velocity[0] += vis.acceleration[0] * dt;
+            vis.velocity[1] += vis.acceleration[1] * dt;
+            vis.base_position[0] += vis.velocity[0] * dt;
+            vis.base_position[1] += vis.velocity[1] * dt;
+        }
         let is_hud = dyn_opt.is_some_and(|d| d.hud);
         let is_hidden = !vis.visible || (is_hud && !state.hud_visible);
         let prop_zoom = if is_hud { 1.0 } else { zoom };
@@ -323,7 +343,7 @@ pub fn sync_stage_props(
             }
 
             sync_composite_prop_pieces(
-                vis,
+                &vis,
                 composite,
                 cur_pieces,
                 clip_bounds_min,
@@ -425,7 +445,7 @@ pub fn sync_stage_props(
 type StagePiecesQuery<'w, 's> = Query<
     'w,
     's,
-    (&'static mut Sprite, &'static mut Transform, &'static mut Visibility, &'static mut CompositeAffine2d),
+    (&'static mut Sprite, &'static mut Visibility, &'static mut CompositeAffine2d),
     (With<StageCompositePiece>, Without<StagePropVisual>),
 >;
 
@@ -446,7 +466,7 @@ fn composite_frame_info<'a>(
 
 fn hide_composite_pieces(entities: &[Entity], pieces: &mut StagePiecesQuery) {
     for &ent in entities {
-        if let Ok((_, _, mut vis, mut aff)) = pieces.get_mut(ent) {
+        if let Ok((_, mut vis, mut aff)) = pieces.get_mut(ent) {
             aff.active = false;
             set_visibility(&mut vis, Visibility::Hidden);
         }
@@ -493,7 +513,7 @@ fn sync_composite_prop_pieces(
     };
 
     for (i, &ent) in composite.piece_entities.iter().enumerate() {
-        let Ok((mut sprite, mut tf, mut p_vis, mut aff)) = pieces_query.get_mut(ent) else {
+        let Ok((mut sprite, mut p_vis, mut aff)) = pieces_query.get_mut(ent) else {
             continue;
         };
         let Some(piece) = frame_pieces.get(i) else {
@@ -512,11 +532,10 @@ fn sync_composite_prop_pieces(
         };
 
         let ([bx, by], cols) = compose_flx_piece_bevy_affine(piece, &params);
-        let pos = Vec3::new(bx, by, vis.z_layer + (i as f32) * 1e-6);
+        let pos = Vec3::new(bx, by, composite_piece_z(vis.z_layer, i));
         set_sprite_atlas(&mut sprite, tex, layout, piece.sprite_index);
         set_sprite_color(&mut sprite, modulate_color(tint, piece.color));
         set_sprite_flip(&mut sprite, false, false);
-        set_transform_full(&mut tf, pos, Vec3::ONE, Quat::IDENTITY);
         aff.active = true;
         aff.cols = cols;
         aff.translation = pos;
@@ -548,6 +567,32 @@ fn make_visual_comp(
         visible,
         coord_mode,
         raw_size,
+        velocity: [0.0, 0.0],
+        acceleration: [0.0, 0.0],
+    }
+}
+
+pub fn sync_script_texts(
+    state: Res<PlayState>,
+    mut texts: Query<(&DynamicScriptText, &mut Transform, &mut Visibility)>,
+) {
+    let cam_scroll_x = state.camera.follow_point[0] as f32 - SCREEN_WIDTH * 0.5;
+    let cam_scroll_y = state.camera.follow_point[1] as f32 - SCREEN_HEIGHT * 0.5;
+    let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
+
+    for (txt, mut tf, mut vis) in &mut texts {
+        let hidden = !txt.visible || (txt.hud && !state.hud_visible);
+        if hidden {
+            set_visibility(&mut vis, Visibility::Hidden);
+            continue;
+        }
+        let text_zoom = if txt.hud { 1.0 } else { zoom };
+        let sx = if txt.hud { 0.0 } else { cam_scroll_x * txt.scroll_factor[0] };
+        let sy = if txt.hud { 0.0 } else { cam_scroll_y * txt.scroll_factor[1] };
+        let bx = (txt.base_position[0] - sx - SCREEN_WIDTH * 0.5) * text_zoom;
+        let by = (SCREEN_HEIGHT * 0.5 - (txt.base_position[1] - sy)) * text_zoom;
+        set_transform_pos_scale(&mut tf, Vec3::new(bx, by, txt.z_layer), Vec3::splat(text_zoom));
+        set_visibility(&mut vis, Visibility::Visible);
     }
 }
 

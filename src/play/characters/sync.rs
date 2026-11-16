@@ -8,7 +8,7 @@ use crate::animations::atlas_composite::{
 };
 use crate::play::notes::CharNoteSignal;
 use crate::play::scene::PlayState;
-use crate::play::stage::schema::stage_layer_z;
+use crate::play::stage::schema::{composite_piece_z, stage_layer_z};
 use crate::play::types::PlayPhase;
 use crate::utils::conductor::advance_step_range;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
@@ -20,7 +20,17 @@ use super::behavior::{CharacterActor, ClipVisual};
 use super::schema::CharacterRole;
 use super::spawn::{CharacterPartVisual, CompositeAffine2d};
 
-type CharPartsQuery<'w, 's> = Query<'w, 's, (&'static mut Sprite, &'static mut Transform, &'static mut Visibility, &'static mut CompositeAffine2d), With<CharacterPartVisual>>;
+type CharPartsQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Sprite,
+        &'static mut Transform,
+        &'static mut Visibility,
+        Option<&'static mut CompositeAffine2d>,
+    ),
+    With<CharacterPartVisual>,
+>;
 
 #[derive(Resource, Default)]
 pub struct CharacterSyncState {
@@ -125,8 +135,12 @@ fn sync_actor_visuals(
     let cur_clip = actor.controller.current_name().and_then(|n| actor.clips.get(n));
     match cur_clip {
         Some(ClipVisual::Sheet { source_idx }) => {
-            if let Ok((mut sprite, mut tf, mut vis, mut aff)) = parts.get_mut(actor.sheet_entity) {
-                aff.active = false;
+            if let Ok((mut sprite, mut tf, mut vis, aff_opt)) = parts.get_mut(actor.sheet_entity) {
+                if let Some(mut aff) = aff_opt
+                    && aff.active
+                {
+                    aff.active = false;
+                }
                 sync_sheet_part(
                     actor,
                     *source_idx,
@@ -204,7 +218,7 @@ fn sync_sheet_part(
     };
     set_transform_full(
         tf,
-        Vec3::new(bx, by, stage_layer_z(actor.slot.layer, 0)),
+        Vec3::new(bx, by, actor.mod_z.unwrap_or_else(|| stage_layer_z(actor.slot.layer, 0))),
         Vec3::new(scale[0] * zoom, scale[1] * zoom, 1.0),
         Quat::from_rotation_z(rot),
     );
@@ -272,21 +286,26 @@ fn sync_composite_parts(
     };
 
     for (i, &ent) in actor.piece_entities.iter().enumerate() {
-        let Ok((mut sprite, mut tf, mut vis, mut aff)) = parts.get_mut(ent) else {
+        let Ok((mut sprite, _, mut vis, aff_opt)) = parts.get_mut(ent) else {
+            continue;
+        };
+        let Some(mut aff) = aff_opt else {
             continue;
         };
         let Some(piece) = pieces.get(i) else {
-            aff.active = false;
+            if aff.active {
+                aff.active = false;
+            }
             set_visibility(&mut vis, Visibility::Hidden);
             continue;
         };
         let ([bx, by], cols) = compose_flx_piece_bevy_affine(piece, &params);
-        let pos = Vec3::new(bx, by, stage_layer_z(actor.slot.layer, i));
+        let base_z = actor.mod_z.unwrap_or_else(|| stage_layer_z(actor.slot.layer, 0));
+        let pos = Vec3::new(bx, by, composite_piece_z(base_z, i));
         let (tex, layout) = src.atlas_pair(piece.spritemap_idx);
         set_sprite_atlas(&mut sprite, tex, layout, piece.sprite_index);
         set_sprite_color(&mut sprite, modulate_color(tint, piece.color));
         set_sprite_flip(&mut sprite, false, false);
-        set_transform_full(&mut tf, pos, Vec3::ONE, Quat::IDENTITY);
         aff.active = true;
         aff.cols = cols;
         aff.translation = pos;
@@ -296,8 +315,12 @@ fn sync_composite_parts(
 
 fn hide_entities(entities: &[Entity], parts: &mut CharPartsQuery) {
     for &ent in entities {
-        if let Ok((_, _, mut vis, mut aff)) = parts.get_mut(ent) {
-            aff.active = false;
+        if let Ok((_, _, mut vis, aff_opt)) = parts.get_mut(ent) {
+            if let Some(mut aff) = aff_opt
+                && aff.active
+            {
+                aff.active = false;
+            }
             set_visibility(&mut vis, Visibility::Hidden);
         }
     }

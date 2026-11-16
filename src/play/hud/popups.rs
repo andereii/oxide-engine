@@ -10,6 +10,9 @@ use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
 
+pub const PREALLOC_RATINGS_PER_KIND: usize = 6;
+pub const PREALLOC_DIGITS_PER_KIND: usize = 12;
+
 #[derive(Debug, Clone, Copy)]
 pub struct PopupEvent {
     pub judgement: Option<Judgement>,
@@ -34,7 +37,7 @@ pub struct PopupAssets {
     pub next_z_step: u32,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct PopupVisual {
     pub kind: PopupKind,
     pub active: bool,
@@ -48,19 +51,19 @@ pub struct PopupVisual {
     pub is_pixel: bool,
 }
 
-struct PopupSpawnParams {
-    kind: PopupKind,
-    texture: Handle<Image>,
-    x: f32,
-    y: f32,
-    z: f32,
-    scale: f32,
-    alpha: f32,
-    vx: f32,
-    vy: f32,
-    accel_y: f32,
-    delay_s: f32,
-    is_pixel: bool,
+pub(super) struct PopupSpawnParams {
+    pub(super) kind: PopupKind,
+    pub(super) texture: Handle<Image>,
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) z: f32,
+    pub(super) scale: f32,
+    pub(super) alpha: f32,
+    pub(super) vx: f32,
+    pub(super) vy: f32,
+    pub(super) accel_y: f32,
+    pub(super) delay_s: f32,
+    pub(super) is_pixel: bool,
 }
 
 pub fn load_popup_assets(
@@ -176,8 +179,8 @@ pub fn sync_popups(
                 PopupSpawnParams {
                     kind: PopupKind::Rating(idx),
                     texture: tex,
-                    x: -33.28 + offset[0],
-                    y: 96.0 - offset[1],
+                    x: -33.28 + offset[0] + state.popup_offset[0],
+                    y: 96.0 - offset[1] - state.popup_offset[1],
                     z,
                     scale,
                     alpha,
@@ -206,8 +209,8 @@ pub fn sync_popups(
                     PopupSpawnParams {
                         kind: PopupKind::Digit(digit),
                         texture: tex,
-                        x: -31.0 - 36.0 * da_loop + assets.combo_offset[0],
-                        y: 18.0 - assets.combo_offset[1],
+                        x: -31.0 - 36.0 * da_loop + assets.combo_offset[0] + state.popup_offset[0],
+                        y: 18.0 - assets.combo_offset[1] - state.popup_offset[1],
                         z,
                         scale: assets.combo_scale,
                         alpha: assets.combo_alpha,
@@ -223,13 +226,107 @@ pub fn sync_popups(
     }
 }
 
+type PopupSlotMut<'w> = (
+    Mut<'w, PopupVisual>,
+    Mut<'w, Sprite>,
+    Mut<'w, Transform>,
+    Mut<'w, Visibility>,
+);
+
+fn spawn_popup_entity(
+    commands: &mut Commands,
+    texture: Handle<Image>,
+    tf: Transform,
+    color: Color,
+    visibility: Visibility,
+    vis: PopupVisual,
+) {
+    let mut sprite = Sprite::from_image(texture);
+    sprite.color = color;
+    commands.spawn((sprite, tf, visibility, hud_render_layer(), vis));
+}
+
+fn spawn_pool_slots(
+    commands: &mut Commands,
+    kind: PopupKind,
+    texture: &Handle<Image>,
+    scale: f32,
+    alpha: f32,
+    is_pixel: bool,
+    count: usize,
+) {
+    let color = Color::srgba(1.0, 1.0, 1.0, alpha);
+    let tf = Transform::from_xyz(0.0, -900.0, 11.0).with_scale(Vec3::splat(scale));
+    let vis = PopupVisual {
+        kind,
+        active: false,
+        vx: 0.0,
+        vy: 0.0,
+        accel_y: 0.0,
+        age_s: 0.0,
+        delay_s: 0.0,
+        fade_s: 0.2,
+        base_alpha: alpha,
+        is_pixel,
+    };
+    for _ in 0..count {
+        spawn_popup_entity(commands, texture.clone(), tf, color, Visibility::Hidden, vis);
+    }
+}
+
+pub fn spawn_popup_pool(commands: &mut Commands, assets: &PopupAssets) {
+    for (idx, entry) in assets.ratings.iter().enumerate() {
+        if let Some((tex, scale, alpha, _)) = entry {
+            spawn_pool_slots(
+                commands,
+                PopupKind::Rating(idx),
+                tex,
+                *scale,
+                *alpha,
+                assets.is_pixel,
+                PREALLOC_RATINGS_PER_KIND,
+            );
+        }
+    }
+    for (digit, entry) in assets.digits.iter().enumerate() {
+        if let Some(tex) = entry {
+            spawn_pool_slots(
+                commands,
+                PopupKind::Digit(digit),
+                tex,
+                assets.combo_scale,
+                assets.combo_alpha,
+                assets.is_pixel,
+                PREALLOC_DIGITS_PER_KIND,
+            );
+        }
+    }
+}
+
+fn apply_popup_slot(
+    slot: PopupSlotMut<'_>,
+    texture: Handle<Image>,
+    tf: Transform,
+    color: Color,
+    next_vis: PopupVisual,
+) {
+    let (mut vis, mut sprite, mut transform, mut visibility) = slot;
+    *vis = next_vis;
+    if sprite.image.id() != texture.id() {
+        sprite.image = texture;
+    }
+    set_sprite_color(&mut sprite, color);
+    *transform = tf;
+    set_visibility(&mut visibility, Visibility::Visible);
+}
+
 fn next_popup_z(step: &mut u32) -> f32 {
     let z = 11.0 + ((*step % 900) as f32) * 0.001;
     *step = step.saturating_add(1);
     z
 }
 
-fn spawn_or_reuse(
+pub(super) fn spawn_or_reuse(
     commands: &mut Commands,
     pool: &mut Query<(&mut PopupVisual, &mut Sprite, &mut Transform, &mut Visibility)>,
     p: PopupSpawnParams,
@@ -248,18 +345,30 @@ fn spawn_or_reuse(
         base_alpha: p.alpha,
         is_pixel: p.is_pixel,
     };
-    for (mut vis, mut sprite, mut transform, mut visibility) in pool.iter_mut() {
-        if !vis.active && vis.kind == p.kind {
-            *vis = next_vis;
-            sprite.color = color;
-            *transform = tf;
-            *visibility = Visibility::Visible;
+
+    let mut oldest_active: Option<PopupSlotMut<'_>> = None;
+    for item in pool.iter_mut() {
+        if item.0.kind != p.kind {
+            continue;
+        }
+        if !item.0.active {
+            apply_popup_slot(item, p.texture, tf, color, next_vis);
             return;
         }
+        let is_older = oldest_active
+            .as_ref()
+            .is_none_or(|cur| item.0.age_s > cur.0.age_s);
+        if is_older {
+            oldest_active = Some(item);
+        }
     }
-    let mut sprite = Sprite::from_image(p.texture);
-    sprite.color = color;
-    commands.spawn((sprite, tf, Visibility::Visible, hud_render_layer(), next_vis));
+
+    if let Some(slot) = oldest_active {
+        apply_popup_slot(slot, p.texture, tf, color, next_vis);
+        return;
+    }
+
+    spawn_popup_entity(commands, p.texture, tf, color, Visibility::Visible, next_vis);
 }
 
 fn judgement_index(j: Judgement) -> Option<usize> {

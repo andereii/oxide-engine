@@ -9,17 +9,279 @@ use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
 use super::super::characters::{
-    CharacterRole, append_character_sidecar_scripts, load_characters_resource, spawn_characters,
+    CharacterRole, CharactersResource, append_character_sidecar_scripts, load_characters_resource,
+    spawn_characters,
 };
 use super::super::hud::countdown::load_countdown_assets;
 use super::super::hud::healthbar::spawn_health_bar;
-use super::super::hud::popups::load_popup_assets;
+use super::super::hud::popups::{load_popup_assets, spawn_popup_pool};
 use super::super::notes::effects::spawn_effect_pools;
 use super::super::notes::render::{load_noteskin_assets, spawn_strumline_and_pools};
 use super::super::playlist::PlayStatePlaylist;
+use super::super::preload::PlayPreloadTracker;
 use super::super::scene::PlayState;
-use super::super::stage::{append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props};
+use super::super::stage::{
+    StageResource, append_stage_sidecar_scripts, load_stage_resource, spawn_stage_props,
+};
 use super::{HudTextVisual, PendingEcsScriptCommands, PlaySfxAssets};
+
+pub(crate) fn seed_stage_and_chars_into_state(
+    state: &mut PlayState,
+    stage: Option<&StageResource>,
+    chars: &CharactersResource,
+) {
+    if let Some(stage) = stage {
+        for (idx, prop) in stage.props.iter().enumerate() {
+            let z = super::super::stage::schema::stage_layer_z(prop.data.layer, idx);
+            state
+                .script_prop_positions
+                .insert(prop.data.name.clone(), prop.data.position);
+            state
+                .script_prop_scales
+                .insert(prop.data.name.clone(), prop.data.scale);
+            state
+                .script_prop_angles
+                .insert(prop.data.name.clone(), prop.data.angle);
+            state
+                .script_prop_alphas
+                .insert(prop.data.name.clone(), prop.data.opacity);
+            state.script_prop_z.insert(prop.data.name.clone(), z);
+            state
+                .script_prop_scrolls
+                .insert(prop.data.name.clone(), prop.data.scroll_factor);
+            state
+                .script_prop_flips
+                .insert(prop.data.name.clone(), prop.data.flip);
+            state
+                .script_prop_vis
+                .insert(prop.data.name.clone(), prop.data.visible);
+        }
+    }
+    for c in &chars.characters {
+        let total_scale = [
+            c.data.scale[0] * c.slot.scale[0],
+            c.data.scale[1] * c.slot.scale[1],
+        ];
+        let tl_x = c.slot.position[0]
+            + c.data.offsets[0] * (1.0 + c.slot.scale[0])
+            - c.idle_size[0] * c.slot.scale[0] * 0.5;
+        let tl_y = c.slot.position[1]
+            + c.data.offsets[1] * (1.0 + c.slot.scale[1])
+            - c.idle_size[1] * c.slot.scale[1];
+        let char_z = super::super::stage::schema::stage_layer_z(c.slot.layer, 0);
+        let focus_x = c.slot.position[0] + c.data.offsets[0];
+        let focus_y =
+            c.slot.position[1] - (c.idle_size[1] * total_scale[1]) * 0.5 + c.data.offsets[1];
+        let focus = [
+            f64::from(focus_x + c.data.camera_offsets[0] + c.slot.camera_offset[0]),
+            f64::from(focus_y + c.data.camera_offsets[1] + c.slot.camera_offset[1]),
+        ];
+
+        state
+            .script_char_positions
+            .insert(c.id.clone(), c.slot.position);
+        state
+            .script_char_top_left
+            .insert(c.id.clone(), [tl_x, tl_y]);
+        state.script_char_z.insert(c.id.clone(), char_z);
+        state.script_char_scales.insert(c.id.clone(), c.slot.scale);
+        state
+            .script_char_alphas
+            .insert(c.id.clone(), c.slot.opacity);
+        state.script_char_flips.insert(c.id.clone(), c.slot.flip);
+        state.script_char_vis.insert(c.id.clone(), c.slot.visible);
+        state.script_char_sizes.insert(c.id.clone(), c.idle_size);
+        state.script_char_focus.insert(c.id.clone(), focus);
+
+        let alias = match c.role {
+            CharacterRole::Player => "bf",
+            CharacterRole::Opponent => "dad",
+            CharacterRole::Spectator => "gf",
+        };
+        state
+            .script_char_positions
+            .entry(alias.to_string())
+            .or_insert(c.slot.position);
+        state
+            .script_char_top_left
+            .entry(alias.to_string())
+            .or_insert([tl_x, tl_y]);
+        state.script_char_z.entry(alias.to_string()).or_insert(char_z);
+        state
+            .script_char_scales
+            .entry(alias.to_string())
+            .or_insert(c.slot.scale);
+        state
+            .script_char_alphas
+            .entry(alias.to_string())
+            .or_insert(c.slot.opacity);
+        state
+            .script_char_flips
+            .entry(alias.to_string())
+            .or_insert(c.slot.flip);
+        state
+            .script_char_vis
+            .entry(alias.to_string())
+            .or_insert(c.slot.visible);
+        state
+            .script_char_sizes
+            .entry(alias.to_string())
+            .or_insert(c.idle_size);
+        state
+            .script_char_focus
+            .entry(alias.to_string())
+            .or_insert(focus);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn populate_play_scene_entities(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    mods: &ModRegistry,
+    mod_store: &mut ModStore,
+    script_host: &mut ScriptHost,
+    pending_ecs: &mut PendingEcsScriptCommands,
+    state: &mut PlayState,
+    playlist: &mut PlayStatePlaylist,
+    audio: &mut SongAudioPlayer,
+    sfx: &mut PlaySfxAssets,
+    mut preload: Option<&mut PlayPreloadTracker>,
+) {
+    if let Some(tr) = preload.as_deref_mut() {
+        tr.clear();
+    }
+    let style = &state.player_strumline.note_style;
+    sfx.miss_sounds = style
+        .miss_sound_assets_in(mods)
+        .into_iter()
+        .map(|rel| asset_server.load(rel))
+        .collect();
+    sfx.miss_volume = style.miss_volume;
+    sfx.miss_cursor = 0;
+    if let Some(tr) = preload.as_deref_mut() {
+        tr.register_sfx(&sfx.miss_sounds);
+    }
+
+    if state.critical_failure {
+        return;
+    }
+
+    let mut stage_script_source: Option<(String, std::path::PathBuf)> = None;
+    let mut char_script_sources: Vec<(String, std::path::PathBuf)> = Vec::new();
+    if !state.is_minimal_mode {
+        let stage_id = state.chart.stage_id.clone();
+        let loaded_stage = match load_stage_resource(mods, &stage_id, asset_server, layouts) {
+            Ok(stage) => {
+                state.camera.stage_zoom = f64::from(stage.camera_zoom);
+                if state.camera.follow_point == [0.0, 0.0] {
+                    state.camera.follow_point = [
+                        f64::from(SCREEN_WIDTH) * 0.5,
+                        f64::from(SCREEN_HEIGHT) * 0.5,
+                    ];
+                }
+                state.reset_camera(true, true, true);
+                spawn_stage_props(commands, &stage);
+                Some(stage)
+            }
+            Err(err) => {
+                state.status_message = format!("Stage error: {err}");
+                None
+            }
+        };
+        let chars = load_characters_resource(
+            mods,
+            &state.chart.characters,
+            loaded_stage.as_ref(),
+            asset_server,
+            layouts,
+        );
+        for c in &chars.characters {
+            if c.data.script {
+                char_script_sources.push((c.id.clone(), c.json_path.clone()));
+            }
+        }
+        seed_stage_and_chars_into_state(state, loaded_stage.as_ref(), &chars);
+        spawn_characters(commands, &chars);
+        spawn_health_bar(
+            mods,
+            commands,
+            Some(&chars),
+            &state.player_strumline.note_style,
+            asset_server,
+            layouts,
+        );
+        if let Some(tr) = preload.as_deref_mut() {
+            tr.register_characters(&chars);
+        }
+        commands.insert_resource(chars);
+        if let Some(stage) = loaded_stage {
+            if stage.scripts {
+                stage_script_source = Some((stage.stage_id.clone(), stage.json_path.clone()));
+            }
+            if let Some(tr) = preload.as_deref_mut() {
+                tr.register_stage(&stage);
+            }
+            commands.insert_resource(stage);
+        }
+    }
+    let countdown_assets =
+        load_countdown_assets(mods, &state.player_strumline.note_style, asset_server);
+    if let Some(tr) = preload.as_deref_mut() {
+        tr.register_countdown(&countdown_assets);
+    }
+    commands.insert_resource(countdown_assets);
+
+    let popup_assets = load_popup_assets(mods, &state.player_strumline.note_style, asset_server);
+    if let Some(tr) = preload.as_deref_mut() {
+        tr.register_popups(&popup_assets);
+    }
+    spawn_popup_pool(commands, &popup_assets);
+    commands.insert_resource(popup_assets);
+
+    audio.load_for_chart_with_mods(
+        mods,
+        commands,
+        asset_server,
+        &state.chart,
+        state.playback_rate,
+    );
+    if let Some(tr) = preload.as_deref_mut() {
+        tr.register_song_audio(audio);
+    }
+
+    match load_noteskin_assets(
+        mods,
+        &state.player_strumline.note_style,
+        asset_server,
+        layouts,
+    ) {
+        Ok(skin_assets) => {
+            if let Some(tr) = preload.as_deref_mut() {
+                tr.register_noteskin(&skin_assets);
+            }
+            spawn_strumline_and_pools(commands, state, &skin_assets);
+            spawn_effect_pools(commands, &skin_assets);
+            commands.insert_resource(skin_assets);
+        }
+        Err(err) => {
+            state.status_message = format!("Noteskin error: {err}");
+        }
+    }
+
+    let cmds = load_and_init_scripts(
+        mods,
+        mod_store,
+        script_host,
+        state,
+        playlist,
+        stage_script_source.as_ref(),
+        &char_script_sources,
+    );
+    pending_ecs.0.extend(cmds);
+    state.enter_loading_phase();
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_play_scene(
@@ -34,158 +296,23 @@ pub(super) fn setup_play_scene(
     mut playlist: ResMut<PlayStatePlaylist>,
     mut audio: ResMut<SongAudioPlayer>,
     mut sfx: ResMut<PlaySfxAssets>,
+    mut preload: ResMut<PlayPreloadTracker>,
 ) {
-    let style = &state.player_strumline.note_style;
-    sfx.miss_sounds = style
-        .miss_sound_assets_in(&mods)
-        .into_iter()
-        .map(|rel| asset_server.load(rel))
-        .collect();
-    sfx.miss_volume = style.miss_volume;
-
     spawn_hud_camera(&mut commands);
-
-    if !state.critical_failure {
-        let mut stage_script_source: Option<(String, std::path::PathBuf)> = None;
-        let mut char_script_sources: Vec<(String, std::path::PathBuf)> = Vec::new();
-        if !state.is_minimal_mode {
-            let stage_id = state.chart.stage_id.clone();
-            let loaded_stage = match load_stage_resource(&mods, &stage_id, &asset_server, &mut layouts) {
-                Ok(stage) => {
-                    state.camera.stage_zoom = f64::from(stage.camera_zoom);
-                    if state.camera.follow_point == [0.0, 0.0] {
-                        state.camera.follow_point = [
-                            f64::from(SCREEN_WIDTH) * 0.5,
-                            f64::from(SCREEN_HEIGHT) * 0.5,
-                        ];
-                    }
-                    state.reset_camera(true, true, true);
-                    for prop in &stage.props {
-                        state
-                            .script_prop_positions
-                            .insert(prop.data.name.clone(), prop.data.position);
-                        state
-                            .script_prop_scales
-                            .insert(prop.data.name.clone(), prop.data.scale);
-                        state
-                            .script_prop_angles
-                            .insert(prop.data.name.clone(), prop.data.angle);
-                        state
-                            .script_prop_alphas
-                            .insert(prop.data.name.clone(), prop.data.opacity);
-                    }
-                    spawn_stage_props(&mut commands, &stage);
-                    Some(stage)
-                }
-                Err(err) => {
-                    state.status_message = format!("Stage error: {err}");
-                    None
-                }
-            };
-            let chars = load_characters_resource(
-                &mods,
-                &state.chart.characters,
-                loaded_stage.as_ref(),
-                &asset_server,
-                &mut layouts,
-            );
-            for c in &chars.characters {
-                let tl_x = c.slot.position[0]
-                    + c.data.offsets[0] * (1.0 + c.slot.scale[0])
-                    - c.idle_size[0] * c.slot.scale[0] * 0.5;
-                let tl_y = c.slot.position[1]
-                    + c.data.offsets[1] * (1.0 + c.slot.scale[1])
-                    - c.idle_size[1] * c.slot.scale[1];
-                let char_z = super::super::stage::schema::stage_layer_z(c.slot.layer, 0);
-                state
-                    .script_char_positions
-                    .insert(c.id.clone(), c.slot.position);
-                state
-                    .script_char_top_left
-                    .insert(c.id.clone(), [tl_x, tl_y]);
-                state.script_char_z.insert(c.id.clone(), char_z);
-                let alias = match c.role {
-                    CharacterRole::Player => "bf",
-                    CharacterRole::Opponent => "dad",
-                    CharacterRole::Spectator => "gf",
-                };
-                state
-                    .script_char_positions
-                    .entry(alias.to_string())
-                    .or_insert(c.slot.position);
-                state
-                    .script_char_top_left
-                    .entry(alias.to_string())
-                    .or_insert([tl_x, tl_y]);
-                state
-                    .script_char_z
-                    .entry(alias.to_string())
-                    .or_insert(char_z);
-                if c.data.script {
-                    char_script_sources.push((c.id.clone(), c.json_path.clone()));
-                }
-            }
-            spawn_characters(&mut commands, &chars);
-            spawn_health_bar(
-                &mods,
-                &mut commands,
-                Some(&chars),
-                &state.player_strumline.note_style,
-                &asset_server,
-                &mut layouts,
-            );
-            commands.insert_resource(chars);
-            if let Some(stage) = loaded_stage {
-                if stage.scripts {
-                    stage_script_source = Some((stage.stage_id.clone(), stage.json_path.clone()));
-                }
-                commands.insert_resource(stage);
-            }
-        }
-        commands.insert_resource(load_countdown_assets(
-            &mods,
-            &state.player_strumline.note_style,
-            &asset_server,
-        ));
-        commands.insert_resource(load_popup_assets(
-            &mods,
-            &state.player_strumline.note_style,
-            &asset_server,
-        ));
-        audio.load_for_chart_with_mods(
-            &mods,
-            &mut commands,
-            &asset_server,
-            &state.chart,
-            state.playback_rate,
-        );
-        match load_noteskin_assets(
-            &mods,
-            &state.player_strumline.note_style,
-            &asset_server,
-            &mut layouts,
-        ) {
-            Ok(skin_assets) => {
-                spawn_strumline_and_pools(&mut commands, &state, &skin_assets);
-                spawn_effect_pools(&mut commands, &skin_assets);
-                commands.insert_resource(skin_assets);
-            }
-            Err(err) => {
-                state.status_message = format!("Noteskin error: {err}");
-            }
-        }
-
-        let cmds = load_and_init_scripts(
-            &mods,
-            &mut mod_store,
-            &mut script_host,
-            &mut state,
-            &mut playlist,
-            stage_script_source.as_ref(),
-            &char_script_sources,
-        );
-        pending_ecs.0.extend(cmds);
-    }
+    populate_play_scene_entities(
+        &mut commands,
+        &asset_server,
+        &mut layouts,
+        &mods,
+        &mut mod_store,
+        &mut script_host,
+        &mut pending_ecs,
+        &mut state,
+        &mut playlist,
+        &mut audio,
+        &mut sfx,
+        Some(&mut preload),
+    );
 
     commands.spawn((
         Text2d::new(""),
@@ -271,16 +398,51 @@ pub(crate) fn load_and_init_scripts(
         (HookKind::Create, ScriptEvent::new(HookKind::Create)),
         (
             HookKind::SongLoaded,
-            ScriptEvent::new(HookKind::SongLoaded)
-                .with_field("song", state.chart.song_id.clone())
-                .with_field("bpm", state.conductor.bpm())
-                .with_field(
-                    "notes",
-                    ScriptValue::Int(
-                        (state.player_strumline.notes.len()
-                            + state.opponent_strumline.notes.len()) as i64,
-                    ),
-                ),
+            {
+                let mut ev_list = Vec::with_capacity(state.chart.events.len());
+                for ev in &state.chart.events {
+                    let mut m = std::collections::BTreeMap::new();
+                    m.insert("time".to_string(), ScriptValue::Float(ev.time_ms));
+                    m.insert("kind".to_string(), ScriptValue::String(ev.kind.clone()));
+                    m.insert("name".to_string(), ScriptValue::String(ev.kind.clone()));
+                    m.insert("value".to_string(), ScriptValue::from_json(&ev.raw_value));
+                    ev_list.push(ScriptValue::Map(m));
+                }
+                let mut note_list = Vec::with_capacity(
+                    state.player_strumline.notes.len() + state.opponent_strumline.notes.len(),
+                );
+                for (is_player, notes) in [
+                    (true, &state.player_strumline.notes),
+                    (false, &state.opponent_strumline.notes),
+                ] {
+                    for n in notes {
+                        let mut m = std::collections::BTreeMap::new();
+                        m.insert("id".to_string(), ScriptValue::Int(n.data.id as i64));
+                        m.insert("time".to_string(), ScriptValue::Float(n.data.time_ms));
+                        m.insert("dir".to_string(), ScriptValue::Int(n.lane.index() as i64));
+                        m.insert("len".to_string(), ScriptValue::Float(n.data.sustain_length_ms));
+                        m.insert(
+                            "kind".to_string(),
+                            ScriptValue::String(n.data.kind.clone().unwrap_or_default()),
+                        );
+                        m.insert("is_player".to_string(), ScriptValue::Bool(is_player));
+                        m.insert("scoreable".to_string(), ScriptValue::Bool(n.data.scoreable));
+                        note_list.push(ScriptValue::Map(m));
+                    }
+                }
+                ScriptEvent::new(HookKind::SongLoaded)
+                    .with_field("song", state.chart.song_id.clone())
+                    .with_field("bpm", state.conductor.bpm())
+                    .with_field("notes", ScriptValue::List(note_list))
+                    .with_field("events", ScriptValue::List(ev_list))
+                    .with_field(
+                        "count",
+                        ScriptValue::Int(
+                            (state.player_strumline.notes.len()
+                                + state.opponent_strumline.notes.len()) as i64,
+                        ),
+                    )
+            },
         ),
     ];
     state.run_script_hooks(

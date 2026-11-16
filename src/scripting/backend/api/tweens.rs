@@ -1,18 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+use crate::scripting::value::ScriptValue;
 use crate::utils::easing::EaseKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TweenProp {
     X,
     Y,
+    Z,
+    VelX,
+    VelY,
     Alpha,
     Angle,
+    HudAngle,
     ScaleX,
     ScaleY,
     Zoom,
     HudZoom,
     Scroll,
+    Volume,
 }
 
 impl TweenProp {
@@ -20,13 +26,18 @@ impl TweenProp {
         match raw.trim().to_ascii_lowercase().as_str() {
             "x" | "pos_x" => Some(Self::X),
             "y" | "pos_y" => Some(Self::Y),
+            "z" | "z_index" => Some(Self::Z),
+            "vx" | "vel_x" => Some(Self::VelX),
+            "vy" | "vel_y" => Some(Self::VelY),
             "alpha" | "opacity" | "a" => Some(Self::Alpha),
             "angle" | "rot" | "rotation" => Some(Self::Angle),
+            "hud_angle" | "hudangle" => Some(Self::HudAngle),
             "scale_x" | "scalex" | "sx" => Some(Self::ScaleX),
             "scale_y" | "scaley" | "sy" => Some(Self::ScaleY),
             "zoom" => Some(Self::Zoom),
             "hud_zoom" | "hudzoom" => Some(Self::HudZoom),
             "scroll" | "scroll_speed" => Some(Self::Scroll),
+            "vol" | "volume" => Some(Self::Volume),
             _ => None,
         }
     }
@@ -38,6 +49,9 @@ pub enum TweenTarget {
     Scroll,
     Lane(usize),
     Prop(String),
+    Char(String),
+    Sound(String),
+    Text(String),
 }
 
 impl TweenTarget {
@@ -55,6 +69,30 @@ impl TweenTarget {
         {
             return Self::Lane(lane);
         }
+        if let Some(idx) = trimmed
+            .strip_prefix("char:")
+            .or_else(|| trimmed.strip_prefix("CHAR:"))
+        {
+            return Self::Char(idx.trim().to_string());
+        }
+        if matches!(
+            lower.as_str(),
+            "bf" | "dad" | "gf" | "player" | "opponent" | "spectator"
+        ) {
+            return Self::Char(lower);
+        }
+        if let Some(tag) = trimmed
+            .strip_prefix("snd:")
+            .or_else(|| trimmed.strip_prefix("sound:"))
+        {
+            return Self::Sound(tag.trim().to_string());
+        }
+        if let Some(tid) = trimmed
+            .strip_prefix("txt:")
+            .or_else(|| trimmed.strip_prefix("text:"))
+        {
+            return Self::Text(tid.trim().to_string());
+        }
         let prop_id = trimmed.strip_prefix("prop:").unwrap_or(trimmed);
         Self::Prop(prop_id.to_string())
     }
@@ -69,6 +107,7 @@ pub struct PropertyTween {
     pub elapsed_s: f64,
     pub duration_s: f64,
     pub ease: EaseKind,
+    pub on_complete: Option<(String, String)>,
 }
 
 impl PropertyTween {
@@ -94,4 +133,5 @@ pub struct ScriptTimer {
     pub interval_s: f64,
     pub remaining_s: f64,
     pub repeats_left: Option<u32>,
+    pub args: Vec<ScriptValue>,
 }

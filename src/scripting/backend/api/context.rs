@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::value::ScriptValue;
 use crate::utils::easing::EaseKind;
@@ -16,6 +18,7 @@ pub struct NewTimerRequest {
     pub fn_name: String,
     pub interval_s: f64,
     pub repeats_left: Option<u32>,
+    pub args: Vec<ScriptValue>,
 }
 
 /// Cross-script custom hook request queued by a script calling `emit(name[, val])`.
@@ -37,10 +40,11 @@ pub struct ScriptContext {
     pub commands: Vec<ScriptCommand>,
     pub new_tweens: Vec<PropertyTween>,
     pub cancel_tween_targets: Vec<TweenTarget>,
+    pub cancel_tween_props: Vec<(TweenTarget, TweenProp)>,
     pub new_timers: Vec<NewTimerRequest>,
     pub cancel_timers_for_fn: Vec<(String, String)>,
     pub pending_custom_hooks: Vec<CustomHookRequest>,
-    pub registry: ModRegistry,
+    pub registry: Arc<ModRegistry>,
     pub store: ModStore,
     pub rng_state: u64,
 }
@@ -48,7 +52,7 @@ pub struct ScriptContext {
 impl ScriptContext {
     pub fn new(
         snapshot: ScriptStateSnapshot,
-        registry: ModRegistry,
+        registry: Arc<ModRegistry>,
         store: ModStore,
         rng_state: u64,
     ) -> Self {
@@ -61,12 +65,33 @@ impl ScriptContext {
             commands: Vec::new(),
             new_tweens: Vec::new(),
             cancel_tween_targets: Vec::new(),
+            cancel_tween_props: Vec::new(),
             new_timers: Vec::new(),
             cancel_timers_for_fn: Vec::new(),
             pending_custom_hooks: Vec::new(),
             registry,
             store,
             rng_state: if rng_state == 0 { 0x9E37_79B9_7F4A_7C15 } else { rng_state },
+        }
+    }
+
+    /// Creates a lightweight zero-clone temporary placeholder while moving the active context into TLS.
+    pub fn empty_placeholder(&self) -> Self {
+        Self {
+            current_script_id: String::new(),
+            current_mod_id: String::new(),
+            snapshot: ScriptStateSnapshot::empty_placeholder(),
+            mutable: ScriptMutableState::default(),
+            commands: Vec::new(),
+            new_tweens: Vec::new(),
+            cancel_tween_targets: Vec::new(),
+            cancel_tween_props: Vec::new(),
+            new_timers: Vec::new(),
+            cancel_timers_for_fn: Vec::new(),
+            pending_custom_hooks: Vec::new(),
+            registry: Arc::clone(&self.registry),
+            store: ModStore::default(),
+            rng_state: self.rng_state,
         }
     }
 
@@ -100,6 +125,7 @@ impl ScriptContext {
             (TweenTarget::Camera, TweenProp::Zoom) => self.mutable.cam_zoom,
             (TweenTarget::Camera, TweenProp::HudZoom) => self.mutable.hud_zoom,
             (TweenTarget::Camera, TweenProp::Angle) => f64::from(self.mutable.cam_angle_deg),
+            (TweenTarget::Camera, TweenProp::HudAngle) => f64::from(self.mutable.hud_angle_deg),
             (TweenTarget::Scroll, TweenProp::Scroll) => self.mutable.scroll_speed,
             (TweenTarget::Lane(lane), TweenProp::X) => self
                 .snapshot
@@ -133,6 +159,60 @@ impl ScriptContext {
                 .get(lane)
                 .copied()
                 .map_or(1.0, f64::from),
+            (TweenTarget::Char(id), TweenProp::X) => self
+                .snapshot
+                .char_positions
+                .get(id)
+                .map_or(0.0, |p| f64::from(p[0])),
+            (TweenTarget::Char(id), TweenProp::Y) => self
+                .snapshot
+                .char_positions
+                .get(id)
+                .map_or(0.0, |p| f64::from(p[1])),
+            (TweenTarget::Char(id), TweenProp::ScaleX) => self
+                .snapshot
+                .char_scales
+                .get(id)
+                .map_or(1.0, |s| f64::from(s[0])),
+            (TweenTarget::Char(id), TweenProp::ScaleY) => self
+                .snapshot
+                .char_scales
+                .get(id)
+                .map_or(1.0, |s| f64::from(s[1])),
+            (TweenTarget::Char(id), TweenProp::Alpha) => self
+                .snapshot
+                .char_alphas
+                .get(id)
+                .copied()
+                .map_or(1.0, f64::from),
+            (TweenTarget::Char(id), TweenProp::Z) => self
+                .snapshot
+                .char_z
+                .get(id)
+                .copied()
+                .map_or(-500.0, f64::from),
+            (TweenTarget::Sound(tag), TweenProp::Volume) => self
+                .snapshot
+                .sound_volumes
+                .get(tag)
+                .copied()
+                .map_or(1.0, f64::from),
+            (TweenTarget::Text(id), TweenProp::X) => self
+                .snapshot
+                .text_positions
+                .get(id)
+                .map_or(0.0, |p| f64::from(p[0])),
+            (TweenTarget::Text(id), TweenProp::Y) => self
+                .snapshot
+                .text_positions
+                .get(id)
+                .map_or(0.0, |p| f64::from(p[1])),
+            (TweenTarget::Text(id), TweenProp::Alpha) => self
+                .snapshot
+                .text_alphas
+                .get(id)
+                .copied()
+                .map_or(1.0, f64::from),
             (TweenTarget::Prop(id), TweenProp::X) => self
                 .snapshot
                 .prop_positions
@@ -143,6 +223,22 @@ impl ScriptContext {
                 .prop_positions
                 .get(id)
                 .map_or(0.0, |p| f64::from(p[1])),
+            (TweenTarget::Prop(id), TweenProp::Z) => self
+                .snapshot
+                .prop_z
+                .get(id)
+                .copied()
+                .map_or(0.0, f64::from),
+            (TweenTarget::Prop(id), TweenProp::VelX) => self
+                .snapshot
+                .prop_velocities
+                .get(id)
+                .map_or(0.0, |v| f64::from(v[0])),
+            (TweenTarget::Prop(id), TweenProp::VelY) => self
+                .snapshot
+                .prop_velocities
+                .get(id)
+                .map_or(0.0, |v| f64::from(v[1])),
             (TweenTarget::Prop(id), TweenProp::ScaleX) => self
                 .snapshot
                 .prop_scales
@@ -170,9 +266,25 @@ impl ScriptContext {
     }
 
     pub fn push_tween(&mut self, target: TweenTarget, prop: TweenProp, end: f64, duration_s: f64, ease: &str) {
+        self.push_tween_cb(target, prop, end, duration_s, ease, None);
+    }
+
+    pub fn push_tween_cb(
+        &mut self,
+        target: TweenTarget,
+        prop: TweenProp,
+        end: f64,
+        duration_s: f64,
+        ease: &str,
+        on_complete: Option<String>,
+    ) {
         let start = self.current_prop_value(&target, prop);
         let parsed_ease = EaseKind::from_name(ease, "");
         let dur = if parsed_ease.is_some() { duration_s.max(0.0) } else { 0.0 };
+        let cb = on_complete
+            .map(|f| f.trim().to_string())
+            .filter(|f| !f.is_empty())
+            .map(|f| (self.current_script_id.clone(), f));
         self.new_tweens.push(PropertyTween {
             target,
             prop,
@@ -181,6 +293,7 @@ impl ScriptContext {
             elapsed_s: 0.0,
             duration_s: dur,
             ease: parsed_ease.unwrap_or_default(),
+            on_complete: cb,
         });
     }
 }

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::animations::Bopper;
 use crate::play::stage::schema::stage_layer_z;
 
-use super::behavior::{CharacterActor, find_count_animations};
+use super::behavior::{CharacterActor, SheetSource, find_count_animations};
 use super::loader::CharactersResource;
 
 #[derive(Component)]
@@ -40,8 +40,8 @@ pub fn spawn_characters(commands: &mut Commands, res: &CharactersResource) {
     }
 }
 
-pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::LoadedCharacter) {
-    let make_sprite = || match loaded.sources.first() {
+fn make_character_sprite(sources: &[SheetSource]) -> Sprite {
+    match sources.first() {
         Some(first_src) => Sprite::from_atlas_image(
             first_src.texture.clone(),
             TextureAtlas {
@@ -50,30 +50,45 @@ pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::L
             },
         ),
         None => Sprite::default(),
-    };
-    let z_base = stage_layer_z(loaded.slot.layer, 0);
-    let sheet_entity = commands
+    }
+}
+
+pub(super) fn spawn_composite_piece_entity(
+    commands: &mut Commands,
+    sources: &[SheetSource],
+    layer: i32,
+    piece_idx: usize,
+) -> Entity {
+    commands
         .spawn((
-            make_sprite(),
-            Transform::from_xyz(0.0, 0.0, z_base),
+            make_character_sprite(sources),
+            Transform::from_xyz(0.0, 0.0, stage_layer_z(layer, piece_idx)),
             Visibility::Hidden,
             CharacterPartVisual,
             CompositeAffine2d::default(),
+        ))
+        .id()
+}
+
+pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::LoadedCharacter) {
+    let z_base = stage_layer_z(loaded.slot.layer, 0);
+    let sheet_entity = commands
+        .spawn((
+            make_character_sprite(&loaded.sources),
+            Transform::from_xyz(0.0, 0.0, z_base),
+            Visibility::Hidden,
+            CharacterPartVisual,
         ))
         .id();
 
     let mut piece_entities = Vec::with_capacity(loaded.max_composite_pieces);
     for i in 0..loaded.max_composite_pieces {
-        let piece_entity = commands
-            .spawn((
-                make_sprite(),
-                Transform::from_xyz(0.0, 0.0, stage_layer_z(loaded.slot.layer, i)),
-                Visibility::Hidden,
-                CharacterPartVisual,
-                CompositeAffine2d::default(),
-            ))
-            .id();
-        piece_entities.push(piece_entity);
+        piece_entities.push(spawn_composite_piece_entity(
+            commands,
+            &loaded.sources,
+            loaded.slot.layer,
+            i,
+        ));
     }
 
     let combo_counts = find_count_animations(&loaded.controller, "combo");
@@ -91,6 +106,7 @@ pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::L
         bopper,
         sources: loaded.sources.clone(),
         clips: loaded.clips.clone(),
+        deferred_gameover_anims: loaded.deferred_gameover_anims.clone(),
         idle_size: loaded.idle_size,
         facing_flip_x: loaded.facing_flip_x,
         camera_focus_point: [0.0, 0.0],
@@ -102,6 +118,7 @@ pub fn spawn_single_character(commands: &mut Commands, loaded: &super::loader::L
         sampler_applied: false,
         mod_tint: [1.0; 4],
         mod_visible: true,
+        mod_z: None,
         script_anim_override: false,
         sheet_entity,
         piece_entities,

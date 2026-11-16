@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::utils::constants::{DEFAULT_DIFFICULTY, DEFAULT_VARIATION};
 
 #[derive(Debug, Clone)]
@@ -11,6 +13,8 @@ pub struct LaunchFlags {
     pub playback_rate: f64,
     pub start_timestamp_ms: f64,
     pub vsync: Option<bool>,
+    pub capture_timestamps_ms: Vec<f64>,
+    pub capture_out_dir: Option<PathBuf>,
     pub show_help: bool,
 }
 
@@ -26,6 +30,8 @@ impl Default for LaunchFlags {
             playback_rate: 1.0,
             start_timestamp_ms: 0.0,
             vsync: None,
+            capture_timestamps_ms: Vec::new(),
+            capture_out_dir: None,
             show_help: false,
         }
     }
@@ -97,6 +103,16 @@ impl LaunchFlags {
                 }
                 "--vsync" => out.vsync = Some(parse_bool_flag(inline_val, true)),
                 "--no-vsync" => out.vsync = Some(false),
+                "--capture-ms" => {
+                    if let Some(v) = take_value(inline_val, &mut iter) {
+                        parse_capture_ms_list(&v, &mut out.capture_timestamps_ms);
+                    }
+                }
+                "--capture-out" => {
+                    if let Some(v) = take_value(inline_val, &mut iter) {
+                        out.capture_out_dir = Some(PathBuf::from(v));
+                    }
+                }
                 _ => {}
             }
         }
@@ -116,9 +132,26 @@ impl LaunchFlags {
              \x20 --rate:<f64>                Playback rate multiplier (default: 1.0)\n\
              \x20 --start-ms:<f64>            Start timestamp in ms (default: 0.0)\n\
              \x20 --vsync / --no-vsync        Override OXIDE_VSYNC\n\
+             \x20 --capture-ms:<ms,...>       Capture screenshots at sorted ms and exit\n\
+             \x20 --capture-out:<dir>         Output directory for --capture-ms (default: captures)\n\
              \x20 -h, --help                  Show this help message"
         );
     }
+}
+
+pub(crate) fn normalize_capture_ms(values: &mut Vec<f64>) {
+    values.retain(|ms| ms.is_finite() && *ms >= 0.0);
+    values.sort_by(f64::total_cmp);
+    values.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+}
+
+fn parse_capture_ms_list(raw: &str, out: &mut Vec<f64>) {
+    for part in raw.split(',') {
+        if let Ok(ms) = part.trim().parse::<f64>() {
+            out.push(ms);
+        }
+    }
+    normalize_capture_ms(out);
 }
 
 fn split_flag(arg: &str) -> (&str, Option<&str>) {

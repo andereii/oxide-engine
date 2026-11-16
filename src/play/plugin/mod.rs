@@ -1,9 +1,14 @@
+mod capture;
 mod hud_audio;
 mod input;
 mod script_commands;
 pub(crate) mod setup;
 mod tick;
 
+#[cfg(test)]
+mod tests;
+
+use capture::{ParityCaptureState, drive_parity_capture};
 use hud_audio::sync_hud_text;
 use input::handle_play_input;
 use setup::setup_play_scene;
@@ -12,8 +17,7 @@ use tick::tick_play_state;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use crate::animations::AnimationController;
-use crate::audio::SongAudioPlayer;
+use crate::audio::{OxideAudioPlugin, PcmSfxAudio, PcmSfxCache, SongAudioPlayer, SyncedSongAudio};
 use crate::cli::LaunchFlags;
 use crate::input::{Controls, CursorState, PreciseInputManager};
 use crate::mods::{ModRegistry, ModStore};
@@ -32,11 +36,10 @@ use super::notes::NoteStyle;
 use super::notes::effects::sync_note_effects;
 use super::notes::render::sync_arrow_visuals;
 use super::playlist::PlayStatePlaylist;
+use super::preload::PlayPreloadTracker;
 use super::scene::PlayState;
 use super::song::{SongSelection, load_song_chart_in};
-use super::stage::{
-    DynamicScriptProp, StageCompositeProp, StagePropVisual, StageSyncState, sync_stage_props,
-};
+use super::stage::{StagePropVisual, StageSyncState, sync_script_texts, sync_stage_props};
 use super::types::{PlayStateParams, SongChart};
 
 #[derive(Default)]
@@ -70,6 +73,26 @@ pub(crate) struct PlaySfxAssets {
 pub(crate) struct PendingEcsScriptCommands(pub(crate) Vec<ScriptCommand>);
 
 #[derive(SystemParam)]
+pub(super) struct AudioTickParams<'w, 's> {
+    pub(super) audio: ResMut<'w, SongAudioPlayer>,
+    pub(super) sync: ResMut<'w, AudioSyncState>,
+    pub(super) sfx: ResMut<'w, PlaySfxAssets>,
+    pub(super) sinks: Query<'w, 's, &'static mut AudioSink>,
+    pub(super) audio_sources: Res<'w, Assets<AudioSource>>,
+    pub(super) synced_songs: ResMut<'w, Assets<SyncedSongAudio>>,
+    pub(super) pcm_sfx: ResMut<'w, Assets<PcmSfxAudio>>,
+    pub(super) sfx_cache: ResMut<'w, PcmSfxCache>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct PendingSongReload {
+    pub(crate) request: Option<(String, Option<String>, Option<String>)>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct PendingSongSeek(pub(crate) Option<f64>);
+
+#[derive(SystemParam)]
 pub(super) struct ScriptTickParams<'w, 's> {
     pub(super) asset_server: Res<'w, AssetServer>,
     pub(super) layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
@@ -78,19 +101,34 @@ pub(super) struct ScriptTickParams<'w, 's> {
     pub(super) script_host: ResMut<'w, ScriptHost>,
     pub(super) pending_ecs: ResMut<'w, PendingEcsScriptCommands>,
     pub(super) pending_shaders: ResMut<'w, super::shaders::systems::PendingShaderCommands>,
-    pub(super) actors: Query<'w, 's, &'static mut CharacterActor>,
-    pub(super) props: Query<
+    pub(super) preload: Option<ResMut<'w, PlayPreloadTracker>>,
+    pub(super) actors: Query<'w, 's, (Entity, &'static mut CharacterActor)>,
+    pub(super) props: script_commands::PropsQuery<'w, 's>,
+    pub(super) sparrows: Query<'w, 's, &'static script_commands::ScriptSparrowData>,
+}
+
+#[derive(SystemParam)]
+pub(super) struct ScriptHudAndTextParams<'w, 's> {
+    pub(super) texts: script_commands::TextsQuery<'w, 's>,
+    pub(super) tagged_sounds: Query<'w, 's, (Entity, &'static mut hud_audio::TaggedScriptSound)>,
+    pub(super) bar_fills: Query<
+        'w,
+        's,
+        (&'static super::hud::healthbar::HealthBarFillVisual, &'static mut Sprite),
+        (Without<StagePropVisual>, Without<super::hud::health_icon::HealthIcon>),
+    >,
+    pub(super) icons: Query<
         'w,
         's,
         (
-            Entity,
-            &'static mut StagePropVisual,
+            &'static mut super::hud::health_icon::HealthIcon,
+            &'static mut crate::animations::AnimationController,
             &'static mut Sprite,
-            Option<&'static mut AnimationController>,
-            Option<&'static DynamicScriptProp>,
-            Option<&'static StageCompositeProp>,
         ),
+        (Without<StagePropVisual>, Without<super::hud::healthbar::HealthBarFillVisual>),
     >,
+    pub(super) pending_reload: ResMut<'w, PendingSongReload>,
+    pub(super) pending_seek: ResMut<'w, PendingSongSeek>,
 }
 
 impl Plugin for PlayPlugin {
@@ -145,6 +183,8 @@ impl Plugin for PlayPlugin {
             .insert_resource(mod_store)
             .insert_resource(script_host)
             .insert_resource(PendingEcsScriptCommands::default())
+            .insert_resource(PendingSongReload::default())
+            .insert_resource(PendingSongSeek::default())
             .insert_resource(selection)
             .insert_resource(controls)
             .insert_resource(precise_input)
@@ -155,16 +195,22 @@ impl Plugin for PlayPlugin {
             .insert_resource(StageSyncState::default())
             .insert_resource(CharacterSyncState::default())
             .insert_resource(HotReloadState::default())
+            .insert_resource(PlayPreloadTracker::default())
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,
             })
             .insert_resource(state)
-            .add_plugins(super::shaders::FunkinShadersPlugin)
+            .add_plugins((OxideAudioPlugin, super::shaders::FunkinShadersPlugin))
             .add_systems(Startup, setup_play_scene)
             .add_systems(Update, (handle_play_input, hot_reload_assets_system, tick_play_state).chain().before(crate::animations::sprite::step_animations))
-            .add_systems(Update, (sync_stage_props, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
+            .add_systems(Update, (sync_stage_props, sync_script_texts, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
+
+        if let Some(capture_state) = ParityCaptureState::from_flags(&self.flags) {
+            app.insert_resource(capture_state)
+                .add_systems(Update, drive_parity_capture.after(sync_hud_text));
+        }
     }
 }
 

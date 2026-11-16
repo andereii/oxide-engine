@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
-use crate::input::{Action, Controls, PreciseInputManager};
+use crate::input::{
+    Action, Controls, PreciseInputManager, keycode_aliases, primary_keycode_name,
+};
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost};
 
@@ -83,13 +85,74 @@ pub(super) fn handle_play_input(
         return;
     }
 
+    if state.phase == PlayPhase::Loading {
+        return;
+    }
+
+    if controls.just_pressed(&keys, Action::WindowScreenshot) {
+        pending_ecs.0.push(ScriptCommand::TakeScreenshot(None));
+    }
+
+    state.script_keys_down.clear();
+    for k in keys.get_pressed() {
+        state.script_keys_down.extend(keycode_aliases(*k));
+    }
+    state.script_keys_hit.clear();
+    for k in keys.get_just_pressed() {
+        state.script_keys_hit.extend(keycode_aliases(*k));
+    }
+    state.script_keys_up.clear();
+    for k in keys.get_just_released() {
+        state.script_keys_up.extend(keycode_aliases(*k));
+    }
+    let (c_down, c_hit, c_up) = controls.collect_active_names(&keys);
+    state.script_ctrls_down = c_down;
+    state.script_ctrls_hit = c_hit;
+    state.script_ctrls_up = c_up;
+
+    let note_lanes_active = !state.is_bot_play_mode
+        && !state.disable_keys
+        && !state.is_in_cutscene
+        && !matches!(state.phase, PlayPhase::Paused(_));
+    let emit_press = script_host.has_hook_listeners(&HookKind::KeyPress);
+    let emit_release = script_host.has_hook_listeners(&HookKind::KeyRelease);
+    if emit_press {
+        let ctrl_name = state.script_ctrls_hit.first().cloned().unwrap_or_default();
+        for k in keys.get_just_pressed() {
+            if note_lanes_active && controls.is_note_key(*k) {
+                continue;
+            }
+            let mut ev = ScriptEvent::new(HookKind::KeyPress)
+                .with_field("key", primary_keycode_name(*k));
+            if !ctrl_name.is_empty() {
+                ev = ev.with_field("ctrl", ctrl_name.as_str());
+            }
+            state.pending_hooks.push((HookKind::KeyPress, ev));
+        }
+    }
+    if emit_release {
+        let ctrl_name = state.script_ctrls_up.first().cloned().unwrap_or_default();
+        for k in keys.get_just_released() {
+            if note_lanes_active && controls.is_note_key(*k) {
+                continue;
+            }
+            let mut ev = ScriptEvent::new(HookKind::KeyRelease)
+                .with_field("key", primary_keycode_name(*k));
+            if !ctrl_name.is_empty() {
+                ev = ev.with_field("ctrl", ctrl_name.as_str());
+            }
+            state.pending_hooks.push((HookKind::KeyRelease, ev));
+        }
+    }
+
     if controls.just_pressed(&keys, Action::Pause) {
         if matches!(state.phase, PlayPhase::Paused(_)) {
             state.resume();
-        } else {
+            return;
+        } else if state.may_pause_game {
             state.pause(PauseMode::Standard);
+            return;
         }
-        return;
     }
 
     if controls.just_pressed(&keys, Action::Reset) {
@@ -97,7 +160,9 @@ pub(super) fn handle_play_input(
         return;
     }
 
-    if state.is_bot_play_mode { return; }
+    if state.is_bot_play_mode || state.disable_keys {
+        return;
+    }
     let pos_ms = state.conductor.song_position_ms;
     precise.poll_keyboard(&keys, pos_ms);
 

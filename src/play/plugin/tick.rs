@@ -1,16 +1,325 @@
-use bevy::audio::AudioSink;
+use std::collections::BTreeMap;
+
+use bevy::app::AppExit;
+use bevy::audio::AudioSinkPlayback;
 use bevy::prelude::*;
+use bevy::window::WindowFocused;
 
-use crate::audio::SongAudioPlayer;
-use crate::scripting::ScriptCommand;
+use crate::scripting::{HookKind, ScriptCommand, ScriptEvent};
 
-use super::super::characters::CharacterRole;
+use super::super::characters::{CharacterRole, ensure_character_gameover_anims_loaded};
+use super::super::hud::countdown::CountdownGraphicVisual;
+use super::super::hud::health_icon::HealthIcon;
+use super::super::hud::healthbar::{HealthBarBgVisual, HealthBarFillVisual};
+use super::super::hud::popups::PopupVisual;
+use super::super::notes::NoteStyle;
+use super::super::notes::effects::{HoldCoverVisual, NoteSplashVisual};
+use super::super::notes::render::visuals::{
+    NoteVisual, ReceptorVisual, SustainBodyVisual, SustainEndVisual,
+};
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
-use super::super::types::PlayPhase;
-use super::hud_audio::spawn_one_shot;
+use super::super::shaders::systems::ShaderScriptCommand;
+use super::super::song::{SongSelection, load_song_chart_in};
+use super::super::stage::StageCompositePiece;
+use super::super::types::{PlayPhase, PlayStateParams, SongChart};
+use super::hud_audio::{prewarm_sfx_handles, spawn_one_shot};
 use super::script_commands::apply_ecs_script_commands;
-use super::{AudioSyncState, PlaySfxAssets, ScriptTickParams};
+use super::setup::populate_play_scene_entities;
+use super::{AudioTickParams, ScriptHudAndTextParams, ScriptTickParams};
+
+pub(super) type ReloadCleanupQuery<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    Or<(
+        With<StageCompositePiece>,
+        With<CountdownGraphicVisual>,
+        With<HealthBarBgVisual>,
+        With<HealthBarFillVisual>,
+        With<HealthIcon>,
+        With<ReceptorVisual>,
+        With<NoteVisual>,
+        With<SustainBodyVisual>,
+        With<SustainEndVisual>,
+        With<NoteSplashVisual>,
+        With<HoldCoverVisual>,
+        With<PopupVisual>,
+    )>,
+>;
+
+fn set_map_copy<V: Copy + PartialEq>(map: &mut BTreeMap<String, V>, key: &str, val: V) {
+    if let Some(slot) = map.get_mut(key) {
+        if *slot != val {
+            *slot = val;
+        }
+    } else {
+        map.insert(key.to_string(), val);
+    }
+}
+
+fn set_map_str(map: &mut BTreeMap<String, String>, key: &str, val: &str) {
+    if let Some(slot) = map.get_mut(key) {
+        if slot != val {
+            slot.clear();
+            slot.push_str(val);
+        }
+    } else {
+        map.insert(key.to_string(), val.to_string());
+    }
+}
+
+fn sync_script_entity_maps(
+    state: &mut PlayState,
+    scripts: &ScriptTickParams,
+    hud_texts: &ScriptHudAndTextParams,
+    sinks: &Query<&mut AudioSink>,
+) {
+    let mut seen_aliases = [false; 3];
+    for (_, actor) in &scripts.actors {
+        let tl_x = actor.slot.position[0]
+            + actor.data.offsets[0] * (1.0 + actor.slot.scale[0])
+            - actor.idle_size[0] * actor.slot.scale[0] * 0.5;
+        let tl_y = actor.slot.position[1]
+            + actor.data.offsets[1] * (1.0 + actor.slot.scale[1])
+            - actor.idle_size[1] * actor.slot.scale[1];
+        let char_z = actor
+            .mod_z
+            .unwrap_or_else(|| super::super::stage::schema::stage_layer_z(actor.slot.layer, 0));
+        let cur_anim = actor.controller.current.as_deref().unwrap_or("");
+        let anim_finished = actor.controller.is_finished();
+
+        let (alias, role_idx) = match actor.role {
+            CharacterRole::Player => ("bf", 0),
+            CharacterRole::Opponent => ("dad", 1),
+            CharacterRole::Spectator => ("gf", 2),
+        };
+        let write_alias = !seen_aliases[role_idx];
+        seen_aliases[role_idx] = true;
+
+        let keys: [&str; 2] = if write_alias {
+            [&actor.id, alias]
+        } else {
+            [&actor.id, ""]
+        };
+        for key in keys {
+            if key.is_empty() {
+                continue;
+            }
+            set_map_copy(&mut state.script_char_positions, key, actor.slot.position);
+            set_map_copy(&mut state.script_char_top_left, key, [tl_x, tl_y]);
+            set_map_copy(&mut state.script_char_z, key, char_z);
+            set_map_copy(&mut state.script_char_scales, key, actor.slot.scale);
+            set_map_copy(&mut state.script_char_alphas, key, actor.mod_tint[3]);
+            set_map_copy(&mut state.script_char_flips, key, actor.slot.flip);
+            set_map_copy(&mut state.script_char_vis, key, actor.mod_visible);
+            set_map_copy(&mut state.script_char_sizes, key, actor.idle_size);
+            set_map_copy(&mut state.script_char_focus, key, actor.camera_focus_point);
+            set_map_str(&mut state.script_char_anims, key, cur_anim);
+            set_map_copy(&mut state.script_char_anim_finished, key, anim_finished);
+        }
+    }
+    for (_, vis, sprite, anim_opt, _, _) in &scripts.props {
+        set_map_copy(&mut state.script_prop_positions, &vis.name, vis.base_position);
+        set_map_copy(&mut state.script_prop_scales, &vis.name, vis.base_scale);
+        set_map_copy(&mut state.script_prop_angles, &vis.name, vis.base_angle_deg);
+        set_map_copy(&mut state.script_prop_alphas, &vis.name, sprite.color.alpha());
+        set_map_copy(&mut state.script_prop_z, &vis.name, vis.z_layer);
+        set_map_copy(&mut state.script_prop_scrolls, &vis.name, vis.scroll_factor);
+        set_map_copy(&mut state.script_prop_flips, &vis.name, vis.base_flip);
+        set_map_copy(&mut state.script_prop_vis, &vis.name, vis.visible);
+        set_map_copy(&mut state.script_prop_sizes, &vis.name, vis.raw_size);
+        set_map_copy(&mut state.script_prop_velocities, &vis.name, vis.velocity);
+        if let Some(ctrl) = anim_opt {
+            set_map_str(
+                &mut state.script_prop_anims,
+                &vis.name,
+                ctrl.current.as_deref().unwrap_or(""),
+            );
+            set_map_copy(&mut state.script_prop_anim_done, &vis.name, ctrl.is_finished());
+        }
+    }
+
+    state.script_texts.clear();
+    state.script_text_positions.clear();
+    state.script_text_alphas.clear();
+    for (_, txt, t2d, _, tc, _) in &hud_texts.texts {
+        state.script_texts.insert(txt.id.clone(), t2d.0.clone());
+        state
+            .script_text_positions
+            .insert(txt.id.clone(), txt.base_position);
+        state
+            .script_text_alphas
+            .insert(txt.id.clone(), tc.0.alpha());
+    }
+
+    state.script_active_sounds.clear();
+    state.script_sound_volumes.clear();
+    for (ent, tagged) in &hud_texts.tagged_sounds {
+        state
+            .script_sound_volumes
+            .insert(tagged.tag.clone(), tagged.base_volume);
+        let active = sinks
+            .get(ent)
+            .ok()
+            .is_some_and(|sink| !sink.is_paused() && !sink.empty());
+        if active {
+            state.script_active_sounds.push(tagged.tag.clone());
+        }
+    }
+}
+
+pub(crate) fn apply_song_seek_state(state: &mut PlayState, seek_ms: f64) {
+    let clamped = seek_ms.max(0.0);
+    let prev_pos = state.conductor.song_position_ms;
+    let was_starting = state.starting_song;
+    state.starting_song = false;
+    state.is_in_countdown = false;
+    state.countdown_paused = false;
+    if state.phase == PlayPhase::Countdown {
+        state.phase = PlayPhase::Playing;
+    }
+    state.conductor.update(clamped);
+    state.last_raw_audio_ms = None;
+    if was_starting {
+        state
+            .pending_hooks
+            .push((HookKind::CountdownEnd, ScriptEvent::new(HookKind::CountdownEnd)));
+        state.pending_hooks.push((
+            HookKind::SongStart,
+            ScriptEvent::new(HookKind::SongStart)
+                .with_field("song", state.chart.song_id.clone())
+                .with_field("bpm", state.conductor.bpm()),
+        ));
+        state.status_message = format!("Playing: {} [{}]", state.chart.song_name, state.current_difficulty);
+    }
+    if clamped < prev_pos {
+        for ev in &mut state.song_events {
+            if ev.time_ms >= clamped {
+                ev.triggered = false;
+            }
+        }
+    } else {
+        // Run skipped song events chronologically so camera/zoom/script state matches the target timestamp.
+        state.process_song_events();
+    }
+    state.player_strumline.seek_to(clamped);
+    state.opponent_strumline.seek_to(clamped);
+}
+
+fn apply_song_seek(state: &mut PlayState, audio_res: &mut AudioTickParams, seek_ms: f64) {
+    apply_song_seek_state(state, seek_ms);
+    let sync_ms = (state.conductor.song_position_ms - state.conductor.combined_offset()).max(0.0);
+    audio_res.sync.was_countdown = false;
+    audio_res.audio.play_from(sync_ms, &mut audio_res.sinks);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_song_reload(
+    commands: &mut Commands,
+    song_id: String,
+    diff_opt: Option<String>,
+    var_opt: Option<String>,
+    state: &mut PlayState,
+    playlist: &mut PlayStatePlaylist,
+    selection: &mut SongSelection,
+    audio_res: &mut AudioTickParams,
+    scripts: &mut ScriptTickParams,
+    hud_texts: &mut ScriptHudAndTextParams,
+    reload_cleanup: &ReloadCleanupQuery,
+) {
+    let _ = state.run_script_hooks(
+        vec![(HookKind::Destroy, ScriptEvent::new(HookKind::Destroy))],
+        false,
+        0.0,
+        playlist,
+        &mut scripts.script_host,
+        &scripts.mods,
+        &mut scripts.mod_store,
+    );
+    scripts.script_host.clear_scripts();
+    scripts.pending_ecs.0.clear();
+    scripts.pending_shaders.0.push(ShaderScriptCommand::ClearShader {
+        target: "cam".to_string(),
+    });
+
+    for (ent, _) in &hud_texts.tagged_sounds {
+        commands.entity(ent).despawn();
+    }
+    for (ent, _, _, _, _, _) in &hud_texts.texts {
+        commands.entity(ent).despawn();
+    }
+    for (ent, _, _, _, _, _) in &scripts.props {
+        commands.entity(ent).despawn();
+    }
+    for (ent, actor) in &scripts.actors {
+        commands.entity(actor.sheet_entity).despawn();
+        for &piece in &actor.piece_entities {
+            commands.entity(piece).despawn();
+        }
+        commands.entity(ent).despawn();
+    }
+    for ent in reload_cleanup {
+        commands.entity(ent).despawn();
+    }
+    audio_res.audio.despawn_all(commands);
+
+    selection.song_id = song_id;
+    if let Some(d) = diff_opt {
+        selection.difficulty = d;
+    }
+    if let Some(v) = var_opt {
+        selection.variation = v;
+    }
+
+    let (chart, note_style, load_error) = match load_song_chart_in(
+        &scripts.mods,
+        &selection.song_id,
+        &selection.difficulty,
+        &selection.variation,
+    ) {
+        Ok(chart) => {
+            let style = NoteStyle::load_in(&scripts.mods, &chart.skins.hud).unwrap_or_default();
+            (chart, style, None)
+        }
+        Err(err) => (SongChart::default(), NoteStyle::default(), Some(err)),
+    };
+
+    let prev_deaths = state.death_counter;
+    let mut next_state = PlayState::new(PlayStateParams {
+        chart,
+        note_style,
+        practice_mode: state.is_practice_mode,
+        bot_play_mode: state.is_bot_play_mode,
+        minimal_mode: state.is_minimal_mode,
+        start_timestamp_ms: 0.0,
+        playback_rate: state.playback_rate,
+        ..default()
+    });
+    next_state.death_counter = prev_deaths;
+    if let Some(err) = load_error {
+        next_state.critical_failure = true;
+        next_state.status_message = err;
+    }
+    *state = next_state;
+    audio_res.sync.was_countdown = state.is_in_countdown;
+    audio_res.sync.was_paused = false;
+
+    populate_play_scene_entities(
+        commands,
+        &scripts.asset_server,
+        &mut scripts.layouts,
+        &scripts.mods,
+        &mut scripts.mod_store,
+        &mut scripts.script_host,
+        &mut scripts.pending_ecs,
+        state,
+        playlist,
+        &mut audio_res.audio,
+        &mut audio_res.sfx,
+        scripts.preload.as_deref_mut(),
+    );
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tick_play_state(
@@ -18,142 +327,215 @@ pub(super) fn tick_play_state(
     time: Res<Time>,
     mut state: ResMut<PlayState>,
     mut playlist: ResMut<PlayStatePlaylist>,
-    mut audio: ResMut<SongAudioPlayer>,
-    mut sync: ResMut<AudioSyncState>,
-    mut sfx: ResMut<PlaySfxAssets>,
-    mut sinks: Query<&mut AudioSink>,
+    mut selection: ResMut<SongSelection>,
+    mut audio_res: AudioTickParams,
     mut scripts: ScriptTickParams,
+    mut hud_texts: ScriptHudAndTextParams,
+    mut focus_events: MessageReader<WindowFocused>,
+    mut exit_events: MessageReader<AppExit>,
+    reload_cleanup: ReloadCleanupQuery,
 ) {
+    for ev in focus_events.read() {
+        let kind = if ev.focused {
+            HookKind::FocusGained
+        } else {
+            HookKind::FocusLost
+        };
+        state.pending_hooks.push((kind.clone(), ScriptEvent::new(kind)));
+    }
+    if exit_events.read().next().is_some() {
+        let exit_cmds = state.run_script_hooks(
+            vec![(HookKind::Destroy, ScriptEvent::new(HookKind::Destroy))],
+            false,
+            0.0,
+            &mut playlist,
+            &mut scripts.script_host,
+            &scripts.mods,
+            &mut scripts.mod_store,
+        );
+        scripts.pending_ecs.0.extend(exit_cmds);
+    }
+
+    audio_res.audio.prepare_mix_if_ready(
+        &mut commands,
+        &audio_res.audio_sources,
+        &mut audio_res.synced_songs,
+    );
+
+    if let Some((song_id, diff_opt, var_opt)) = hud_texts.pending_reload.request.take() {
+        execute_song_reload(
+            &mut commands,
+            song_id,
+            diff_opt,
+            var_opt,
+            &mut state,
+            &mut playlist,
+            &mut selection,
+            &mut audio_res,
+            &mut scripts,
+            &mut hud_texts,
+            &reload_cleanup,
+        );
+        return;
+    }
+
+    if state.phase == PlayPhase::Loading {
+        if !scripts.pending_ecs.0.is_empty() {
+            let init_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
+            apply_ecs_script_commands(
+                &mut commands,
+                &mut audio_res,
+                &mut scripts,
+                &mut hud_texts,
+                &init_cmds,
+            );
+        }
+
+        prewarm_sfx_handles(
+            &audio_res.sfx.miss_sounds,
+            &audio_res.audio_sources,
+            &mut audio_res.pcm_sfx,
+            &mut audio_res.sfx_cache,
+        );
+
+        let progress = if let Some(ref mut preload) = scripts.preload {
+            preload.poll(&scripts.asset_server, audio_res.audio.is_ready())
+        } else {
+            return;
+        };
+        state.status_message = format!(
+            "Loading... {:.0}% ({}/{})",
+            progress.fraction() * 100.0,
+            progress.loaded_assets,
+            progress.total_assets,
+        );
+        if progress.is_complete() {
+            state.start_countdown();
+            audio_res.sync.was_countdown = true;
+            audio_res.sync.was_paused = false;
+        }
+        return;
+    }
+
     let is_paused = matches!(
         state.phase,
         PlayPhase::Paused(_) | PlayPhase::GameOver | PlayPhase::Ended
     );
-    if is_paused && !sync.was_paused {
-        audio.pause(&mut sinks);
-        sync.was_paused = true;
-    } else if !is_paused && sync.was_paused {
-        audio.resume(&mut sinks);
-        sync.was_paused = false;
+    if is_paused && !audio_res.sync.was_paused {
+        audio_res.audio.pause(&mut audio_res.sinks);
+        audio_res.sync.was_paused = true;
+    } else if !is_paused && audio_res.sync.was_paused {
+        audio_res.audio.resume(&mut audio_res.sinks);
+        audio_res.sync.was_paused = false;
     }
 
     if state.needs_reset {
-        audio.pause(&mut sinks);
-        sync.was_countdown = true;
+        audio_res.audio.pause(&mut audio_res.sinks);
+        audio_res.sync.was_countdown = true;
     }
 
-    let mut seen_aliases = [false; 3];
-    for actor in &scripts.actors {
-        let tl_x = actor.slot.position[0]
-            + actor.data.offsets[0] * (1.0 + actor.slot.scale[0])
-            - actor.idle_size[0] * actor.slot.scale[0] * 0.5;
-        let tl_y = actor.slot.position[1]
-            + actor.data.offsets[1] * (1.0 + actor.slot.scale[1])
-            - actor.idle_size[1] * actor.slot.scale[1];
-        let char_z = super::super::stage::schema::stage_layer_z(actor.slot.layer, 0);
-        state
-            .script_char_positions
-            .insert(actor.id.clone(), actor.slot.position);
-        state
-            .script_char_top_left
-            .insert(actor.id.clone(), [tl_x, tl_y]);
-        state.script_char_z.insert(actor.id.clone(), char_z);
-        let cur_anim = actor.controller.current.clone().unwrap_or_default();
-        let anim_finished = actor.controller.is_finished();
-        state
-            .script_char_anims
-            .insert(actor.id.clone(), cur_anim.clone());
-        state
-            .script_char_anim_finished
-            .insert(actor.id.clone(), anim_finished);
-        let (alias, role_idx) = match actor.role {
-            CharacterRole::Player => ("bf", 0),
-            CharacterRole::Opponent => ("dad", 1),
-            CharacterRole::Spectator => ("gf", 2),
-        };
-        state
-            .script_char_positions
-            .entry(alias.to_string())
-            .or_insert(actor.slot.position);
-        state
-            .script_char_top_left
-            .entry(alias.to_string())
-            .or_insert([tl_x, tl_y]);
-        state
-            .script_char_z
-            .entry(alias.to_string())
-            .or_insert(char_z);
-        if !seen_aliases[role_idx] {
-            seen_aliases[role_idx] = true;
-            state.script_char_anims.insert(alias.to_string(), cur_anim);
-            state
-                .script_char_anim_finished
-                .insert(alias.to_string(), anim_finished);
-        }
-    }
-    for (_, vis, sprite, _, _, _) in &scripts.props {
-        state
-            .script_prop_positions
-            .insert(vis.name.clone(), vis.base_position);
-        state
-            .script_prop_scales
-            .insert(vis.name.clone(), vis.base_scale);
-        state
-            .script_prop_angles
-            .insert(vis.name.clone(), vis.base_angle_deg);
-        state
-            .script_prop_alphas
-            .insert(vis.name.clone(), sprite.color.alpha());
+    if let Some(seek_ms) = hud_texts.pending_seek.0.take() {
+        apply_song_seek(&mut state, &mut audio_res, seek_ms);
     }
 
     let dt = f64::from(time.delta_secs()).min(0.1);
-    let master_ms = audio.master_time_ms(&sinks);
+    let master_ms = audio_res.audio.master_time_ms(&audio_res.sinks);
     state.audio_finished = state.phase == PlayPhase::Playing
         && !state.is_in_countdown
-        && audio.all_tracks_finished(&sinks);
-    let mut ecs_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
-    let frame_cmds = state.update_with_scripts(
-        dt,
-        master_ms,
-        &mut playlist,
-        &mut scripts.script_host,
-        &scripts.mods,
-        &mut scripts.mod_store,
-    );
-    ecs_cmds.extend(frame_cmds);
-    apply_ecs_script_commands(
-        &mut commands,
-        &scripts.asset_server,
-        &mut scripts.layouts,
-        &scripts.mods,
-        &mut scripts.actors,
-        &mut scripts.props,
-        &mut scripts.pending_shaders,
-        &ecs_cmds,
-    );
+        && audio_res.audio.all_tracks_finished(&audio_res.sinks);
 
-    if state.pending_miss_sfx {
-        state.pending_miss_sfx = false;
-        if !sfx.miss_sounds.is_empty() {
-            let idx = sfx.miss_cursor % sfx.miss_sounds.len();
-            sfx.miss_cursor = sfx.miss_cursor.wrapping_add(1);
-            spawn_one_shot(&mut commands, sfx.miss_sounds[idx].clone(), sfx.miss_volume);
+    state.update(dt, master_ms, &mut playlist);
+
+    if state.phase == PlayPhase::GameOver {
+        for (_, mut actor) in &mut scripts.actors {
+            ensure_character_gameover_anims_loaded(
+                &mut actor,
+                &scripts.mods,
+                &scripts.asset_server,
+                &mut scripts.layouts,
+                &mut commands,
+            );
         }
     }
 
-    if sync.was_countdown && !state.is_in_countdown && state.phase == PlayPhase::Playing {
-        audio.play_from(state.start_timestamp_ms, &mut sinks);
-        sync.was_countdown = false;
+    let hooks = std::mem::take(&mut state.pending_hooks);
+    let mut ecs_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
+    if !hooks.is_empty() || scripts.script_host.has_frame_update_work() {
+        sync_script_entity_maps(&mut state, &scripts, &hud_texts, &audio_res.sinks);
+        let frame_cmds = state.run_script_hooks(
+            hooks,
+            true,
+            dt,
+            &mut playlist,
+            &mut scripts.script_host,
+            &scripts.mods,
+            &mut scripts.mod_store,
+        );
+        ecs_cmds.extend(frame_cmds);
+    }
+
+    if !ecs_cmds.is_empty() {
+        apply_ecs_script_commands(
+            &mut commands,
+            &mut audio_res,
+            &mut scripts,
+            &mut hud_texts,
+            &ecs_cmds,
+        );
+    }
+
+    if let Some((song_id, diff_opt, var_opt)) = hud_texts.pending_reload.request.take() {
+        execute_song_reload(
+            &mut commands,
+            song_id,
+            diff_opt,
+            var_opt,
+            &mut state,
+            &mut playlist,
+            &mut selection,
+            &mut audio_res,
+            &mut scripts,
+            &mut hud_texts,
+            &reload_cleanup,
+        );
+        return;
+    }
+
+    if let Some(seek_ms) = hud_texts.pending_seek.0.take() {
+        apply_song_seek(&mut state, &mut audio_res, seek_ms);
+    }
+
+    if state.pending_miss_sfx {
+        state.pending_miss_sfx = false;
+        if !audio_res.sfx.miss_sounds.is_empty() {
+            let idx = audio_res.sfx.miss_cursor % audio_res.sfx.miss_sounds.len();
+            audio_res.sfx.miss_cursor = audio_res.sfx.miss_cursor.wrapping_add(1);
+            spawn_one_shot(
+                &mut commands,
+                audio_res.sfx.miss_sounds[idx].clone(),
+                audio_res.sfx.miss_volume,
+                &audio_res.audio_sources,
+                &mut audio_res.pcm_sfx,
+                &mut audio_res.sfx_cache,
+            );
+        }
+    }
+
+    if audio_res.sync.was_countdown && !state.is_in_countdown && state.phase == PlayPhase::Playing {
+        audio_res
+            .audio
+            .play_from(state.start_timestamp_ms, &mut audio_res.sinks);
+        audio_res.sync.was_countdown = false;
     }
 
     if state.phase == PlayPhase::Playing {
-        audio.sync_volumes(
+        audio_res.audio.sync_volumes(
             state.instrumental_volume as f32,
             state.player_vocals_volume as f32,
             state.opponent_vocals_volume as f32,
-            &mut sinks,
+            &mut audio_res.sinks,
         );
         let sync_ms = (state.conductor.song_position_ms - state.conductor.combined_offset()).max(0.0);
-        audio.tick(sync_ms, dt, &mut sinks);
+        audio_res.audio.tick(sync_ms, dt, &mut audio_res.sinks);
     }
 }
-

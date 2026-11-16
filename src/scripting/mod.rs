@@ -12,7 +12,8 @@ pub use backend::api;
 #[allow(unused_imports)]
 pub use api::{
     LogLevel, PropertyTween, SCRIPT_API_CATALOG, ScriptApiDoc, ScriptCommand, ScriptContext,
-    ScriptMutableState, ScriptPropAnimKind, ScriptStateSnapshot, TweenProp, TweenTarget,
+    ScriptMutableState, ScriptNoteSnapshot, ScriptPropAnimKind, ScriptStateSnapshot, TweenProp,
+    TweenTarget,
 };
 #[allow(unused_imports)]
 pub use backend::{RhaiBackend, ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
@@ -20,3 +21,6 @@ pub use events::{HookKind, ScriptEvent};
 pub use host::ScriptHost;
 #[allow(unused_imports)]
 pub use value::{ScriptLanguage, ScriptValue};
+
+#[cfg(test)]
+mod tests;

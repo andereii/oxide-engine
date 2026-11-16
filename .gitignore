@@ -6,6 +6,8 @@
 
 # --- Rust / Cargo ----------------------------------------------------------
 /target/
+# Stray root-level build output from `cargo build`.
+/oxide
 **/*.rs.bk
 *.pdb
 *.profraw

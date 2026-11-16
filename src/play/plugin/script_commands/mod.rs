@@ -1,0 +1,206 @@
+mod chars_hud_audio;
+mod props_text;
+
+use std::collections::HashMap;
+
+use bevy::prelude::*;
+
+use crate::animations::AnimationController;
+use crate::play::stage::{DynamicScriptProp, DynamicScriptText, StageCompositeProp, StagePropVisual};
+use crate::scripting::{LogLevel, ScriptCommand};
+
+use super::super::shaders::systems::{ShaderScriptCommand, parse_wiggle_effect_type};
+use super::{AudioTickParams, ScriptHudAndTextParams, ScriptTickParams};
+use chars_hud_audio::handle_char_hud_audio_cmd;
+pub(crate) use props_text::ScriptSparrowData;
+use props_text::{build_prop_index_ci, handle_prop_text_cmd};
+
+pub(crate) fn apply_ecs_script_commands(
+    commands: &mut Commands,
+    audio_res: &mut AudioTickParams,
+    scripts: &mut ScriptTickParams,
+    hud_texts: &mut ScriptHudAndTextParams,
+    cmds: &[ScriptCommand],
+) {
+    // Build an indexed lookup when batches address props repeatedly (e.g. per-note visualizers)
+    // and invalidate if a spawn/despawn mutates prop entities mid-batch.
+    let mut prop_index: Option<HashMap<String, Vec<Entity>>> =
+        (cmds.len() >= 2).then(|| build_prop_index_ci(&scripts.props));
+
+    for cmd in cmds {
+        match cmd {
+            ScriptCommand::Log { level, mod_id, message } => match level {
+                LogLevel::Info => info!("[mod:{mod_id}] {message}"),
+                LogLevel::Warn => warn!("[mod:{mod_id}] {message}"),
+                LogLevel::Error => error!("[mod:{mod_id}] {message}"),
+            },
+            ScriptCommand::SpawnProp { .. }
+            | ScriptCommand::SpawnAnimatedProp { .. }
+            | ScriptCommand::DespawnProp(_)
+            | ScriptCommand::SetPropNumber { .. }
+            | ScriptCommand::SetPropTint { .. }
+            | ScriptCommand::SetPropVisible { .. }
+            | ScriptCommand::SetPropFlip { .. }
+            | ScriptCommand::SetPropScroll { .. }
+            | ScriptCommand::SetPropZ { .. }
+            | ScriptCommand::SetPropSize { .. }
+            | ScriptCommand::SetPropVelocity { .. }
+            | ScriptCommand::AddPropAnim { .. }
+            | ScriptCommand::SpawnText { .. }
+            | ScriptCommand::SetText { .. }
+            | ScriptCommand::SetTextStyle { .. } => {
+                handle_prop_text_cmd(
+                    cmd,
+                    commands,
+                    &scripts.asset_server,
+                    &mut scripts.layouts,
+                    &scripts.mods,
+                    scripts.preload.as_deref_mut(),
+                    &mut scripts.props,
+                    &scripts.sparrows,
+                    &mut hud_texts.texts,
+                    &mut prop_index,
+                );
+            }
+            ScriptCommand::SetShaderAdjustColor {
+                target,
+                hue,
+                saturation,
+                brightness,
+                contrast,
+            } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetAdjustColor {
+                    target: target.clone(),
+                    hue: *hue,
+                    saturation: *saturation,
+                    brightness: *brightness,
+                    contrast: *contrast,
+                });
+            }
+            ScriptCommand::SetShaderDropShadow {
+                target,
+                color,
+                angle_deg,
+                distance,
+                strength,
+                threshold,
+                hue,
+                saturation,
+                brightness,
+                contrast,
+                use_alt_mask,
+                alt_mask_path,
+                mask_threshold,
+            } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetDropShadow {
+                    target: target.clone(),
+                    color: *color,
+                    angle_deg: *angle_deg,
+                    distance: *distance,
+                    strength: *strength,
+                    threshold: *threshold,
+                    hue: *hue,
+                    saturation: *saturation,
+                    brightness: *brightness,
+                    contrast: *contrast,
+                    use_alt_mask: *use_alt_mask,
+                    alt_mask_path: alt_mask_path.clone(),
+                    mask_threshold: *mask_threshold,
+                });
+            }
+            ScriptCommand::SetShaderWiggle {
+                target,
+                effect,
+                speed,
+                frequency,
+                amplitude,
+            } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetWiggle {
+                    target: target.clone(),
+                    effect_type: parse_wiggle_effect_type(effect),
+                    speed: *speed,
+                    frequency: *frequency,
+                    amplitude: *amplitude,
+                });
+            }
+            ScriptCommand::SetCameraRain {
+                scale,
+                intensity,
+                color,
+                time_scale_decay,
+            } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetCameraRain {
+                    scale: *scale,
+                    intensity: *intensity,
+                    color: *color,
+                    time_scale_decay: *time_scale_decay,
+                });
+            }
+            ScriptCommand::SetBlendMode { target, mode } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetBlendMode {
+                    target: target.clone(),
+                    mode: mode.clone(),
+                });
+            }
+            ScriptCommand::SetCustomShader { target, path } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetCustomShader {
+                    target: target.clone(),
+                    path: path.clone(),
+                });
+            }
+            ScriptCommand::SetShaderParam { target, key, values } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetShaderParam {
+                    target: target.clone(),
+                    key: key.clone(),
+                    values: *values,
+                });
+            }
+            ScriptCommand::SetShaderTex { target, path } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetShaderTex {
+                    target: target.clone(),
+                    path: path.clone(),
+                });
+            }
+            ScriptCommand::ClearShader { target } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::ClearShader {
+                    target: target.clone(),
+                });
+            }
+            _ => {
+                handle_char_hud_audio_cmd(
+                    cmd,
+                    commands,
+                    audio_res,
+                    scripts,
+                    hud_texts,
+                );
+            }
+        }
+    }
+}
+
+pub(crate) type PropsQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut StagePropVisual,
+        &'static mut Sprite,
+        Option<&'static mut AnimationController>,
+        Option<&'static DynamicScriptProp>,
+        Option<&'static StageCompositeProp>,
+    ),
+>;
+
+pub(crate) type TextsQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut DynamicScriptText,
+        &'static mut Text2d,
+        &'static mut TextFont,
+        &'static mut TextColor,
+        &'static mut bevy::sprite::Anchor,
+    ),
+>;

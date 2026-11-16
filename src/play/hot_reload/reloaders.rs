@@ -12,7 +12,7 @@ use crate::play::characters::{
 use crate::play::hud::countdown::{CountdownAssets, load_countdown_assets};
 use crate::play::hud::health_icon::{HealthIcon, spawn_health_icons};
 use crate::play::hud::healthbar::HealthBarBgVisual;
-use crate::play::hud::popups::{PopupAssets, load_popup_assets};
+use crate::play::hud::popups::{PopupAssets, PopupVisual, load_popup_assets, spawn_popup_pool};
 use crate::play::notes::effects::{HoldCoverVisual, NoteSplashVisual, spawn_effect_pools};
 use crate::play::notes::render::visuals::{
     NoteVisual, NoteskinAssets, ReceptorVisual, SustainBodyVisual, SustainEndVisual,
@@ -74,6 +74,7 @@ pub(crate) struct HotReloadQueries<'w, 's> {
             With<SustainEndVisual>,
             With<NoteSplashVisual>,
             With<HoldCoverVisual>,
+            With<PopupVisual>,
         )>,
     >,
     pub(super) health_bar_bg: Query<'w, 's, (&'static mut HealthBarBgVisual, &'static mut Sprite)>,
@@ -401,6 +402,16 @@ pub(super) fn reload_skin_domain(
         **cd = new_countdown;
     }
     let new_popup = load_popup_assets(&res.mods, &new_style, &res.asset_server);
+    let pool_popup = PopupAssets {
+        ratings: new_popup.ratings.clone(),
+        digits: new_popup.digits.clone(),
+        combo_scale: new_popup.combo_scale,
+        combo_alpha: new_popup.combo_alpha,
+        combo_offset: new_popup.combo_offset,
+        is_pixel: new_popup.is_pixel,
+        rng_state: new_popup.rng_state,
+        next_z_step: new_popup.next_z_step,
+    };
     if let Some(ref mut pop) = res.popup_res {
         **pop = new_popup;
     }
@@ -424,6 +435,7 @@ pub(super) fn reload_skin_domain(
             }
             spawn_strumline_and_pools(commands, &res.state, &skin_assets);
             spawn_effect_pools(commands, &skin_assets);
+            spawn_popup_pool(commands, &pool_popup);
             if let Some(ref mut sr) = res.skin_res {
                 **sr = skin_assets;
             } else {

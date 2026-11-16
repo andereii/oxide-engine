@@ -168,6 +168,9 @@ impl Strumline {
             if note.data.time_ms > render_window_start {
                 break;
             }
+            if !note.killed {
+                self.pending_incoming_notes.push(self.next_note_index);
+            }
             self.next_note_index += 1;
         }
     }

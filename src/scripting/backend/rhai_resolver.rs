@@ -25,6 +25,7 @@ impl ModuleResolver for SharedVfsModuleResolver {
 pub(super) struct VfsModuleResolver {
     registry: ModRegistry,
     cache: Mutex<HashMap<PathBuf, Shared<Module>>>,
+    resolution_cache: Mutex<HashMap<(Option<String>, String), PathBuf>>,
     loading: Mutex<HashSet<PathBuf>>,
 }
 
@@ -46,6 +47,7 @@ impl VfsModuleResolver {
         Self {
             registry,
             cache: Mutex::new(HashMap::new()),
+            resolution_cache: Mutex::new(HashMap::new()),
             loading: Mutex::new(HashSet::new()),
         }
     }
@@ -55,6 +57,15 @@ impl VfsModuleResolver {
             .lock()
             .map(|m| m.keys().cloned().collect())
             .unwrap_or_default()
+    }
+
+    pub(super) fn clear_caches(&self) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.clear();
+        }
+        if let Ok(mut resolution_cache) = self.resolution_cache.lock() {
+            resolution_cache.clear();
+        }
     }
 
     fn candidate_paths(source_path: Option<&str>, raw_path: &str) -> Vec<String> {
@@ -123,6 +134,19 @@ impl ModuleResolver for VfsModuleResolver {
         path: &str,
         pos: Position,
     ) -> Result<Shared<Module>, Box<EvalAltResult>> {
+        let lookup_key = (source_path.map(str::to_string), path.to_string());
+        let cached_disk_path = self
+            .resolution_cache
+            .lock()
+            .ok()
+            .and_then(|res_cache| res_cache.get(&lookup_key).cloned());
+        if let Some(cached_path) = cached_disk_path
+            && let Ok(cache) = self.cache.lock()
+            && let Some(cached) = cache.get(&cached_path)
+        {
+            return Ok(cached.clone());
+        }
+
         let (disk_path, vfs_rel) = self
             .resolve_vfs_target(source_path, path)
             .ok_or_else(|| Box::new(EvalAltResult::ErrorModuleNotFound(path.to_string(), pos)))?;
@@ -130,7 +154,12 @@ impl ModuleResolver for VfsModuleResolver {
         if let Ok(cache) = self.cache.lock()
             && let Some(cached) = cache.get(&disk_path)
         {
-            return Ok(cached.clone());
+            let module = cached.clone();
+            drop(cache);
+            if let Ok(mut res_cache) = self.resolution_cache.lock() {
+                res_cache.insert(lookup_key, disk_path);
+            }
+            return Ok(module);
         }
 
         {
@@ -177,7 +206,10 @@ impl ModuleResolver for VfsModuleResolver {
 
         let shared = Shared::new(module);
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(disk_path, shared.clone());
+            cache.insert(disk_path.clone(), shared.clone());
+        }
+        if let Ok(mut res_cache) = self.resolution_cache.lock() {
+            res_cache.insert(lookup_key, disk_path);
         }
         Ok(shared)
     }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use bevy::prelude::Resource;
 
@@ -14,6 +14,16 @@ use super::hud::popups::PopupEvent;
 use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
 use super::types::{CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent, SongChart, SongEventData};
+
+#[derive(Debug, Clone)]
+pub struct SongEventRevertSnapshot {
+    pub camera: CameraState,
+    pub player_scroll: f64,
+    pub opponent_scroll: f64,
+    pub scroll_tweens: Vec<(bool, LinearTween)>,
+    pub player_custom_dist: (bool, f64),
+    pub opponent_custom_dist: (bool, f64),
+}
 
 #[derive(Resource)]
 pub struct PlayState {
@@ -55,23 +65,54 @@ pub struct PlayState {
     pub input_release_queue: VecDeque<PreciseInputEvent>,
     pub countdown_ticks_remaining: i32,
     pub countdown_timer_s: f64,
+    pub countdown_paused: bool,
     pub pending_countdown_step: Option<usize>,
     pub pending_miss_sfx: bool,
     pub pending_popups: Vec<PopupEvent>,
+    pub popups_visible: bool,
+    pub popup_offset: [f32; 2],
     pub score_text: String,
     pub custom_score_text: Option<String>,
     pub hud_visible: bool,
     pub strums_swapped: bool,
     pub pending_hooks: Vec<(HookKind, ScriptEvent)>,
+    pub pending_song_event_reverts: HashMap<usize, SongEventRevertSnapshot>,
+    pub next_song_event_seq: usize,
+    pub last_song_end_popped: Option<(String, i32)>,
     pub script_char_positions: BTreeMap<String, [f32; 2]>,
     pub script_char_top_left: BTreeMap<String, [f32; 2]>,
     pub script_char_z: BTreeMap<String, f32>,
+    pub script_char_scales: BTreeMap<String, [f32; 2]>,
+    pub script_char_alphas: BTreeMap<String, f32>,
+    pub script_char_flips: BTreeMap<String, [bool; 2]>,
+    pub script_char_vis: BTreeMap<String, bool>,
+    pub script_char_sizes: BTreeMap<String, [f32; 2]>,
+    pub script_char_focus: BTreeMap<String, [f64; 2]>,
     pub script_char_anims: BTreeMap<String, String>,
     pub script_char_anim_finished: BTreeMap<String, bool>,
     pub script_prop_positions: BTreeMap<String, [f32; 2]>,
     pub script_prop_scales: BTreeMap<String, [f32; 2]>,
     pub script_prop_angles: BTreeMap<String, f32>,
     pub script_prop_alphas: BTreeMap<String, f32>,
+    pub script_prop_z: BTreeMap<String, f32>,
+    pub script_prop_scrolls: BTreeMap<String, [f32; 2]>,
+    pub script_prop_flips: BTreeMap<String, [bool; 2]>,
+    pub script_prop_vis: BTreeMap<String, bool>,
+    pub script_prop_sizes: BTreeMap<String, [f32; 2]>,
+    pub script_prop_velocities: BTreeMap<String, [f32; 2]>,
+    pub script_prop_anims: BTreeMap<String, String>,
+    pub script_prop_anim_done: BTreeMap<String, bool>,
+    pub script_texts: BTreeMap<String, String>,
+    pub script_text_positions: BTreeMap<String, [f32; 2]>,
+    pub script_text_alphas: BTreeMap<String, f32>,
+    pub script_active_sounds: Vec<String>,
+    pub script_sound_volumes: BTreeMap<String, f32>,
+    pub script_keys_down: Vec<String>,
+    pub script_keys_hit: Vec<String>,
+    pub script_keys_up: Vec<String>,
+    pub script_ctrls_down: Vec<String>,
+    pub script_ctrls_hit: Vec<String>,
+    pub script_ctrls_up: Vec<String>,
     pub status_message: String,
     pub last_hud_key: (i64, u32, u32, i32),
     pub last_raw_audio_ms: Option<f64>,
@@ -127,23 +168,54 @@ impl PlayState {
             input_release_queue: VecDeque::new(),
             countdown_ticks_remaining: 4,
             countdown_timer_s: 0.0,
+            countdown_paused: false,
             pending_countdown_step: None,
             pending_miss_sfx: false,
             pending_popups: Vec::new(),
+            popups_visible: true,
+            popup_offset: [0.0, 0.0],
             score_text: String::new(),
             custom_score_text: None,
             hud_visible: true,
             strums_swapped: false,
             pending_hooks: Vec::new(),
+            pending_song_event_reverts: HashMap::new(),
+            next_song_event_seq: 0,
+            last_song_end_popped: None,
             script_char_positions: BTreeMap::new(),
             script_char_top_left: BTreeMap::new(),
             script_char_z: BTreeMap::new(),
+            script_char_scales: BTreeMap::new(),
+            script_char_alphas: BTreeMap::new(),
+            script_char_flips: BTreeMap::new(),
+            script_char_vis: BTreeMap::new(),
+            script_char_sizes: BTreeMap::new(),
+            script_char_focus: BTreeMap::new(),
             script_char_anims: BTreeMap::new(),
             script_char_anim_finished: BTreeMap::new(),
             script_prop_positions: BTreeMap::new(),
             script_prop_scales: BTreeMap::new(),
             script_prop_angles: BTreeMap::new(),
             script_prop_alphas: BTreeMap::new(),
+            script_prop_z: BTreeMap::new(),
+            script_prop_scrolls: BTreeMap::new(),
+            script_prop_flips: BTreeMap::new(),
+            script_prop_vis: BTreeMap::new(),
+            script_prop_sizes: BTreeMap::new(),
+            script_prop_velocities: BTreeMap::new(),
+            script_prop_anims: BTreeMap::new(),
+            script_prop_anim_done: BTreeMap::new(),
+            script_texts: BTreeMap::new(),
+            script_text_positions: BTreeMap::new(),
+            script_text_alphas: BTreeMap::new(),
+            script_active_sounds: Vec::new(),
+            script_sound_volumes: BTreeMap::new(),
+            script_keys_down: Vec::new(),
+            script_keys_hit: Vec::new(),
+            script_keys_up: Vec::new(),
+            script_ctrls_down: Vec::new(),
+            script_ctrls_hit: Vec::new(),
+            script_ctrls_up: Vec::new(),
             status_message: String::new(),
             last_hud_key: (i64::MIN, u32::MAX, u32::MAX, i32::MIN),
             last_raw_audio_ms: None,
@@ -162,8 +234,21 @@ impl PlayState {
         self.update_score_text();
     }
 
+    pub fn enter_loading_phase(&mut self) {
+        self.phase = PlayPhase::Loading;
+        self.is_in_countdown = false;
+        self.countdown_paused = false;
+        self.starting_song = true;
+        self.countdown_ticks_remaining = 4;
+        self.countdown_timer_s = 0.0;
+        self.pending_countdown_step = None;
+        self.last_raw_audio_ms = None;
+        self.status_message = "Loading assets...".to_string();
+    }
+
     pub fn start_countdown(&mut self) {
         self.is_in_countdown = true;
+        self.countdown_paused = false;
         self.starting_song = true;
         self.last_raw_audio_ms = None;
         self.phase = PlayPhase::Countdown;
@@ -198,7 +283,12 @@ impl PlayState {
     }
 
     pub fn update(&mut self, elapsed_s: f64, audio_time_ms: Option<f64>, playlist: &mut PlayStatePlaylist) {
-        if self.critical_failure || matches!(self.phase, PlayPhase::Paused(_) | PlayPhase::GameOver | PlayPhase::Ended) {
+        if self.critical_failure
+            || matches!(
+                self.phase,
+                PlayPhase::Loading | PlayPhase::Paused(_) | PlayPhase::GameOver | PlayPhase::Ended
+            )
+        {
             return;
         }
 
@@ -213,7 +303,7 @@ impl PlayState {
 
         let tick = self.sync_song_clock(elapsed_s, audio_time_ms);
 
-        if self.is_in_countdown {
+        if self.is_in_countdown && !self.countdown_paused {
             let beat_s = self.conductor.beat_length_ms() / 1000.0;
             self.countdown_timer_s += elapsed_s * self.playback_rate;
             if self.countdown_timer_s >= beat_s {
@@ -237,6 +327,7 @@ impl PlayState {
         let next_pos = self.conductor.song_position_ms;
         self.player_strumline.update_notes(elapsed_s, next_pos, self.start_timestamp_ms);
         self.opponent_strumline.update_notes(elapsed_s, next_pos, self.start_timestamp_ms);
+        self.emit_pending_incoming_notes();
 
         if tick.step_changed {
             self.step_hit();
@@ -266,6 +357,7 @@ impl PlayState {
         self.needs_reset = false;
         self.is_player_dying = false;
         self.audio_finished = false;
+        self.countdown_paused = false;
         self.health = HEALTH_STARTING;
         self.health_lerp = HEALTH_STARTING;
         self.song_score = 0.0;
@@ -273,8 +365,11 @@ impl PlayState {
         self.input_press_queue.clear();
         self.input_release_queue.clear();
         self.pending_popups.clear();
+        self.pending_song_event_reverts.clear();
         self.custom_score_text = None;
         self.hud_visible = true;
+        self.popups_visible = true;
+        self.popup_offset = [0.0, 0.0];
         self.strums_swapped = false;
         self.player_strumline.middlescroll = false;
         self.opponent_strumline.middlescroll = false;
@@ -290,6 +385,14 @@ impl PlayState {
         self.script_prop_scales.clear();
         self.script_prop_angles.clear();
         self.script_prop_alphas.clear();
+        self.script_prop_z.clear();
+        self.script_prop_scrolls.clear();
+        self.script_prop_flips.clear();
+        self.script_prop_vis.clear();
+        self.script_prop_sizes.clear();
+        self.script_prop_velocities.clear();
+        self.script_prop_anims.clear();
+        self.script_prop_anim_done.clear();
         self.cancel_all_camera_tweens();
         self.cancel_scroll_speed_tweens();
         self.reset_camera(true, true, true);
@@ -314,7 +417,12 @@ impl PlayState {
     }
 
     pub fn pause(&mut self, mode: PauseMode) {
-        if !self.may_pause_game || matches!(self.phase, PlayPhase::GameOver | PlayPhase::Ended) {
+        if !self.may_pause_game
+            || matches!(
+                self.phase,
+                PlayPhase::Loading | PlayPhase::GameOver | PlayPhase::Ended
+            )
+        {
             return;
         }
         self.phase = PlayPhase::Paused(mode);
@@ -345,10 +453,15 @@ impl PlayState {
 
     pub fn end_song(&mut self, playlist: &mut PlayStatePlaylist) {
         self.phase = PlayPhase::Ended;
+        self.last_song_end_popped = None;
         if playlist.is_story_mode {
-            playlist.campaign_score += self.song_score.round() as i32;
+            let delta = self.song_score.round() as i32;
+            playlist.campaign_score += delta;
             if !playlist.playlist_song_ids.is_empty() {
-                playlist.playlist_song_ids.remove(0);
+                let removed = playlist.playlist_song_ids.remove(0);
+                self.last_song_end_popped = Some((removed, delta));
+            } else {
+                self.last_song_end_popped = Some((String::new(), delta));
             }
         }
         self.status_message = format!(
@@ -362,6 +475,35 @@ impl PlayState {
                 .with_field("score", self.song_score)
                 .with_field("misses", i64::from(self.tallies.missed)),
         ));
+    }
+
+    fn emit_pending_incoming_notes(&mut self) {
+        let player_idxs: Vec<usize> = self.player_strumline.pending_incoming_notes.drain(..).collect();
+        let opp_idxs: Vec<usize> = self.opponent_strumline.pending_incoming_notes.drain(..).collect();
+        for (is_player, idxs) in [(true, player_idxs), (false, opp_idxs)] {
+            let notes = if is_player {
+                &self.player_strumline.notes
+            } else {
+                &self.opponent_strumline.notes
+            };
+            let side = if is_player { "player" } else { "opponent" };
+            for idx in idxs {
+                let Some(n) = notes.get(idx) else {
+                    continue;
+                };
+                self.pending_hooks.push((
+                    HookKind::NoteIncoming,
+                    ScriptEvent::new(HookKind::NoteIncoming)
+                        .with_field("id", n.data.id as i64)
+                        .with_field("dir", n.lane.index() as i64)
+                        .with_field("time", n.data.time_ms)
+                        .with_field("length", n.data.sustain_length_ms)
+                        .with_field("kind", n.data.kind.clone().unwrap_or_default())
+                        .with_field("is_player", is_player)
+                        .with_field("side", side),
+                ));
+            }
+        }
     }
 
 }

@@ -3,7 +3,7 @@ use rhai::{Dynamic, Engine, EvalAltResult};
 use crate::scripting::api::{LogLevel, ScriptCommand, script_clamp, script_lerp, script_remap};
 use crate::scripting::backend::context::{dyn_to_f64, dyn_to_i64, runtime_err, with_ctx};
 use crate::scripting::value::ScriptValue;
-use crate::utils::constants::MS_PER_SEC;
+use crate::utils::constants::{MS_PER_SEC, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub fn register_core_and_song_api(engine: &mut Engine) {
     let push_log = |level: LogLevel, msg: &str| {
@@ -30,9 +30,12 @@ pub fn register_core_and_song_api(engine: &mut Engine) {
     });
 
     engine.register_fn("song", || with_ctx(|c| c.snapshot.song_id.clone()));
+    engine.register_fn("song_len", || with_ctx(|c| c.snapshot.song_length_ms));
     engine.register_fn("diff", || with_ctx(|c| c.snapshot.difficulty.clone()));
     engine.register_fn("variation", || with_ctx(|c| c.snapshot.variation.clone()));
     engine.register_fn("stage", || with_ctx(|c| c.snapshot.stage_id.clone()));
+    engine.register_fn("mod_id", || with_ctx(|c| c.current_mod_id.clone()));
+    engine.register_fn("script_id", || with_ctx(|c| c.current_script_id.clone()));
     engine.register_fn("time", || with_ctx(|c| c.snapshot.song_position_ms));
     engine.register_fn("bpm", || with_ctx(|c| c.snapshot.bpm));
     engine.register_fn("step", || with_ctx(|c| i64::from(c.snapshot.step)));
@@ -89,6 +92,67 @@ pub fn register_core_and_song_api(engine: &mut Engine) {
                 .map(|v| ScriptValue::from_json(v).into_rhai())
                 .unwrap_or(Dynamic::UNIT)
         })
+    });
+
+    // VFS directory & JSON helpers
+    engine.register_fn("dir_exists", |rel: &str| with_ctx(|c| c.registry.resolve_dir(rel).is_some()));
+    engine.register_fn("ls", |rel: &str| {
+        with_ctx(|c| {
+            let list: rhai::Array = c
+                .registry
+                .list_dir(rel)
+                .into_iter()
+                .map(Dynamic::from)
+                .collect();
+            list
+        })
+    });
+    for name in ["read_merged", "read_file_merged"] {
+        engine.register_fn(name, |rel: &str| -> Result<Dynamic, Box<EvalAltResult>> {
+            with_ctx(|c| match c.registry.read_to_string_merged(rel) {
+                Ok(txt) => Dynamic::from(txt),
+                Err(_) => Dynamic::UNIT,
+            })
+        });
+    }
+    for name in ["from_json", "json_parse"] {
+        engine.register_fn(name, |raw: &str| -> Dynamic {
+            serde_json::from_str::<serde_json::Value>(raw)
+                .map(|v| ScriptValue::from_json(&v).into_rhai())
+                .unwrap_or(Dynamic::UNIT)
+        });
+    }
+    for name in ["to_json", "json_stringify"] {
+        engine.register_fn(name, |val: Dynamic| -> String {
+            serde_json::to_string(&ScriptValue::from_rhai(&val).to_json()).unwrap_or_default()
+        });
+    }
+
+    // Screen, input & screenshot API
+    engine.register_fn("screen_w", || f64::from(SCREEN_WIDTH));
+    engine.register_fn("screen_h", || f64::from(SCREEN_HEIGHT));
+    engine.register_fn("screen_size", || {
+        vec![Dynamic::from(f64::from(SCREEN_WIDTH)), Dynamic::from(f64::from(SCREEN_HEIGHT))]
+    });
+
+    let has_ci = |items: &[String], needle: &str| -> bool {
+        let q = needle.trim();
+        !q.is_empty() && items.iter().any(|item| item.eq_ignore_ascii_case(q))
+    };
+    engine.register_fn("key_down", move |k: &str| with_ctx(|c| has_ci(&c.snapshot.keys_down, k)));
+    engine.register_fn("key_hit", move |k: &str| with_ctx(|c| has_ci(&c.snapshot.keys_hit, k)));
+    engine.register_fn("key_up", move |k: &str| with_ctx(|c| has_ci(&c.snapshot.keys_up, k)));
+    engine.register_fn("ctrl_down", move |ctrl: &str| with_ctx(|c| has_ci(&c.snapshot.ctrls_down, ctrl)));
+    engine.register_fn("ctrl_hit", move |ctrl: &str| with_ctx(|c| has_ci(&c.snapshot.ctrls_hit, ctrl)));
+    engine.register_fn("ctrl_up", move |ctrl: &str| with_ctx(|c| has_ci(&c.snapshot.ctrls_up, ctrl)));
+
+    engine.register_fn("screenshot", || {
+        with_ctx(|c| c.commands.push(ScriptCommand::TakeScreenshot(None)))
+    });
+    engine.register_fn("screenshot", |name: &str| {
+        let trimmed = name.trim();
+        let arg = (!trimmed.is_empty()).then(|| trimmed.to_string());
+        with_ctx(|c| c.commands.push(ScriptCommand::TakeScreenshot(arg)))
     });
 }
 

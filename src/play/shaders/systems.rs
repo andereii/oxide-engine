@@ -11,11 +11,12 @@ use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::easing::EaseKind;
 
 use super::defs::{
-    AdjustColorParams, CameraRainSpec, CharShaderRole, DropShadowParams,
-    PHILLY_TRAIN_ERECT_LIGHT_COLORS, PHILLY_TRAIN_LIGHT_COLORS, SHADER_MODE_BUILDING,
-    SHADER_MODE_DROP_SHADOW, SHADER_MODE_RAIN_SPRITE, SHADER_MODE_SSERAFIM, SHADER_MODE_WIGGLE,
-    SpriteShaderConfig, WiggleEffectType, argb_to_rgba_f32, stage_camera_rain,
-    stage_character_initial_tint, stage_character_shader, stage_prop_shader,
+    AdjustColorParams, CameraRainSpec, CharShaderRole, DropShadowParams, FunkinBlendMode,
+    PHILLY_TRAIN_ERECT_LIGHT_COLORS, PHILLY_TRAIN_LIGHT_COLORS, SHADER_MODE_ADJUST_COLOR,
+    SHADER_MODE_BUILDING, SHADER_MODE_DROP_SHADOW, SHADER_MODE_OVERLAY_BLEND,
+    SHADER_MODE_RAIN_SPRITE, SHADER_MODE_SSERAFIM, SHADER_MODE_WIGGLE, SpriteShaderConfig,
+    WiggleEffectType, argb_to_rgba_f32, stage_camera_rain, stage_character_initial_tint,
+    stage_character_shader, stage_prop_shader,
 };
 use super::material::FunkinSpriteMaterial;
 use super::rain_post::RainCameraEffect;
@@ -76,6 +77,23 @@ pub enum ShaderScriptCommand {
         intensity: f32,
         color: [f32; 3],
         time_scale_decay: bool,
+    },
+    SetBlendMode {
+        target: String,
+        mode: String,
+    },
+    SetCustomShader {
+        target: String,
+        path: String,
+    },
+    SetShaderParam {
+        target: String,
+        key: String,
+        values: [f32; 4],
+    },
+    SetShaderTex {
+        target: String,
+        path: String,
     },
     ClearShader {
         target: String,
@@ -448,6 +466,7 @@ pub fn update_stage_shaders(
     mods: Res<ModRegistry>,
     stage_res: Option<Res<StageResource>>,
     asset_server: Res<AssetServer>,
+    mut shaders: Option<ResMut<Assets<Shader>>>,
     mut materials: ResMut<Assets<FunkinSpriteMaterial>>,
     mut runtime: ResMut<StageShaderRuntime>,
     mut pending_cmds: ResMut<PendingShaderCommands>,
@@ -583,6 +602,7 @@ pub fn update_stage_shaders(
             &mut commands,
             &mods,
             &asset_server,
+            shaders.as_deref_mut(),
             &mut materials,
             &mut runtime,
             &mut managed,
@@ -609,7 +629,8 @@ pub fn update_stage_shaders(
         };
         let mut dirty = false;
 
-        if (mat.config.mode_flags & (SHADER_MODE_WIGGLE | SHADER_MODE_RAIN_SPRITE)) != 0
+        if (mat.custom_shader.is_some()
+            || (mat.config.mode_flags & (SHADER_MODE_WIGGLE | SHADER_MODE_RAIN_SPRITE)) != 0)
             && (mat.time_s - runtime.time_s).abs() > f32::EPSILON
         {
             mat.time_s = runtime.time_s;
@@ -690,17 +711,25 @@ pub fn update_stage_shaders(
         let cx = state.camera.follow_point[0] as f32;
         let cy = state.camera.follow_point[1] as f32;
         let bounds = Vec4::new(cx - half_w, cy - half_h, cx + half_w, cy + half_h);
+        let screen_and_scale = Vec4::new(SCREEN_WIDTH, SCREEN_HEIGHT, spec.scale, intensity);
+        let time_and_color = Vec4::new(
+            runtime.rain_time_s,
+            spec.rain_color[0],
+            spec.rain_color[1],
+            spec.rain_color[2],
+        );
 
         for (_, cam_fx) in &mut cameras {
             if let Some(mut fx) = cam_fx {
-                fx.bounds = bounds;
-                fx.screen_and_scale = Vec4::new(SCREEN_WIDTH, SCREEN_HEIGHT, spec.scale, intensity);
-                fx.time_and_color = Vec4::new(
-                    runtime.rain_time_s,
-                    spec.rain_color[0],
-                    spec.rain_color[1],
-                    spec.rain_color[2],
-                );
+                if fx.bounds != bounds {
+                    fx.bounds = bounds;
+                }
+                if fx.screen_and_scale != screen_and_scale {
+                    fx.screen_and_scale = screen_and_scale;
+                }
+                if fx.time_and_color != time_and_color {
+                    fx.time_and_color = time_and_color;
+                }
             }
         }
     }
@@ -935,6 +964,7 @@ fn apply_shader_script_command(
     commands: &mut Commands,
     mods: &ModRegistry,
     asset_server: &AssetServer,
+    shaders: Option<&mut Assets<Shader>>,
     materials: &mut Assets<FunkinSpriteMaterial>,
     runtime: &mut StageShaderRuntime,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
@@ -1074,6 +1104,250 @@ fn apply_shader_script_command(
                 actors,
             );
         }
+        ShaderScriptCommand::SetBlendMode { target, mode } => {
+            let blend = parse_blend_mode(&mode);
+            mutate_target_materials(
+                &target,
+                commands,
+                materials,
+                runtime.time_s,
+                managed,
+                stage_props,
+                dynamic_props,
+                actors,
+                |mat| {
+                    mat.config.blend_mode = blend;
+                },
+            );
+        }
+        ShaderScriptCommand::SetCustomShader { target, path } => {
+            let trimmed = path.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("clear") {
+                mutate_target_materials(
+                    &target,
+                    commands,
+                    materials,
+                    runtime.time_s,
+                    managed,
+                    stage_props,
+                    dynamic_props,
+                    actors,
+                    |mat| {
+                        mat.custom_shader = None;
+                    },
+                );
+                return;
+            }
+            if let Some(mode_bit) = builtin_mode_flag(trimmed) {
+                mutate_target_materials(
+                    &target,
+                    commands,
+                    materials,
+                    runtime.time_s,
+                    managed,
+                    stage_props,
+                    dynamic_props,
+                    actors,
+                    |mat| {
+                        mat.custom_shader = None;
+                        mat.config.mode_flags |= mode_bit;
+                    },
+                );
+                return;
+            }
+            let Some(shader_file) = mods.resolve_with_extensions(trimmed, &["wgsl", "wesl"]) else {
+                warn!("shader({target}): could not find '{trimmed}'");
+                return;
+            };
+            let Ok(src) = std::fs::read_to_string(&shader_file) else {
+                warn!("shader({target}): failed to read '{}'", shader_file.display());
+                return;
+            };
+            let srv_path = mods.to_asset_server_path(&shader_file);
+            let is_wesl = shader_file
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("wesl"));
+            let shader = if is_wesl {
+                Shader::from_wesl(src, srv_path.clone())
+            } else {
+                Shader::from_wgsl(src, srv_path.clone())
+            };
+            let uuid = deterministic_shader_uuid(&srv_path);
+            if let Some(shader_assets) = shaders {
+                let _ = shader_assets.insert(bevy::asset::AssetId::Uuid { uuid }, shader);
+            }
+            let shader_handle: Handle<Shader> = Handle::Uuid(uuid, std::marker::PhantomData);
+            mutate_target_materials(
+                &target,
+                commands,
+                materials,
+                runtime.time_s,
+                managed,
+                stage_props,
+                dynamic_props,
+                actors,
+                |mat| {
+                    mat.custom_shader = Some(shader_handle.clone());
+                },
+            );
+        }
+        ShaderScriptCommand::SetShaderParam { target, key, values } => {
+            if matches!(target.trim().to_ascii_lowercase().as_str(), "cam" | "camera" | "rain")
+                && let Some(ref mut spec) = runtime.rain_spec
+            {
+                match key.trim().to_ascii_lowercase().as_str() {
+                    "scale" => spec.scale = values[0],
+                    "intensity" | "int" => {
+                        spec.start_intensity = values[0];
+                        spec.end_intensity = values[0];
+                    }
+                    "color" | "rain_color" => spec.rain_color = [values[0], values[1], values[2]],
+                    _ => {}
+                }
+                return;
+            }
+            let key_lower = key.trim().to_ascii_lowercase();
+            mutate_target_materials(
+                &target,
+                commands,
+                materials,
+                runtime.time_s,
+                managed,
+                stage_props,
+                dynamic_props,
+                actors,
+                |mat| apply_param_to_config(&mut mat.config, &key_lower, values),
+            );
+        }
+        ShaderScriptCommand::SetShaderTex { target, path } => {
+            let trimmed = path.trim();
+            let aux_tex = (!trimmed.is_empty()).then(|| load_aux_handle(mods, asset_server, Some(trimmed))).flatten();
+            let aux_rel = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            let entities = collect_target_entities(&target, managed, stage_props, dynamic_props, actors);
+            for (entity, kind, char_id, prop_name) in entities {
+                if let Ok((_, mut existing)) = managed.get_mut(entity) {
+                    if let Some(mut mat) = materials.get_mut(&existing.handle) {
+                        mat.aux_texture = aux_tex.clone();
+                        mat.sync_uniform();
+                    }
+                    existing.aux_path = aux_rel.clone();
+                } else {
+                    let mut mat = FunkinSpriteMaterial::from_config(SpriteShaderConfig::default(), aux_tex.clone());
+                    mat.time_s = runtime.time_s;
+                    mat.sync_uniform();
+                    let handle = materials.add(mat);
+                    commands.entity(entity).insert((
+                        SpriteMaterial(handle.clone()),
+                        ManagedSpriteShader {
+                            handle,
+                            target: kind,
+                            char_id,
+                            prop_name,
+                            aux_path: aux_rel.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mutate_target_materials(
+    target: &str,
+    commands: &mut Commands,
+    materials: &mut Assets<FunkinSpriteMaterial>,
+    time_s: f32,
+    managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
+    stage_props: &Query<(Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>), Without<DynamicScriptProp>>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp), Without<StagePropVisual>>,
+    actors: &Query<&CharacterActor>,
+    mut mutator: impl FnMut(&mut FunkinSpriteMaterial),
+) {
+    let entities = collect_target_entities(target, managed, stage_props, dynamic_props, actors);
+    for (entity, kind, char_id, prop_name) in entities {
+        if let Ok((_, existing)) = managed.get(entity) {
+            if let Some(mut mat) = materials.get_mut(&existing.handle) {
+                mutator(&mut mat);
+                mat.time_s = time_s;
+                mat.sync_uniform();
+            }
+        } else {
+            let mut mat = FunkinSpriteMaterial::from_config(SpriteShaderConfig::default(), None);
+            mat.time_s = time_s;
+            mutator(&mut mat);
+            mat.sync_uniform();
+            let handle = materials.add(mat);
+            commands.entity(entity).insert((
+                SpriteMaterial(handle.clone()),
+                ManagedSpriteShader {
+                    handle,
+                    target: kind,
+                    char_id,
+                    prop_name,
+                    aux_path: None,
+                },
+            ));
+        }
+    }
+}
+
+fn builtin_mode_flag(name: &str) -> Option<u32> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "adjust_color" | "adjustcolor" | "hsbc" => Some(SHADER_MODE_ADJUST_COLOR),
+        "drop_shadow" | "dropshadow" => Some(SHADER_MODE_DROP_SHADOW),
+        "wiggle" => Some(SHADER_MODE_WIGGLE),
+        "building" => Some(SHADER_MODE_BUILDING),
+        "overlay" | "overlay_blend" => Some(SHADER_MODE_OVERLAY_BLEND),
+        "rain" | "rain_sprite" => Some(SHADER_MODE_RAIN_SPRITE),
+        _ => None,
+    }
+}
+
+fn parse_blend_mode(raw: &str) -> FunkinBlendMode {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "add" | "additive" => FunkinBlendMode::Add,
+        "multiply" | "mult" => FunkinBlendMode::Multiply,
+        "screen" => FunkinBlendMode::Screen,
+        _ => FunkinBlendMode::Normal,
+    }
+}
+
+fn apply_param_to_config(cfg: &mut SpriteShaderConfig, key: &str, values: [f32; 4]) {
+    if let Some(slot_str) = key.strip_prefix('u')
+        && let Ok(idx) = slot_str.parse::<usize>()
+        && idx < 16
+    {
+        cfg.custom_params[idx / 4][idx % 4] = values[0];
+        return;
+    }
+    if let Some(vec_str) = key.strip_prefix("vec").or_else(|| key.strip_prefix('c'))
+        && let Ok(row) = vec_str.parse::<usize>()
+        && row < 4
+    {
+        cfg.custom_params[row] = values;
+        return;
+    }
+    match key {
+        "hue" => cfg.adjust.hue = values[0],
+        "sat" | "saturation" => cfg.adjust.saturation = values[0],
+        "bright" | "brightness" => cfg.adjust.brightness = values[0],
+        "contrast" => cfg.adjust.contrast = values[0],
+        "angle" => cfg.drop_shadow.angle_deg = values[0],
+        "dist" | "distance" => cfg.drop_shadow.distance = values[0],
+        "str" | "strength" => cfg.drop_shadow.strength = values[0],
+        "thr" | "threshold" => cfg.drop_shadow.threshold = values[0],
+        "mask_thr" | "mask_threshold" => cfg.drop_shadow.mask_threshold = values[0],
+        "drop_color" | "color" => cfg.drop_shadow.color = [values[0], values[1], values[2]],
+        "speed" => cfg.wiggle.speed = values[0],
+        "freq" | "frequency" => cfg.wiggle.frequency = values[0],
+        "amp" | "amplitude" => cfg.wiggle.amplitude = values[0],
+        "alpha_shit" => cfg.building.alpha_shit = values[0],
+        "scale" => cfg.rain_sprite.scale = values[0],
+        "intensity" | "int" => cfg.rain_sprite.intensity = values[0],
+        "rain_color" => cfg.rain_sprite.rain_color = [values[0], values[1], values[2]],
+        _ => {}
     }
 }
 
@@ -1142,4 +1416,19 @@ pub fn parse_wiggle_effect_type(name: &str) -> WiggleEffectType {
 pub fn parse_shader_color_rgb(hex: &str) -> [f32; 3] {
     let [r, g, b, _] = crate::scripting::api::parse_hex_rgba(hex);
     [r, g, b]
+}
+
+fn deterministic_shader_uuid(key: &str) -> bevy::asset::uuid::Uuid {
+    let mut h1: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut h2: u64 = 0x517c_c1b7_2722_0a95;
+    for &b in key.as_bytes() {
+        h1 ^= u64::from(b);
+        h1 = h1.wrapping_mul(0x0000_0100_0000_01b3);
+        h2 ^= u64::from(b).wrapping_add(17);
+        h2 = h2.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&h1.to_le_bytes());
+    bytes[8..].copy_from_slice(&h2.to_le_bytes());
+    bevy::asset::uuid::Uuid::from_bytes(bytes)
 }

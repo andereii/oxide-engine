@@ -38,18 +38,14 @@ impl PlayState {
             }
             let (is_hold, lane, note_id, strum_time_ms, full_length_ms, end_ms, rem, scoreable, note_kind) = {
                 let note = &self.opponent_strumline.notes[idx];
-                let strum_time_ms = note.data.time_ms;
-                let full_length_ms = note.data.sustain_length_ms;
-                let end_ms = strum_time_ms + full_length_ms;
-                let rem = (end_ms - pos_ms).clamp(0.0, full_length_ms);
                 (
                     note.is_hold_note(),
                     note.lane,
                     note.data.id,
-                    strum_time_ms,
-                    full_length_ms,
-                    end_ms,
-                    rem,
+                    note.data.time_ms,
+                    note.data.sustain_length_ms,
+                    note.data.time_ms + note.data.sustain_length_ms,
+                    (note.data.time_ms + note.data.sustain_length_ms - pos_ms).clamp(0.0, note.data.sustain_length_ms),
                     note.data.scoreable,
                     note.data.kind.clone(),
                 )
@@ -60,11 +56,14 @@ impl PlayState {
                 HookKind::OpponentNoteHit,
                 ScriptEvent::new(HookKind::OpponentNoteHit)
                     .with_field("id", note_id as i64)
+                    .with_field("note_idx", idx as i64)
                     .with_field("dir", lane.index() as i64)
                     .with_field("time", strum_time_ms)
                     .with_field("length", full_length_ms)
                     .with_field("kind", note_kind.clone().unwrap_or_default())
-                    .with_field("is_hold", is_hold),
+                    .with_field("is_hold", is_hold)
+                    .with_field("is_player", false)
+                    .with_field("play_anim", true),
             ));
             self.opponent_strumline.pending_char_events.push(CharNoteSignal::Hit {
                 direction: lane,
@@ -186,6 +185,8 @@ impl PlayState {
                 {
                     hold.handled_miss = true;
                     let prev_combo = self.tallies.combo;
+                    let prev_max_combo = self.tallies.max_combo;
+                    let prev_health = self.health;
                     let rem_sec = hold.remaining_ms / MS_PER_SEC;
                     let score_change = SCORE_HOLD_DROP_PENALTY_PER_SECOND * rem_sec;
                     let health_uncapped = rem_sec * HEALTH_HOLD_DROP_PENALTY_PER_SECOND;
@@ -198,12 +199,19 @@ impl PlayState {
                     self.pending_miss_sfx = true;
                     self.song_score += score_change;
                     self.health = (self.health + health_change).clamp(HEALTH_MIN, HEALTH_MAX);
+                    let applied_health_delta = self.health - prev_health;
                     self.pending_hooks.push((
                         HookKind::HoldDrop,
                         ScriptEvent::new(HookKind::HoldDrop)
                             .with_field("id", hold.note_id as i64)
                             .with_field("dir", hold.lane.index() as i64)
-                            .with_field("remaining_ms", hold.remaining_ms),
+                            .with_field("remaining_ms", hold.remaining_ms)
+                            .with_field("health_change", applied_health_delta)
+                            .with_field("score_change", score_change)
+                            .with_field("combo_before", prev_combo as i64)
+                            .with_field("max_combo_before", prev_max_combo as i64)
+                            .with_field("play_sound", true)
+                            .with_field("play_anim", true),
                     ));
                     self.player_strumline.pending_char_events.push(CharNoteSignal::HoldDrop {
                         direction: hold.lane,
@@ -227,7 +235,7 @@ impl PlayState {
     }
 
     fn break_combo(&mut self) {
-        if self.tallies.combo >= COMBO_POPUP_THRESHOLD {
+        if self.popups_visible && self.tallies.combo >= COMBO_POPUP_THRESHOLD {
             self.pending_popups.push(crate::play::hud::popups::PopupEvent {
                 judgement: None,
                 combo: Some(0),
@@ -243,15 +251,21 @@ impl PlayState {
     }
 
     pub fn ghost_note_miss(&mut self, direction: NoteDirection, has_possible_notes: bool) {
+        let prev_health = self.health;
         self.player_vocals_volume = 0.0;
         self.pending_miss_sfx = true;
         self.song_score += SCORE_GHOST_MISS_PENALTY;
         self.health = (self.health + HEALTH_GHOST_MISS_PENALTY).clamp(HEALTH_MIN, HEALTH_MAX);
+        let applied_health_delta = self.health - prev_health;
         self.pending_hooks.push((
             HookKind::GhostMiss,
             ScriptEvent::new(HookKind::GhostMiss)
                 .with_field("dir", direction.index() as i64)
-                .with_field("has_possible_notes", has_possible_notes),
+                .with_field("has_possible_notes", has_possible_notes)
+                .with_field("health_change", applied_health_delta)
+                .with_field("score_change", SCORE_GHOST_MISS_PENALTY)
+                .with_field("play_sound", true)
+                .with_field("play_anim", true),
         ));
     }
 

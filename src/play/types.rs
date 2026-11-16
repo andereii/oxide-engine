@@ -93,6 +93,7 @@ pub enum PauseMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayPhase {
+    Loading,
     Countdown,
     Playing,
     Paused(PauseMode),
@@ -290,9 +291,11 @@ pub struct CameraState {
     pub flash_color: [f32; 4],
     pub flash_timer_s: f64,
     pub flash_duration_s: f64,
+    pub flash_fade_in: bool,
     pub hud_flash_color: [f32; 4],
     pub hud_flash_timer_s: f64,
     pub hud_flash_duration_s: f64,
+    pub hud_flash_fade_in: bool,
 }
 
 impl Default for CameraState {
@@ -325,9 +328,11 @@ impl Default for CameraState {
             flash_color: [1.0, 1.0, 1.0, 0.0],
             flash_timer_s: 0.0,
             flash_duration_s: 0.0,
+            flash_fade_in: false,
             hud_flash_color: [1.0, 1.0, 1.0, 0.0],
             hud_flash_timer_s: 0.0,
             hud_flash_duration_s: 0.0,
+            hud_flash_fade_in: false,
         }
     }
 }

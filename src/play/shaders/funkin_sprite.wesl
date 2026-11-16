@@ -42,6 +42,11 @@ struct FunkinSpriteUniform {
     ss_params: vec4<f32>,
     // .xyz = lightColor, .w = reserved
     ss_light: vec4<f32>,
+    // Generic user uniforms (u0..u15 / vec0..vec3)
+    custom_0: vec4<f32>,
+    custom_1: vec4<f32>,
+    custom_2: vec4<f32>,
+    custom_3: vec4<f32>,
 };
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(20) var<uniform> fx: FunkinSpriteUniform;
@@ -311,8 +316,6 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     var srgb_col = sample_tex_srgb(sample_uv);
-    let aux_sample = sample_aux_srgb(sample_uv + vec2<f32>(0.1, 0.2));
-    let mask_sample = sample_aux_srgb(sample_uv);
 
     if (mode_flags & MODE_RAIN_SPRITE) != 0u {
         let u_scale = max(fx.wiggle_and_rain.y, 0.01);
@@ -344,7 +347,8 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         srgb_col = vec4<f32>(rgb, refracted.a);
     }
 
-    if (mode_flags & MODE_OVERLAY_BLEND) != 0u {
+    if (mode_flags & MODE_OVERLAY_BLEND) != 0u && (extra_flags & FLAG_HAS_AUX_TEX) != 0u {
+        let aux_sample = sample_aux_srgb(sample_uv + vec2<f32>(0.1, 0.2));
         srgb_col = blend_overlay(srgb_col, aux_sample);
     }
 
@@ -355,6 +359,7 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
 
         var threshold = fx.sat_col2.w;
         if (extra_flags & FLAG_USE_ALT_MASK) != 0u && (extra_flags & FLAG_HAS_AUX_TEX) != 0u {
+            let mask_sample = sample_aux_srgb(sample_uv);
             if mask_sample.b > 0.0 {
                 threshold = fx.drop_color_and_mask.w;
             }

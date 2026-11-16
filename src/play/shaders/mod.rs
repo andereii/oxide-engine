@@ -27,10 +27,8 @@ impl Plugin for FunkinShadersPlugin {
 
         app.init_resource::<PendingShaderCommands>()
             .init_resource::<StageShaderRuntime>()
-            .add_plugins((
-                SpriteMaterialPlugin::<FunkinSpriteMaterial>::default(),
-                FullscreenMaterialPlugin::<RainCameraEffect>::default(),
-            ))
+            .add_plugins(SpriteMaterialPlugin::<FunkinSpriteMaterial>::default())
+            .add_plugins(FullscreenMaterialPlugin::<RainCameraEffect>::default())
             .add_systems(
                 Update,
                 (attach_stage_and_character_shaders, update_stage_shaders)

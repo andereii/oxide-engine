@@ -11,30 +11,32 @@ use crate::mods::ModRegistry;
 
 use super::behavior::{ClipVisual, SheetSource};
 
-pub(super) fn get_or_load_sparrow(
-    mods: &ModRegistry,
-    char_id: &str,
-    raw_path: &str,
-    asset_server: &AssetServer,
-    layouts: &mut Assets<TextureAtlasLayout>,
-    sources: &mut Vec<SheetSource>,
-    sheet_cache: &mut HashMap<String, (usize, usize)>,
-    sparrow_data: &mut Vec<(SparrowAtlas, HashMap<String, usize>)>,
-) -> Option<(usize, usize)> {
-    let key = raw_path.to_string();
-    if let Some(&hit) = sheet_cache.get(&key) {
-        return Some(hit);
-    }
-    let (png, xml) = char_rel_candidates(char_id, raw_path)
-        .into_iter()
-        .find_map(|rel_base| {
-            let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
-            let xml = mods.resolve_file(&ensure_ext_str(&rel_base, "xml"))?;
-            Some((png, xml))
-        })?;
-    let atlas = SparrowAtlas::from_file(&xml).ok()?;
-    let (layout, indices) = atlas.build_layout();
-    let frame_sizes = atlas
+pub(super) struct CharAssetCtx<'a> {
+    pub mods: &'a ModRegistry,
+    pub char_id: &'a str,
+    pub asset_server: &'a AssetServer,
+}
+
+#[derive(Default)]
+pub(super) struct CharLoadCaches {
+    pub sheet_cache: HashMap<String, (usize, usize)>,
+    pub sparrow_data: Vec<(SparrowAtlas, HashMap<String, usize>)>,
+    pub atlas_cache: HashMap<String, CachedAnimateAtlas>,
+    pub packer_cache: HashMap<String, (usize, usize)>,
+    pub packer_data: Vec<(PackerAtlas, HashMap<String, usize>)>,
+}
+
+pub(super) struct AnimLoadTarget<'a> {
+    pub sources: &'a mut Vec<SheetSource>,
+    pub controller: &'a mut AnimationController,
+    pub clips: &'a mut HashMap<String, ClipVisual>,
+}
+
+fn compute_sparrow_frame_sizes(
+    atlas: &SparrowAtlas,
+    indices: &HashMap<String, usize>,
+) -> HashMap<usize, [f32; 2]> {
+    atlas
         .frames
         .iter()
         .filter_map(|f| {
@@ -53,82 +55,139 @@ pub(super) fn get_or_load_sparrow(
                 )
             })
         })
-        .collect();
-    let texture = asset_server.load(mods.to_asset_server_path(&png));
+        .collect()
+}
+
+pub(super) fn get_or_load_sparrow(
+    ctx: &CharAssetCtx<'_>,
+    raw_path: &str,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    sources: &mut Vec<SheetSource>,
+    caches: &mut CharLoadCaches,
+) -> Option<(usize, usize)> {
+    if let Some(&hit) = caches.sheet_cache.get(raw_path) {
+        return Some(hit);
+    }
+    let (png, xml) = char_rel_candidates(ctx.char_id, raw_path)
+        .into_iter()
+        .find_map(|rel_base| {
+            let png = ctx.mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
+            let xml = ctx.mods.resolve_file(&ensure_ext_str(&rel_base, "xml"))?;
+            Some((png, xml))
+        })?;
+    let atlas = SparrowAtlas::from_file(&xml).ok()?;
+    let asset_key = format!("sparrow:{}", xml.to_string_lossy());
+    if let Some(existing_idx) = sources.iter().position(|s| s.asset_key == asset_key) {
+        let (_, indices) = atlas.build_layout();
+        let sp_idx = caches.sparrow_data.len();
+        caches.sparrow_data.push((atlas, indices));
+        let pair = (existing_idx, sp_idx);
+        caches.sheet_cache.insert(raw_path.to_string(), pair);
+        return Some(pair);
+    }
+    let (layout, indices) = atlas.build_layout();
+    let frame_sizes = compute_sparrow_frame_sizes(&atlas, &indices);
+    let texture = ctx
+        .asset_server
+        .load(ctx.mods.to_asset_server_path(&png));
     let layout_handle = layouts.add(layout);
     let src_idx = sources.len();
     sources.push(SheetSource {
+        asset_key,
         texture,
         layout: layout_handle,
         extra_layers: Vec::new(),
         frame_sizes,
     });
-    let sp_idx = sparrow_data.len();
-    sparrow_data.push((atlas, indices));
-    sheet_cache.insert(key, (src_idx, sp_idx));
-    Some((src_idx, sp_idx))
+    let sp_idx = caches.sparrow_data.len();
+    caches.sparrow_data.push((atlas, indices));
+    let pair = (src_idx, sp_idx);
+    caches.sheet_cache.insert(raw_path.to_string(), pair);
+    Some(pair)
 }
 
 pub(super) type CachedAnimateAtlas = (usize, AnimateAtlas, HashMap<String, usize>);
 
 pub(super) fn get_or_load_animate(
-    mods: &ModRegistry,
-    char_id: &str,
+    ctx: &CharAssetCtx<'_>,
     raw_path: &str,
-    asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
     sources: &mut Vec<SheetSource>,
-    atlas_cache: &mut HashMap<String, CachedAnimateAtlas>,
+    caches: &mut CharLoadCaches,
 ) -> Option<CachedAnimateAtlas> {
-    if let Some(hit) = atlas_cache.get(raw_path) {
+    if let Some(hit) = caches.atlas_cache.get(raw_path) {
         return Some(hit.clone());
     }
-    let dir = char_rel_candidates(char_id, raw_path)
+    let dir = char_rel_candidates(ctx.char_id, raw_path)
         .into_iter()
         .find_map(|rel_dir| {
-            let dir = mods.resolve_dir(&rel_dir)?;
+            let dir = ctx.mods.resolve_dir(&rel_dir)?;
             (dir.join("Animation.json").is_file() && dir.join("spritemap1.png").is_file())
                 .then_some(dir)
         })?;
     let atlas = AnimateAtlas::from_dir(&dir).ok()?;
+    let asset_key = format!("animate:{}", dir.to_string_lossy());
+    if let Some(existing_idx) = sources.iter().position(|s| s.asset_key == asset_key) {
+        let (_, indices) = atlas.build_layouts();
+        let val = (existing_idx, atlas, indices);
+        caches.atlas_cache.insert(raw_path.to_string(), val.clone());
+        return Some(val);
+    }
     let (atlas_layouts, indices) = atlas.build_layouts();
     let mut iter = atlas_layouts.into_iter().enumerate();
     let (_, first_layout) = iter.next()?;
-    let texture = asset_server.load(mods.to_asset_server_path(&dir.join("spritemap1.png")));
+    let texture = ctx
+        .asset_server
+        .load(ctx.mods.to_asset_server_path(&dir.join("spritemap1.png")));
     let layout_handle = layouts.add(first_layout);
     let extra_layers = iter
         .map(|(i, layout)| {
-            let img_rel = mods.to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
-            (asset_server.load(img_rel), layouts.add(layout))
+            let img_rel = ctx
+                .mods
+                .to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
+            (ctx.asset_server.load(img_rel), layouts.add(layout))
         })
         .collect();
     let src_idx = sources.len();
     sources.push(SheetSource {
+        asset_key,
         texture,
         layout: layout_handle,
         extra_layers,
         frame_sizes: HashMap::new(),
     });
     let val = (src_idx, atlas, indices);
-    atlas_cache.insert(raw_path.to_string(), val.clone());
+    caches.atlas_cache.insert(raw_path.to_string(), val.clone());
     Some(val)
 }
 
-pub(super) fn load_packer_source(
-    mods: &ModRegistry,
-    char_id: &str,
+pub(super) fn get_or_load_packer(
+    ctx: &CharAssetCtx<'_>,
     raw_path: &str,
-    asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
-) -> Option<(SheetSource, PackerAtlas, HashMap<String, usize>)> {
-    let (png, txt) = char_rel_candidates(char_id, raw_path)
+    sources: &mut Vec<SheetSource>,
+    caches: &mut CharLoadCaches,
+) -> Option<(usize, usize)> {
+    if let Some(&hit) = caches.packer_cache.get(raw_path) {
+        return Some(hit);
+    }
+    let (png, txt) = char_rel_candidates(ctx.char_id, raw_path)
         .into_iter()
         .find_map(|rel_base| {
-            let png = mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
-            let txt = mods.resolve_file(&ensure_ext_str(&rel_base, "txt"))?;
+            let png = ctx.mods.resolve_file(&ensure_ext_str(&rel_base, "png"))?;
+            let txt = ctx.mods.resolve_file(&ensure_ext_str(&rel_base, "txt"))?;
             Some((png, txt))
         })?;
     let atlas = PackerAtlas::from_file(&txt).ok()?;
+    let asset_key = format!("packer:{}", txt.to_string_lossy());
+    if let Some(existing_idx) = sources.iter().position(|s| s.asset_key == asset_key) {
+        let (_, indices) = atlas.build_layout();
+        let pk_idx = caches.packer_data.len();
+        caches.packer_data.push((atlas, indices));
+        let pair = (existing_idx, pk_idx);
+        caches.packer_cache.insert(raw_path.to_string(), pair);
+        return Some(pair);
+    }
     let (layout, indices) = atlas.build_layout();
     let frame_sizes = atlas
         .frames
@@ -140,18 +199,23 @@ pub(super) fn load_packer_source(
                 .map(|idx| (idx, [f.w as f32, f.h as f32]))
         })
         .collect();
-    let texture = asset_server.load(mods.to_asset_server_path(&png));
+    let texture = ctx
+        .asset_server
+        .load(ctx.mods.to_asset_server_path(&png));
     let layout_handle = layouts.add(layout);
-    Some((
-        SheetSource {
-            texture,
-            layout: layout_handle,
-            extra_layers: Vec::new(),
-            frame_sizes,
-        },
-        atlas,
-        indices,
-    ))
+    let src_idx = sources.len();
+    sources.push(SheetSource {
+        asset_key,
+        texture,
+        layout: layout_handle,
+        extra_layers: Vec::new(),
+        frame_sizes,
+    });
+    let pk_idx = caches.packer_data.len();
+    caches.packer_data.push((atlas, indices));
+    let pair = (src_idx, pk_idx);
+    caches.packer_cache.insert(raw_path.to_string(), pair);
+    Some(pair)
 }
 
 fn push_unique_char_norm(out: &mut Vec<String>, raw_rel: &str) {
@@ -215,21 +279,16 @@ fn ensure_ext_str(rel: &str, ext: &str) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn load_composite_anim(
-    mods: &ModRegistry,
-    char_id: &str,
+    ctx: &CharAssetCtx<'_>,
     rel_path: &str,
     anim: &BaseAnimationData,
-    asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
-    sources: &mut Vec<SheetSource>,
-    atlas_cache: &mut HashMap<String, CachedAnimateAtlas>,
-    controller: &mut AnimationController,
-    clips: &mut HashMap<String, ClipVisual>,
+    caches: &mut CharLoadCaches,
+    target: &mut AnimLoadTarget<'_>,
 ) {
     let Some((src_i, atlas, indices)) =
-        get_or_load_animate(mods, char_id, rel_path, asset_server, layouts, sources, atlas_cache)
+        get_or_load_animate(ctx, rel_path, layouts, target.sources, caches)
     else {
         return;
     };
@@ -237,10 +296,12 @@ pub(super) fn load_composite_anim(
         return;
     };
     let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
-    controller.add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
-    controller.set_offset(&anim.name, clip.offset);
-    controller.set_flip(&anim.name, clip.flip);
-    clips.insert(
+    target
+        .controller
+        .add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
+    target.controller.set_offset(&anim.name, clip.offset);
+    target.controller.set_flip(&anim.name, clip.flip);
+    target.clips.insert(
         anim.name.clone(),
         ClipVisual::Composite {
             source_idx: src_i,

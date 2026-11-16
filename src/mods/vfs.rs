@@ -441,6 +441,18 @@ impl ModRegistry {
         let Ok(normalized) = Self::normalize_rel_path(rel) else {
             return Vec::new();
         };
+        self.collect_dir_names(Some(&normalized))
+    }
+
+    pub fn list_dir(&self, rel: &str) -> Vec<String> {
+        let trimmed = rel.trim().replace('\\', "/");
+        if trimmed.is_empty() || trimmed == "." || trimmed == "./" {
+            return self.collect_dir_names(None);
+        }
+        self.list_dir_entries(rel)
+    }
+
+    fn collect_dir_names(&self, sub: Option<&Path>) -> Vec<String> {
         let mut names = BTreeSet::new();
         let collect = |dir: PathBuf, out: &mut BTreeSet<String>| {
             if let Ok(entries) = fs::read_dir(dir) {
@@ -453,9 +465,11 @@ impl ModRegistry {
                 }
             }
         };
-        collect(self.assets_dir.join(&normalized), &mut names);
+        let base_dir = sub.map_or_else(|| self.assets_dir.clone(), |s| self.assets_dir.join(s));
+        collect(base_dir, &mut names);
         for loaded_mod in &self.mods {
-            collect(loaded_mod.root.join(&normalized), &mut names);
+            let mod_dir = sub.map_or_else(|| loaded_mod.root.clone(), |s| loaded_mod.root.join(s));
+            collect(mod_dir, &mut names);
         }
         names.into_iter().collect()
     }

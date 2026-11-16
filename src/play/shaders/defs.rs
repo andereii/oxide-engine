@@ -30,7 +30,7 @@ pub const PHILLY_TRAIN_ERECT_LIGHT_COLORS: [u32; 5] = [
 
 pub const FUNKIN_SCREEN_HEIGHT: f32 = 720.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, bevy::prelude::Reflect)]
 #[repr(u32)]
 pub enum WiggleEffectType {
     #[default]
@@ -41,7 +41,7 @@ pub enum WiggleEffectType {
     Flag = 4,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, bevy::prelude::Reflect)]
 #[repr(u32)]
 pub enum FunkinBlendMode {
     #[default]
@@ -269,6 +269,7 @@ pub struct SpriteShaderConfig {
     pub overlay_path: Option<String>,
     pub rain_sprite: RainSpriteParams,
     pub sserafim: SserafimParams,
+    pub custom_params: [[f32; 4]; 4],
 }
 
 impl SpriteShaderConfig {

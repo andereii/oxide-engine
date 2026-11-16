@@ -166,5 +166,89 @@ impl Controls {
     pub fn just_released(&self, input: &ButtonInput<KeyCode>, action: Action) -> bool {
         self.keys_for(action).iter().any(|key| input.just_released(*key))
     }
+
+    pub fn is_note_key(&self, key: KeyCode) -> bool {
+        [
+            Action::NoteLeft,
+            Action::NoteDown,
+            Action::NoteUp,
+            Action::NoteRight,
+        ]
+        .iter()
+        .any(|action| self.keys_for(*action).contains(&key))
+    }
+
+    pub fn collect_active_names(
+        &self,
+        input: &ButtonInput<KeyCode>,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
+        const ACTION_NAMES: &[(Action, &[&str])] = &[
+            (Action::NoteLeft, &["NOTE_LEFT"]),
+            (Action::NoteDown, &["NOTE_DOWN"]),
+            (Action::NoteUp, &["NOTE_UP"]),
+            (Action::NoteRight, &["NOTE_RIGHT"]),
+            (Action::UiLeft, &["UI_LEFT", "LEFT"]),
+            (Action::UiDown, &["UI_DOWN", "DOWN"]),
+            (Action::UiUp, &["UI_UP", "UP"]),
+            (Action::UiRight, &["UI_RIGHT", "RIGHT"]),
+            (Action::Accept, &["ACCEPT"]),
+            (Action::Back, &["BACK"]),
+            (Action::Pause, &["PAUSE"]),
+            (Action::Reset, &["RESET"]),
+            (Action::CutsceneAdvance, &["CUTSCENE_ADVANCE"]),
+            (Action::VolumeUp, &["VOLUME_UP"]),
+            (Action::VolumeDown, &["VOLUME_DOWN"]),
+            (Action::VolumeMute, &["VOLUME_MUTE"]),
+            (Action::WindowFullscreen, &["FULLSCREEN"]),
+            (Action::WindowScreenshot, &["SCREENSHOT"]),
+            (Action::ReloadMods, &["RELOAD_MODS"]),
+            (Action::DebugDisplay, &["DEBUG_DISPLAY"]),
+        ];
+        let mut down = Vec::new();
+        let mut hit = Vec::new();
+        let mut up = Vec::new();
+        for (action, names) in ACTION_NAMES {
+            if self.pressed(input, *action) {
+                down.extend(names.iter().map(|s| (*s).to_string()));
+            }
+            if self.just_pressed(input, *action) {
+                hit.extend(names.iter().map(|s| (*s).to_string()));
+            }
+            if self.just_released(input, *action) {
+                up.extend(names.iter().map(|s| (*s).to_string()));
+            }
+        }
+        (down, hit, up)
+    }
+}
+
+pub fn primary_keycode_name(key: KeyCode) -> String {
+    let raw = format!("{key:?}");
+    if let Some(rest) = raw.strip_prefix("Key") {
+        return rest.to_string();
+    }
+    if let Some(rest) = raw.strip_prefix("Digit") {
+        return rest.to_string();
+    }
+    raw
+}
+
+pub fn keycode_aliases(key: KeyCode) -> Vec<String> {
+    let raw = format!("{key:?}");
+    let mut out = vec![raw.clone()];
+    if let Some(rest) = raw.strip_prefix("Key") {
+        out.push(rest.to_string());
+    } else if let Some(rest) = raw.strip_prefix("Digit") {
+        out.push(rest.to_string());
+    } else if let Some(rest) = raw.strip_prefix("Arrow") {
+        out.push(rest.to_string());
+    } else if raw.starts_with("Shift") {
+        out.push("Shift".to_string());
+    } else if raw.starts_with("Control") {
+        out.push("Ctrl".to_string());
+    } else if raw.starts_with("Alt") {
+        out.push("Alt".to_string());
+    }
+    out
 }
 
