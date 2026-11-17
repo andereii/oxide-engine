@@ -119,13 +119,14 @@ pub fn build_app(config: WindowConfig) -> App {
     let _ = std::fs::create_dir_all(&mods_dir);
     let mods_path = mods_dir.to_string_lossy().into_owned();
 
-    let backends = match config.render_backend {
-        RenderBackend::Auto => None,
-        RenderBackend::Vulkan => Some(Backends::VULKAN),
-        RenderBackend::Dx12 => Some(Backends::DX12),
-        RenderBackend::Gl => Some(Backends::GL),
-        RenderBackend::Metal => Some(Backends::METAL),
-    };
+    let mut wgpu_settings = WgpuSettings::default();
+    match config.render_backend {
+        RenderBackend::Auto => {}
+        RenderBackend::Vulkan => wgpu_settings.backends = Some(Backends::VULKAN),
+        RenderBackend::Dx12 => wgpu_settings.backends = Some(Backends::DX12),
+        RenderBackend::Gl => wgpu_settings.backends = Some(Backends::GL),
+        RenderBackend::Metal => wgpu_settings.backends = Some(Backends::METAL),
+    }
 
     app.register_asset_source("mods", AssetSourceBuilder::platform_default(&mods_path, None))
         .add_plugins(
@@ -135,11 +136,7 @@ pub fn build_app(config: WindowConfig) -> App {
                     ..default()
                 })
                 .set(RenderPlugin {
-                    render_creation: WgpuSettings {
-                        backends,
-                        ..default()
-                    }
-                    .into(),
+                    render_creation: wgpu_settings.into(),
                     ..default()
                 })
                 .set(WindowPlugin {

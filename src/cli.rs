@@ -81,7 +81,7 @@ impl LaunchFlags {
                         out.variation = Some(v);
                     }
                 }
-                "--botplay" | "--bot-play" => {
+                "--botplay" | "--bot-play" | "--wb" => {
                     out.bot_play_mode = parse_bool_flag(inline_val, true);
                 }
                 "--practice" => {
