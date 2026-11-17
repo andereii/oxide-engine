@@ -18,16 +18,38 @@ use systems::{
     update_stage_shaders,
 };
 
-pub struct FunkinShadersPlugin;
+pub struct FunkinShadersPlugin {
+    pub enabled: bool,
+}
+
+impl Default for FunkinShadersPlugin {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+fn drain_disabled_shader_queues(
+    mut state: ResMut<crate::play::scene::PlayState>,
+    mut pending_cmds: ResMut<PendingShaderCommands>,
+) {
+    state.pending_shader_events.clear();
+    pending_cmds.0.clear();
+}
 
 impl Plugin for FunkinShadersPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<PendingShaderCommands>()
+            .init_resource::<StageShaderRuntime>();
+
+        if !self.enabled {
+            app.add_systems(Update, drain_disabled_shader_queues);
+            return;
+        }
+
         embedded_asset!(app, "funkin_sprite.wesl");
         embedded_asset!(app, "funkin_rain_post.wesl");
 
-        app.init_resource::<PendingShaderCommands>()
-            .init_resource::<StageShaderRuntime>()
-            .add_plugins(SpriteMaterialPlugin::<FunkinSpriteMaterial>::default())
+        app.add_plugins(SpriteMaterialPlugin::<FunkinSpriteMaterial>::default())
             .add_plugins(FullscreenMaterialPlugin::<RainCameraEffect>::default())
             .add_systems(
                 Update,

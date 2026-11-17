@@ -19,12 +19,16 @@ Para flags booleanos basta con pasar el flag (equivale a `true`), o usar `:true`
 | `--song:<id>` | — | `string` | `blammed` | ID de la canción dentro de `assets/gameplay/songs/<id>/`. |
 | `--difficulty:<diff>` | `--diff:<diff>` | `string` | `hard` | Dificultad a cargar (`easy`, `normal`, `hard`, `erect`, `nightmare`). |
 | `--variation:<var>` | — | `string` | `default` | Variación del chart. |
-| `--botplay` | `--bot-play` | `bool` | `false` | Activa el modo botplay en la strumline del jugador (si se pasa el flag, queda en `true`). |
+| `--botplay` | `--bot-play`, `--wb` | `bool` | `false` | Activa el modo botplay en la strumline del jugador (si se pasa el flag, queda en `true`). |
 | `--practice` | — | `bool` | `false` | Activa el modo práctica (evita game over por vida en `0`). |
 | `--minimal` | — | `bool` | `false` | Activa el modo mínimo (sin stage ni personajes). |
+| `--upscroll` / `--downscroll` | — | `bool` | `--upscroll` (`false`) | Fuerza la dirección de desplazamiento de notas (arriba o abajo). |
 | `--rate:<f64>` | `--playback-rate:<f64>` | `f64` | `1.0` | Multiplicador de velocidad de reproducción (`0.1` a `10.0`). |
 | `--start-ms:<f64>` | — | `f64` | `0.0` | Posición inicial de la canción en milisegundos (`>= 0.0`). |
 | `--vsync` / `--no-vsync` | — | `bool` | `OXIDE_VSYNC` (`true`) | Fuerza activar o desactivar VSync en la ventana. |
+| `--no-shaders` | `--disable-shaders`, `--shaders:false` | `bool` | `false` | Desactiva todos los shaders de stages, personajes y post-procesado. |
+| `--renderer:<api>` | `--render`, `--backend` | `string` | `auto` | Selecciona el backend gráfico (`auto`, `vulkan`, `dx12`, `dx11`/`gl`, `metal`). |
+| `--vulkan` / `--dx12` / `--dx11` / `--gl` / `--metal` | — | — | — | Atajos para seleccionar el backend gráfico directamente. |
 | `--help` | `-h` | — | — | Muestra la ayuda de flags en consola y sale sin abrir ventana. |
 
 ## Variables de entorno

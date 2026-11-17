@@ -16,6 +16,7 @@ pub struct LaunchFlags {
     pub playback_rate: f64,
     pub start_timestamp_ms: f64,
     pub vsync: Option<bool>,
+    pub no_shaders: bool,
     pub render_backend: RenderBackend,
     pub capture_timestamps_ms: Vec<f64>,
     pub capture_out_dir: Option<PathBuf>,
@@ -35,6 +36,7 @@ impl Default for LaunchFlags {
             playback_rate: 1.0,
             start_timestamp_ms: 0.0,
             vsync: None,
+            no_shaders: false,
             render_backend: RenderBackend::Auto,
             capture_timestamps_ms: Vec::new(),
             capture_out_dir: None,
@@ -115,6 +117,12 @@ impl LaunchFlags {
                 }
                 "--vsync" => out.vsync = Some(parse_bool_flag(inline_val, true)),
                 "--no-vsync" => out.vsync = Some(false),
+                "--no-shaders" | "--disable-shaders" => {
+                    out.no_shaders = parse_bool_flag(inline_val, true);
+                }
+                "--shaders" => {
+                    out.no_shaders = !parse_bool_flag(inline_val, true);
+                }
                 "--renderer" | "--render" | "--backend" => {
                     if let Some(v) = take_value(inline_val, &mut iter) {
                         out.render_backend = parse_render_backend(&v);
@@ -157,6 +165,7 @@ impl LaunchFlags {
              \x20 --rate:<f64>                Playback rate multiplier (default: 1.0)\n\
              \x20 --start-ms:<f64>            Start timestamp in ms (default: 0.0)\n\
              \x20 --vsync / --no-vsync        Override OXIDE_VSYNC\n\
+             \x20 --no-shaders / --shaders    Disable or enable stage/character shaders\n\
              \x20 --renderer:<api>            Select GPU backend: auto, vulkan, dx12, dx11/gl, metal\n\
              \x20 --vulkan / --dx12 / --gl    Shorthand GPU backend flags\n\
              \x20 --capture-ms:<ms,...>       Capture screenshots at sorted ms and exit\n\
