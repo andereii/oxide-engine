@@ -39,8 +39,8 @@ fn spawn_viz(ax, ay, gz, is_pixel) {
     } else {
         "gameplay/characters/nene/abot-viz"
     };
-    let base_x = if is_pixel { ax + 66.0 } else { ax + 207.0 };
-    let base_y = if is_pixel { ay + 48.0 } else { ay + 84.0 };
+    let base_x = if is_pixel { ax + 75.5 } else { ax + 207.0 };
+    let base_y = if is_pixel { ay + 68.5 } else { ay + 84.0 };
     let dx = viz_offsets_x(is_pixel);
     let dy = viz_offsets_y(is_pixel);
     let acc_x = 0.0;

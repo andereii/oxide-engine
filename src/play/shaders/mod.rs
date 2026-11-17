@@ -15,7 +15,7 @@ use material::FunkinSpriteMaterial;
 use rain_post::RainCameraEffect;
 use systems::{
     PendingShaderCommands, StageShaderRuntime, attach_stage_and_character_shaders,
-    update_stage_shaders,
+    ensure_character_composite_rt, update_stage_shaders,
 };
 
 pub struct FunkinShadersPlugin {
@@ -29,11 +29,29 @@ impl Default for FunkinShadersPlugin {
 }
 
 fn drain_disabled_shader_queues(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
     mut state: ResMut<crate::play::scene::PlayState>,
     mut pending_cmds: ResMut<PendingShaderCommands>,
+    mut runtime: ResMut<StageShaderRuntime>,
+    mut actors: Query<&mut crate::play::characters::CharacterActor>,
 ) {
+    if state.phase == crate::play::types::PlayPhase::Loading {
+        return;
+    }
     state.pending_shader_events.clear();
     pending_cmds.0.clear();
+    for mut actor in &mut actors {
+        if actor.mirror_of.is_some() {
+            continue;
+        }
+        if !actor.piece_entities.is_empty()
+            && actor.data.effective_atlas_settings().use_render_texture
+            && actor.composite_rt.is_none()
+        {
+            ensure_character_composite_rt(&mut actor, &mut commands, &mut images, &mut runtime);
+        }
+    }
 }
 
 impl Plugin for FunkinShadersPlugin {
@@ -53,7 +71,11 @@ impl Plugin for FunkinShadersPlugin {
             .add_plugins(FullscreenMaterialPlugin::<RainCameraEffect>::default())
             .add_systems(
                 Update,
-                (attach_stage_and_character_shaders, update_stage_shaders)
+                (
+                    attach_stage_and_character_shaders,
+                    ApplyDeferred,
+                    update_stage_shaders,
+                )
                     .chain()
                     .after(sync_stage_props)
                     .after(sync_characters),

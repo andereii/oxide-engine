@@ -60,6 +60,7 @@ const MODE_WIGGLE: u32       = 8u;
 const MODE_OVERLAY_BLEND: u32 = 16u;
 const MODE_RAIN_SPRITE: u32  = 32u;
 const MODE_SSERAFIM: u32     = 64u;
+const MODE_TEXTURE_SWAP: u32 = 128u;
 
 const FLAG_USE_ALT_MASK: u32 = 256u;
 const FLAG_IS_CHAR: u32      = 512u;
@@ -341,7 +342,7 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
                 rain_sum += (1.0 - rain_sum) * 0.75;
             }
         }
-        let rwpos = ((wpos - orig_wpos) / vec2<f32>(1280.0, 720.0)) * frame_span;
+        let rwpos = (wpos - orig_wpos) / vec2<f32>(1280.0, 720.0);
         let refracted = sample_tex_srgb(clamp(sample_uv + rwpos, frame_min, frame_max));
         var rgb = refracted.rgb + add;
         rgb = mix(rgb, rain_color, 0.1 * rain_sum);
@@ -351,6 +352,12 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     if (mode_flags & MODE_OVERLAY_BLEND) != 0u && (extra_flags & FLAG_HAS_AUX_TEX) != 0u {
         let aux_sample = sample_aux_srgb(sample_uv + vec2<f32>(0.1, 0.2));
         srgb_col = blend_overlay(srgb_col, aux_sample);
+    }
+
+    if (mode_flags & MODE_TEXTURE_SWAP) != 0u && (extra_flags & FLAG_HAS_AUX_TEX) != 0u {
+        let aux_sample = sample_aux_srgb(sample_uv);
+        let swap_amt = clamp(fx.time_and_extra.y, 0.0, 1.0);
+        srgb_col = vec4<f32>(mix(srgb_col.rgb, aux_sample.rgb, swap_amt), srgb_col.a);
     }
 
     if (mode_flags & MODE_DROP_SHADOW) != 0u {

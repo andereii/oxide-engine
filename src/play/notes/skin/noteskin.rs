@@ -309,20 +309,33 @@ impl NoteStyle {
     }
 
     pub fn miss_sound_assets_in(&self, mods: &ModRegistry) -> Vec<String> {
-        if self.has_custom_miss_sounds {
-            self.miss_sounds
-                .iter()
-                .map(|rel| self.asset_path_in(mods, rel))
-                .collect()
-        } else {
-            self.miss_sounds
-                .iter()
-                .map(|rel| {
-                    let fallback = format!("gameplay/noteskins/funkin/{rel}");
-                    mods.resolve_asset_server_path(&fallback).unwrap_or(fallback)
-                })
-                .collect()
+        const DEFAULT_MISS: [&str; 3] = ["missnote1.ogg", "missnote2.ogg", "missnote3.ogg"];
+        let resolve_default = |idx: usize| -> String {
+            let name = DEFAULT_MISS[idx % DEFAULT_MISS.len()];
+            let fallback = format!("gameplay/noteskins/funkin/{name}");
+            mods.resolve_asset_server_path(&fallback).unwrap_or(fallback)
+        };
+        if !self.has_custom_miss_sounds || self.miss_sounds.is_empty() {
+            return (0..DEFAULT_MISS.len()).map(resolve_default).collect();
         }
+        self.miss_sounds
+            .iter()
+            .enumerate()
+            .map(|(idx, rel)| {
+                for candidate in self.skin_rel_candidates(rel) {
+                    if let Some(path) = mods.resolve_asset_server_path(&candidate) {
+                        return path;
+                    }
+                    if !candidate.ends_with(".ogg") {
+                        let with_ext = format!("{candidate}.ogg");
+                        if let Some(path) = mods.resolve_asset_server_path(&with_ext) {
+                            return path;
+                        }
+                    }
+                }
+                resolve_default(idx)
+            })
+            .collect()
     }
 
     pub fn health_bar_asset_in(&self, mods: &ModRegistry) -> String {

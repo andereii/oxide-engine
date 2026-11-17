@@ -478,6 +478,7 @@ fn spawn_animated_script_prop(
             if let Some(tr) = preload.as_deref_mut() {
                 tr.register_handle(tex.clone());
             }
+            let is_pixel = path.to_ascii_lowercase().contains("pixel");
             let mut spr = Sprite::from_image(tex);
             spr.color = tint;
             let mut ec = commands.spawn((
@@ -490,6 +491,12 @@ fn spawn_animated_script_prop(
                     hud,
                 },
             ));
+            if is_pixel {
+                ec.insert(crate::play::stage::sync::StagePropPixelSampler {
+                    is_pixel: true,
+                    sampler_applied: false,
+                });
+            }
             if hud {
                 ec.insert(hud_render_layer());
             }
@@ -557,6 +564,7 @@ fn spawn_animated_script_prop(
             if let Some(tr) = preload.as_deref_mut() {
                 tr.register_handle(tex.clone());
             }
+            let is_pixel = path.to_ascii_lowercase().contains("pixel");
             let mut spr = Sprite::from_atlas_image(
                 tex,
                 TextureAtlas {
@@ -578,6 +586,12 @@ fn spawn_animated_script_prop(
                     hud,
                 },
             ));
+            if is_pixel {
+                ec.insert(crate::play::stage::sync::StagePropPixelSampler {
+                    is_pixel: true,
+                    sampler_applied: false,
+                });
+            }
             if hud {
                 ec.insert(hud_render_layer());
             }

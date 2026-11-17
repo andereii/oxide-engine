@@ -19,14 +19,16 @@ fn onCreate() {
     if target != "" {
         let tl = char_top_left(target);
         let gz = char_z(target);
-        let ax = tl[0] - 96.0;
-        let ay = tl[1] + 410.0;
+        let nx = tl[0] + 7.0;
+        let ny = tl[1] + 23.0;
+        let ax = nx + 38.5;
+        let ay = ny + 302.5;
 
         spawn_sparrow(
             "abot_pixel_head",
             "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-head",
-            ax - 165.0,
-            ay + 65.0,
+            ax - 140.0,
+            ay + 99.5,
             gz - 0.10,
             [
                 #{ name: "toleft", prefix: "toleft0", fps: 24.0, looped: false },
@@ -39,18 +41,18 @@ fn onCreate() {
         spawn_sparrow(
             "abot_pixel_speaker",
             "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-speaker",
-            ax - 150.0,
-            ay + 18.0,
+            ax - 138.0,
+            ay + 21.5,
             gz - 0.08,
-            [#{ name: "idle", prefix: "bop", fps: 24.0, looped: false }]
+            [#{ name: "danceLeft", prefix: "danceLeft", fps: 24.0, looped: false }]
         );
         prop_scale("abot_pixel_speaker", 6.0, 6.0);
 
         spawn_sprite_tl(
             "abot_pixel_back",
             "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-back.png",
-            ax + 54.0,
-            ay + 30.0,
+            ax + 13.8,
+            ay + 20.0,
             gz - 0.06
         );
         prop_scale("abot_pixel_back", 6.1, 6.0);
@@ -63,7 +65,11 @@ fn onCreate() {
             ax,
             ay,
             gz - 0.02,
-            [#{ name: "idle", prefix: "bop", fps: 24.0, looped: false }]
+            [
+                #{ name: "danceLeft", prefix: "danceLeft", fps: 24.0, looped: false },
+                #{ name: "danceRight", prefix: "danceRight", fps: 24.0, looped: false },
+                #{ name: "lowerKnife", prefix: "return", fps: 24.0, looped: false }
+            ]
         );
         prop_scale("abot_pixel_body", 6.0, 6.0);
     }
@@ -78,6 +84,7 @@ fn onSongRetry() {
     import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
     this.nene_state = "DEFAULT";
     this.blink_countdown = 3;
+    this.abot_danced = false;
     this.viz = viz_mod::reset_viz(this.viz);
     let target = find_slot("nene-pixel");
     if target != "" {
@@ -92,8 +99,15 @@ fn onSongEnd() {
 
 fn onBeatHit() {
     import "gameplay/characters/nene/ABotVisualizer" as viz_mod;
-    play_anim("abot_pixel_speaker", "idle");
-    play_anim("abot_pixel_body", "idle");
+    play_anim("abot_pixel_speaker", "danceLeft");
+    if this.nene_state == "DEFAULT" {
+        if this.abot_danced {
+            play_anim("abot_pixel_body", "danceRight");
+        } else {
+            play_anim("abot_pixel_body", "danceLeft");
+        }
+        this.abot_danced = !this.abot_danced;
+    }
     viz_mod::pulse_viz(this.viz);
     let target = find_slot("nene-pixel");
     if target == "" { return; }

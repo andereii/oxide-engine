@@ -51,12 +51,13 @@ fn sync_script_entity_maps(
         if actor.mirror_of.is_some() {
             continue;
         }
+        let total_scale = actor.total_scale();
         let tl_x = actor.slot.position[0]
-            + actor.data.offsets[0] * (1.0 + actor.slot.scale[0])
-            - actor.idle_size[0] * actor.slot.scale[0] * 0.5;
+            + actor.data.offsets[0] * (1.0 + total_scale[0])
+            - actor.idle_size[0] * total_scale[0] * 0.5;
         let tl_y = actor.slot.position[1]
-            + actor.data.offsets[1] * (1.0 + actor.slot.scale[1])
-            - actor.idle_size[1] * actor.slot.scale[1];
+            + actor.data.offsets[1] * (1.0 + total_scale[1])
+            - actor.idle_size[1] * total_scale[1];
         let char_z = actor
             .mod_z
             .unwrap_or_else(|| super::super::stage::schema::stage_layer_z(actor.slot.layer, 0));

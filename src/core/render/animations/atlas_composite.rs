@@ -345,6 +345,11 @@ fn sample_composite_timeline(
         let (bmin, bsize) = compute_layers_bounds(atlas, indices, layers);
         return (frames, bmin, bsize);
     }
+    if !atlas.main_layers.is_empty() {
+        let frames = sample_layers_composite(atlas, indices, &atlas.main_layers, None);
+        let (bmin, bsize) = compute_layers_bounds(atlas, indices, &atlas.main_layers);
+        return (frames, bmin, bsize);
+    }
     (Vec::new(), [0.0, 0.0], [100.0, 100.0])
 }
 

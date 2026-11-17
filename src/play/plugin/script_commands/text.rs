@@ -48,6 +48,7 @@ pub(super) fn handle_text_cmd(
                 Text2d::new(text.clone()),
                 TextFont {
                     font_size: FontSize::Px(*size),
+                    font_smoothing: bevy::text::FontSmoothing::None,
                     ..default()
                 },
                 TextColor(Color::srgba(color[0], color[1], color[2], color[3])),

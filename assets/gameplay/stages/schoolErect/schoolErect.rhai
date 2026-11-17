@@ -12,6 +12,15 @@ fn apply_school_erect_shaders() {
     let gf_mask = "gameplay/characters/gf-pixel/gf-pixel-mask.png";
     if gf_id == "nene-pixel" {
         gf_mask = "gameplay/characters/nene-pixel/nene-pixel-mask.png";
+        set_adjust_color("abot_pixel_body", -10.0, -23.0, -66.0, 24.0);
+        set_adjust_color("abot_pixel_back", -10.0, -23.0, -66.0, 24.0);
+        set_adjust_color("abot_pixel_head", -10.0, -23.0, -66.0, 24.0);
+        let i = 1;
+        while i <= 7 {
+            set_adjust_color("abot_viz_" + i, -10.0, -23.0, -66.0, 24.0);
+            i += 1;
+        }
+        set_drop_shadow("abot_pixel_speaker", "#52351d", 90.0, 5.0, 1.0, 1.0, -10.0, -23.0, -66.0, 24.0, "gameplay/characters/nene-pixel/abot-pixel/abot-pixel-speaker-mask.png", 0.0);
     }
     set_drop_shadow("gf", "#52351d", 90.0, 3.0, 1.0, 0.3, -10.0, -25.0, -42.0, 5.0, gf_mask, 1.0);
 

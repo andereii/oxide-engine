@@ -48,7 +48,7 @@ pub fn update_stage_shaders(
         (Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>),
         Without<DynamicScriptProp>,
     >,
-    dynamic_props: Query<(Entity, &DynamicScriptProp)>,
+    dynamic_props: Query<(Entity, &DynamicScriptProp, Option<&StageCompositeProp>)>,
     actors: Query<&CharacterActor>,
     mut cameras: Query<
         (Entity, Option<&mut RainCameraEffect>),
@@ -175,22 +175,26 @@ pub fn update_stage_shaders(
         }
     }
 
-    let commands_to_apply: Vec<ShaderScriptCommand> = pending_cmds.0.drain(..).collect();
-    for cmd in commands_to_apply {
-        apply_shader_script_command(
-            cmd,
-            &mut commands,
-            &mods,
-            &asset_server,
-            shaders.as_deref_mut(),
-            &mut materials,
-            &mut runtime,
-            &mut managed,
-            &stage_props,
-            &dynamic_props,
-            &actors,
-            &mut cameras,
-        );
+    if state.phase != PlayPhase::Loading {
+        let mut pending_mats = std::collections::HashMap::new();
+        let commands_to_apply: Vec<ShaderScriptCommand> = pending_cmds.0.drain(..).collect();
+        for cmd in commands_to_apply {
+            apply_shader_script_command(
+                cmd,
+                &mut commands,
+                &mods,
+                &asset_server,
+                shaders.as_deref_mut(),
+                &mut materials,
+                &mut runtime,
+                &mut managed,
+                &mut pending_mats,
+                &stage_props,
+                &dynamic_props,
+                &actors,
+                &mut cameras,
+            );
+        }
     }
 
     let mut actor_rot_flags = [false; 3];

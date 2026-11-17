@@ -8,9 +8,10 @@ use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual}
 use crate::ui::LoadingOverlayCamera;
 
 use super::super::defs::{
-    AdjustColorParams, CameraRainSpec, DropShadowParams, FunkinBlendMode, SHADER_MODE_ADJUST_COLOR,
-    SHADER_MODE_BUILDING, SHADER_MODE_DROP_SHADOW, SHADER_MODE_OVERLAY_BLEND,
-    SHADER_MODE_RAIN_SPRITE, SHADER_MODE_WIGGLE, SpriteShaderConfig,
+    AdjustColorParams, CameraRainSpec, CharShaderRole, DropShadowParams, FunkinBlendMode,
+    SHADER_MODE_ADJUST_COLOR, SHADER_MODE_BUILDING, SHADER_MODE_DROP_SHADOW,
+    SHADER_MODE_OVERLAY_BLEND, SHADER_MODE_RAIN_SPRITE, SHADER_MODE_TEXTURE_SWAP,
+    SHADER_MODE_WIGGLE, SpriteShaderConfig,
 };
 use super::super::material::FunkinSpriteMaterial;
 use super::super::rain_post::RainCameraEffect;
@@ -26,7 +27,7 @@ fn collect_target_entities(
         (Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>),
         Without<DynamicScriptProp>,
     >,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp, Option<&StageCompositeProp>)>,
     actors: &Query<&CharacterActor>,
 ) -> Vec<(Entity, ShaderTargetKind, String, String)> {
     let mut out = Vec::new();
@@ -62,6 +63,37 @@ fn collect_target_entities(
                     }
                 }
             }
+            if role == CharShaderRole::Spectator
+                && actor.id != "nene-dark"
+                && actor.id != "nene-pixel"
+            {
+                for (d_ent, dprop, dcomp) in dynamic_props {
+                    if matches!(
+                        dprop.id.as_str(),
+                        "abot_body" | "abot_stereo_bg" | "abot_eye_whites" | "abot_pupil"
+                    ) || dprop.id.starts_with("abot_viz_")
+                    {
+                        out.push((
+                            d_ent,
+                            ShaderTargetKind::DynamicProp,
+                            String::new(),
+                            dprop.id.clone(),
+                        ));
+                        if let Some(comp) = dcomp {
+                            for &piece in &comp.piece_entities {
+                                if piece != Entity::PLACEHOLDER {
+                                    out.push((
+                                        piece,
+                                        ShaderTargetKind::DynamicProp,
+                                        String::new(),
+                                        dprop.id.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     for (entity, prop, _, composite) in stage_props.iter() {
@@ -86,7 +118,7 @@ fn collect_target_entities(
             }
         }
     }
-    for (entity, dprop) in dynamic_props {
+    for (entity, dprop, composite) in dynamic_props {
         if dprop.id == target {
             out.push((
                 entity,
@@ -94,6 +126,18 @@ fn collect_target_entities(
                 String::new(),
                 dprop.id.clone(),
             ));
+            if let Some(composite) = composite {
+                for &piece in &composite.piece_entities {
+                    if piece != Entity::PLACEHOLDER {
+                        out.push((
+                            piece,
+                            ShaderTargetKind::DynamicProp,
+                            String::new(),
+                            dprop.id.clone(),
+                        ));
+                    }
+                }
+            }
         }
     }
     if out.is_empty() {
@@ -123,11 +167,12 @@ pub(super) fn apply_shader_script_command(
     materials: &mut Assets<FunkinSpriteMaterial>,
     runtime: &mut StageShaderRuntime,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
+    pending_mats: &mut std::collections::HashMap<Entity, Handle<FunkinSpriteMaterial>>,
     stage_props: &Query<
         (Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>),
         Without<DynamicScriptProp>,
     >,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp, Option<&StageCompositeProp>)>,
     actors: &Query<&CharacterActor>,
     cameras: &mut Query<
         (Entity, Option<&mut RainCameraEffect>),
@@ -183,6 +228,7 @@ pub(super) fn apply_shader_script_command(
             for (entity, _, _, _) in
                 collect_target_entities(&target, managed, stage_props, dynamic_props, actors)
             {
+                pending_mats.remove(&entity);
                 commands
                     .entity(entity)
                     .remove::<(SpriteMaterial<FunkinSpriteMaterial>, ManagedSpriteShader)>();
@@ -205,6 +251,7 @@ pub(super) fn apply_shader_script_command(
                 materials,
                 runtime.time_s,
                 managed,
+                pending_mats,
                 stage_props,
                 dynamic_props,
                 actors,
@@ -246,6 +293,7 @@ pub(super) fn apply_shader_script_command(
                 materials,
                 runtime.time_s,
                 managed,
+                pending_mats,
                 stage_props,
                 dynamic_props,
                 actors,
@@ -268,6 +316,7 @@ pub(super) fn apply_shader_script_command(
                 materials,
                 runtime.time_s,
                 managed,
+                pending_mats,
                 stage_props,
                 dynamic_props,
                 actors,
@@ -281,6 +330,7 @@ pub(super) fn apply_shader_script_command(
                 materials,
                 runtime.time_s,
                 managed,
+                pending_mats,
                 stage_props,
                 dynamic_props,
                 actors,
@@ -301,6 +351,7 @@ pub(super) fn apply_shader_script_command(
                     materials,
                     runtime.time_s,
                     managed,
+                    pending_mats,
                     stage_props,
                     dynamic_props,
                     actors,
@@ -317,6 +368,7 @@ pub(super) fn apply_shader_script_command(
                     materials,
                     runtime.time_s,
                     managed,
+                    pending_mats,
                     stage_props,
                     dynamic_props,
                     actors,
@@ -356,6 +408,7 @@ pub(super) fn apply_shader_script_command(
                 materials,
                 runtime.time_s,
                 managed,
+                pending_mats,
                 stage_props,
                 dynamic_props,
                 actors,
@@ -392,6 +445,7 @@ pub(super) fn apply_shader_script_command(
                 materials,
                 runtime.time_s,
                 managed,
+                pending_mats,
                 stage_props,
                 dynamic_props,
                 actors,
@@ -413,6 +467,19 @@ pub(super) fn apply_shader_script_command(
                         mat.sync_uniform();
                     }
                     existing.aux_path = aux_rel.clone();
+                } else if let Some(pending_handle) = pending_mats.get(&entity) {
+                    if let Some(mut mat) = materials.get_mut(pending_handle) {
+                        mat.aux_texture = aux_tex.clone();
+                        mat.time_s = runtime.time_s;
+                        mat.sync_uniform();
+                    }
+                    commands.entity(entity).insert(ManagedSpriteShader {
+                        handle: pending_handle.clone(),
+                        target: kind,
+                        char_id,
+                        prop_name,
+                        aux_path: aux_rel.clone(),
+                    });
                 } else {
                     let mut mat = FunkinSpriteMaterial::from_config(
                         SpriteShaderConfig::default(),
@@ -421,6 +488,7 @@ pub(super) fn apply_shader_script_command(
                     mat.time_s = runtime.time_s;
                     mat.sync_uniform();
                     let handle = materials.add(mat);
+                    pending_mats.insert(entity, handle.clone());
                     commands.entity(entity).insert((
                         SpriteMaterial(handle.clone()),
                         ManagedSpriteShader {
@@ -444,11 +512,12 @@ fn mutate_target_materials(
     materials: &mut Assets<FunkinSpriteMaterial>,
     time_s: f32,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
+    pending_mats: &mut std::collections::HashMap<Entity, Handle<FunkinSpriteMaterial>>,
     stage_props: &Query<
         (Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>),
         Without<DynamicScriptProp>,
     >,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp, Option<&StageCompositeProp>)>,
     actors: &Query<&CharacterActor>,
     mut mutator: impl FnMut(&mut FunkinSpriteMaterial),
 ) {
@@ -460,12 +529,19 @@ fn mutate_target_materials(
                 mat.time_s = time_s;
                 mat.sync_uniform();
             }
+        } else if let Some(pending_handle) = pending_mats.get(&entity) {
+            if let Some(mut mat) = materials.get_mut(pending_handle) {
+                mutator(&mut mat);
+                mat.time_s = time_s;
+                mat.sync_uniform();
+            }
         } else {
             let mut mat = FunkinSpriteMaterial::from_config(SpriteShaderConfig::default(), None);
             mat.time_s = time_s;
             mutator(&mut mat);
             mat.sync_uniform();
             let handle = materials.add(mat);
+            pending_mats.insert(entity, handle.clone());
             commands.entity(entity).insert((
                 SpriteMaterial(handle.clone()),
                 ManagedSpriteShader {
@@ -488,6 +564,7 @@ fn builtin_mode_flag(name: &str) -> Option<u32> {
         "building" => Some(SHADER_MODE_BUILDING),
         "overlay" | "overlay_blend" => Some(SHADER_MODE_OVERLAY_BLEND),
         "rain" | "rain_sprite" => Some(SHADER_MODE_RAIN_SPRITE),
+        "texture_swap" | "textureswap" => Some(SHADER_MODE_TEXTURE_SWAP),
         _ => None,
     }
 }
@@ -525,7 +602,7 @@ fn apply_param_to_config(cfg: &mut SpriteShaderConfig, key: &str, values: [f32; 
         "speed" => cfg.wiggle.speed = values[0],
         "freq" | "frequency" => cfg.wiggle.frequency = values[0],
         "amp" | "amplitude" => cfg.wiggle.amplitude = values[0],
-        "alpha_shit" => cfg.building.alpha_shit = values[0],
+        "alpha_shit" | "amount" | "fade_amount" => cfg.building.alpha_shit = values[0],
         "scale" => cfg.rain_sprite.scale = values[0],
         "intensity" | "int" => cfg.rain_sprite.intensity = values[0],
         "rain_color" => cfg.rain_sprite.rain_color = [values[0], values[1], values[2]],
@@ -543,11 +620,12 @@ fn apply_config_to_target(
     materials: &mut Assets<FunkinSpriteMaterial>,
     time_s: f32,
     managed: &mut Query<(Entity, &mut ManagedSpriteShader)>,
+    pending_mats: &mut std::collections::HashMap<Entity, Handle<FunkinSpriteMaterial>>,
     stage_props: &Query<
         (Entity, &StagePropVisual, &mut Sprite, Option<&StageCompositeProp>),
         Without<DynamicScriptProp>,
     >,
-    dynamic_props: &Query<(Entity, &DynamicScriptProp)>,
+    dynamic_props: &Query<(Entity, &DynamicScriptProp, Option<&StageCompositeProp>)>,
     actors: &Query<&CharacterActor>,
 ) {
     let aux_rel = aux_path_for_config(&cfg).map(str::to_string);
@@ -565,11 +643,26 @@ fn apply_config_to_target(
                 mat.time_s = time_s;
                 mat.sync_uniform();
             }
+        } else if let Some(pending_handle) = pending_mats.get(&entity) {
+            if let Some(mut mat) = materials.get_mut(pending_handle) {
+                mat.config = cfg.clone();
+                mat.aux_texture = aux_tex.clone();
+                mat.time_s = time_s;
+                mat.sync_uniform();
+            }
+            commands.entity(entity).insert(ManagedSpriteShader {
+                handle: pending_handle.clone(),
+                target: kind,
+                char_id,
+                prop_name,
+                aux_path: aux_rel.clone(),
+            });
         } else {
             let mut mat = FunkinSpriteMaterial::from_config(cfg.clone(), aux_tex.clone());
             mat.time_s = time_s;
             mat.sync_uniform();
             let handle = materials.add(mat);
+            pending_mats.insert(entity, handle.clone());
             commands.entity(entity).insert((
                 SpriteMaterial(handle.clone()),
                 ManagedSpriteShader {

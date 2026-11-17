@@ -7,6 +7,7 @@ pub const SHADER_MODE_WIGGLE: u32 = 1 << 3;
 pub const SHADER_MODE_OVERLAY_BLEND: u32 = 1 << 4;
 pub const SHADER_MODE_RAIN_SPRITE: u32 = 1 << 5;
 pub const SHADER_MODE_SSERAFIM: u32 = 1 << 6;
+pub const SHADER_MODE_TEXTURE_SWAP: u32 = 1 << 7;
 
 pub const SHADER_FLAG_USE_ALT_MASK: u32 = 1 << 8;
 pub const SHADER_FLAG_IS_CHAR: u32 = 1 << 9;
@@ -618,6 +619,9 @@ pub fn stage_prop_shader(stage_id: &str, prop_name: &str) -> Option<SpriteShader
             Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Multiply))
         }
         ("phillyStreets" | "phillyStreetsErect", name) if name.ends_with("_lightmap") => {
+            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
+        }
+        ("phillyStreetsErect", "mist0" | "mist1" | "mist2" | "mist3" | "mist4" | "mist5") => {
             Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
         }
         ("phillyStreetsErect", "grey1") => {

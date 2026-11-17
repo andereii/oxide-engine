@@ -41,6 +41,7 @@ pub struct PlayState {
     pub is_practice_mode: bool,
     pub is_bot_play_mode: bool,
     pub is_minimal_mode: bool,
+    pub loop_song: bool,
     pub is_player_dying: bool,
     pub may_pause_game: bool,
     pub disable_keys: bool,
@@ -149,6 +150,7 @@ impl PlayState {
             is_practice_mode: params.practice_mode,
             is_bot_play_mode: params.bot_play_mode,
             is_minimal_mode: params.minimal_mode,
+            loop_song: params.loop_song,
             is_player_dying: false,
             may_pause_game: true,
             disable_keys: false,
@@ -355,7 +357,17 @@ impl PlayState {
             && self.conductor.song_position_ms >= self.chart.length_ms
             && self.audio_finished
         {
-            self.end_song(playlist);
+            if self.loop_song {
+                self.pending_hooks.push((
+                    HookKind::SongEnd,
+                    ScriptEvent::new(HookKind::SongEnd)
+                        .with_field("score", self.song_score)
+                        .with_field("misses", i64::from(self.tallies.missed)),
+                ));
+                self.needs_reset = true;
+            } else {
+                self.end_song(playlist);
+            }
         }
     }
 

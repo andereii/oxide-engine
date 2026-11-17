@@ -14,6 +14,8 @@ pub struct AtlasSettings {
     pub apply_stage_matrix: bool,
     #[serde(rename = "postStageMatrixApply")]
     pub post_stage_matrix_apply: bool,
+    #[serde(rename = "useRenderTexture")]
+    pub use_render_texture: bool,
 }
 
 /// Generic animation clip metadata matching Funkin's `AnimationData`.

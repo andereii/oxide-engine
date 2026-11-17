@@ -3,6 +3,7 @@
 
 pub mod loader;
 pub mod manifest;
+pub mod scripting;
 pub mod store;
 pub mod vfs;
 

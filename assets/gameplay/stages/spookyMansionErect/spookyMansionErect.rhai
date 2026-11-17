@@ -10,7 +10,6 @@ fn reset_lightning(alpha_val) {
     char_alpha("bf", 1.0);
     char_alpha("dad", 1.0);
     char_alpha("gf", 1.0);
-    prop_alpha("abot_body", 1.0);
 }
 
 fn onCreate() {
@@ -30,7 +29,6 @@ fn lightning_off() {
     char_alpha("bf", 1.0);
     char_alpha("dad", 1.0);
     char_alpha("gf", 1.0);
-    prop_alpha("abot_body", 1.0);
 }
 
 fn lightning_fade() {
@@ -43,7 +41,6 @@ fn lightning_fade() {
     char_alpha("bf", 0.0);
     char_alpha("dad", 0.0);
     char_alpha("gf", 0.0);
-    prop_alpha("abot_body", 0.0);
     tween_prop("bgLight", "alpha", 0.0, 1.5, "linear");
     tween_prop("stairsLight", "alpha", 0.0, 1.5, "linear");
 }
@@ -55,7 +52,6 @@ fn onUpdate() {
         char_alpha("bf", a);
         char_alpha("dad", a);
         char_alpha("gf", a);
-        prop_alpha("abot_body", a);
         if a >= 1.0 {
             this.char_fading = false;
         }

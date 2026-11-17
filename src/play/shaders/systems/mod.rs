@@ -15,6 +15,7 @@ use super::defs::{
 };
 
 pub use attach::attach_stage_and_character_shaders;
+pub(crate) use attach::ensure_character_composite_rt;
 pub use events::parse_wiggle_effect_type;
 pub use update::update_stage_shaders;
 

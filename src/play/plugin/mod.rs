@@ -166,6 +166,7 @@ impl Plugin for PlayPlugin {
             bot_play_mode: self.flags.bot_play_mode,
             minimal_mode: self.flags.minimal_mode,
             downscroll: self.flags.downscroll.unwrap_or(false),
+            loop_song: self.flags.loop_song,
             start_timestamp_ms: self.flags.start_timestamp_ms,
             playback_rate: self.flags.playback_rate,
             ..default()
@@ -209,7 +210,7 @@ impl Plugin for PlayPlugin {
                 },
             ))
             .add_systems(Startup, setup_play_scene)
-            .add_systems(Update, (handle_play_input, hot_reload_assets_system, tick_play_state).chain().before(crate::animations::sprite::step_animations))
+            .add_systems(Update, (handle_play_input, hot_reload_assets_system, tick_play_state, ApplyDeferred).chain().before(crate::animations::sprite::step_animations))
             .add_systems(Update, (sync_stage_props, sync_script_texts, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
 

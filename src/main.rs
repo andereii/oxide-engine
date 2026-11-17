@@ -1,15 +1,18 @@
-mod animations;
-mod audio;
 mod cli;
-mod input;
+mod core;
 mod mods;
 mod play;
-mod scripting;
 mod ui;
 mod utils;
 
-use animations::AnimationsPlugin;
+pub use crate::core::audio;
+pub use crate::core::input;
+pub use crate::core::render;
+pub use crate::core::render::animations;
+pub use crate::mods::scripting;
+
 use cli::LaunchFlags;
+use core::render::animations::AnimationsPlugin;
 use oxin_app::{WindowConfig, run_window};
 use play::PlayPlugin;
 use ui::LoadingScreenPlugin;

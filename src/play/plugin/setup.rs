@@ -58,11 +58,11 @@ pub(crate) fn seed_stage_and_chars_into_state(
             c.data.scale[1] * c.slot.scale[1],
         ];
         let tl_x = c.slot.position[0]
-            + c.data.offsets[0] * (1.0 + c.slot.scale[0])
-            - c.idle_size[0] * c.slot.scale[0] * 0.5;
+            + c.data.offsets[0] * (1.0 + total_scale[0])
+            - c.idle_size[0] * total_scale[0] * 0.5;
         let tl_y = c.slot.position[1]
-            + c.data.offsets[1] * (1.0 + c.slot.scale[1])
-            - c.idle_size[1] * c.slot.scale[1];
+            + c.data.offsets[1] * (1.0 + total_scale[1])
+            - c.idle_size[1] * total_scale[1];
         let char_z = super::super::stage::schema::stage_layer_z(c.slot.layer, 0);
         let focus_x = c.slot.position[0] + c.data.offsets[0];
         let focus_y =
@@ -157,6 +157,7 @@ pub(super) fn setup_play_scene(
         TextFont {
             font: score_font.into(),
             font_size: FontSize::Px(16.0),
+            font_smoothing: bevy::text::FontSmoothing::None,
             ..default()
         },
         TextLayout::justify(Justify::Right),

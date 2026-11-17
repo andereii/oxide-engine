@@ -96,21 +96,24 @@ fn onCreate() {
     this.nene_state = "DEFAULT";
     this.blink_countdown = 3;
     this.has_danced = false;
+    this.last_alpha = -1.0;
     this.abot = abot_mod::new_abot_state("nene-dark");
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("nene-dark");
     if target != "" {
         char_underlay(target, "nene", 0.0, 0.0, -3);
-        let ab = abot_mod::spawn_abot_with_body(
-            target,
-            -95.0,
-            384.0,
-            "gameplay/characters/nene-dark/abot-system-dark"
-        );
-        spawn_atlas("abot_body_underlay", "gameplay/characters/nene/abot-system", ab[0], ab[1], ab[2] - 0.03, []);
-        play_anim_frame("abot_body_underlay", "idle", 1);
+        let ab = abot_mod::spawn_abot_with_body(target, -95.0, 384.0, "gameplay/characters/nene-dark/abot-system-dark");
         viz_mod::spawn_viz(ab[0], ab[1], ab[2], false);
+        set_shader("abot_body", "texture_swap");
+        shader_tex("abot_body", "gameplay/characters/nene/abot-system/spritemap1.png");
+        shader_val("abot_body", "amount", 0.0);
+        prop_tint("abot_eye_whites", "#FF6F96CE");
         prop_tint("abot_stereo_bg", "#FF616785");
+        let i = 1;
+        while i <= 7 {
+            set_adjust_color("abot_viz_" + i, -26.0, -45.0, -12.0, 0.0);
+            i += 1;
+        }
     }
 }
 
@@ -169,10 +172,35 @@ fn onBeatHit() {
     }
 }
 
+fn lerp_channel(a, b, t) {
+    let v = (a + (b - a) * t).round();
+    if v < 0.0 { 0 } else if v > 255.0 { 255 } else { v.to_int() }
+}
+
+fn hex_byte(n) {
+    let hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"];
+    let hi = (n / 16) % 16;
+    let lo = n % 16;
+    hex_digits[hi] + hex_digits[lo]
+}
+
+fn sync_abot_darkness(a) {
+    shader_val("abot_body", "amount", 1.0 - a);
+    let r = lerp_channel(255.0, 111.0, a);
+    let g = lerp_channel(255.0, 150.0, a);
+    let b = lerp_channel(255.0, 206.0, a);
+    prop_tint("abot_eye_whites", "#FF" + hex_byte(r) + hex_byte(g) + hex_byte(b));
+}
+
 fn onUpdate() {
     if char_id("bf") == "pico-blazin" { return; }
     let target = find_slot("nene-dark");
     if target == "" { return; }
+    let a = clamp(get_char_alpha(target), 0.0, 1.0);
+    if a != this.last_alpha {
+        this.last_alpha = a;
+        sync_abot_darkness(a);
+    }
     this.nene_state = transition_nene_state(this.nene_state, target);
 }
 

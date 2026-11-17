@@ -11,7 +11,7 @@ fn onCreate() {
     this.slot = find_slot("gf-dark");
     this.last_anim = "";
     if this.slot != "" {
-        char_underlay(this.slot, "gf");
+        char_underlay(this.slot, "gf", -45.5, 0.0);
     }
 }
 

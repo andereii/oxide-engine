@@ -12,10 +12,13 @@ use crate::play::characters::spawn::CharacterPartVisual;
 use crate::play::characters::CharacterActor;
 use crate::play::scene::PlayState;
 use crate::play::stage::schema::stage_layer_z;
-use crate::play::stage::{StageCompositeProp, StagePropVisual};
+use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual};
+use crate::play::types::PlayPhase;
 use crate::ui::LoadingOverlayCamera;
 
-use super::super::defs::{stage_character_initial_tint, stage_character_shader, stage_prop_shader};
+use super::super::defs::{
+    CharShaderRole, stage_character_initial_tint, stage_character_shader, stage_prop_shader,
+};
 use super::super::material::FunkinSpriteMaterial;
 use super::super::rain_post::RainCameraEffect;
 use super::{
@@ -23,7 +26,7 @@ use super::{
     load_aux_handle, to_char_shader_role,
 };
 
-fn ensure_character_composite_rt(
+pub(crate) fn ensure_character_composite_rt(
     actor: &mut CharacterActor,
     commands: &mut Commands,
     images: &mut Assets<Image>,
@@ -89,6 +92,7 @@ pub fn attach_stage_and_character_shaders(
     mut materials: ResMut<Assets<FunkinSpriteMaterial>>,
     mut runtime: ResMut<StageShaderRuntime>,
     props: Query<(Entity, &StagePropVisual, Option<&StageCompositeProp>), Without<ManagedSpriteShader>>,
+    dynamic_props: Query<(Entity, &DynamicScriptProp, Option<&StageCompositeProp>), Without<ManagedSpriteShader>>,
     mut actors: Query<&mut CharacterActor>,
     char_shaders: Query<(), With<ManagedSpriteShader>>,
     cameras: Query<
@@ -96,6 +100,11 @@ pub fn attach_stage_and_character_shaders(
         (With<Camera2d>, Without<HudCamera>, Without<LoadingOverlayCamera>),
     >,
 ) {
+    if state.phase == PlayPhase::Loading {
+        runtime.attached = false;
+        return;
+    }
+
     let stage_id = state.chart.stage_id.clone();
     let song_id = state.chart.song_id.clone();
     if runtime.attached && runtime.stage_id == stage_id && runtime.song_id == song_id {
@@ -140,6 +149,11 @@ pub fn attach_stage_and_character_shaders(
             continue;
         }
         let role = to_char_shader_role(actor.role);
+        if !actor.piece_entities.is_empty()
+            && actor.data.effective_atlas_settings().use_render_texture
+        {
+            ensure_character_composite_rt(&mut actor, &mut commands, &mut images, &mut runtime);
+        }
         if let Some(tint) = stage_character_initial_tint(&stage_id, role) {
             actor.mod_tint = tint;
         }
@@ -164,11 +178,29 @@ pub fn attach_stage_and_character_shaders(
             let quad_ent =
                 ensure_character_composite_rt(&mut actor, &mut commands, &mut images, &mut runtime);
             let rt_handle = materials.add(FunkinSpriteMaterial::from_config_ex(
-                cfg,
-                aux_tex,
+                cfg.clone(),
+                aux_tex.clone(),
                 true,
             ));
             target_entities.push((quad_ent, rt_handle));
+        }
+        if role == CharShaderRole::Spectator
+            && actor.id != "nene-dark"
+            && actor.id != "nene-pixel"
+        {
+            let abot_handle = materials.add(FunkinSpriteMaterial::from_config(cfg, aux_tex));
+            for (d_ent, dprop, dcomp) in &dynamic_props {
+                if is_abot_shader_synced_prop(&dprop.id) {
+                    target_entities.push((d_ent, abot_handle.clone()));
+                    if let Some(composite) = dcomp {
+                        for &piece_ent in &composite.piece_entities {
+                            if piece_ent != Entity::PLACEHOLDER {
+                                target_entities.push((piece_ent, abot_handle.clone()));
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         for (entity, handle) in target_entities {
@@ -198,4 +230,11 @@ pub fn attach_stage_and_character_shaders(
         }
     }
     state.pending_shader_events.clear();
+}
+
+fn is_abot_shader_synced_prop(id: &str) -> bool {
+    matches!(
+        id,
+        "abot_body" | "abot_stereo_bg" | "abot_eye_whites" | "abot_pupil"
+    ) || id.starts_with("abot_viz_")
 }
