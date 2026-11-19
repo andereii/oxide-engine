@@ -321,8 +321,7 @@ impl NoteStyle {
             .ok()
             .and_then(|raw| serde_json::from_str::<NoteskinFileRaw>(&raw).ok())
             .and_then(|parsed| parsed.misses)
-            .and_then(|misses| misses.sounds)
-            .and_then(|sounds| sounds.path)
+            .map(|misses| misses.sounds.path)
             .filter(|paths| !paths.is_empty())
             .unwrap_or_else(|| DEFAULT_MISS.iter().map(|s| (*s).to_string()).collect());
 

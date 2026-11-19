@@ -166,7 +166,7 @@ pub(super) fn setup_play_scene(
         },
         bevy::sprite::Anchor::TOP_LEFT,
         Transform::from_xyz(
-            (601.0 * 0.5 - 190.0).round(),
+            (601.0_f32 * 0.5 - 190.0).round(),
             (-SCREEN_HEIGHT * 0.4 - 30.0).round(),
             10.8,
         )
