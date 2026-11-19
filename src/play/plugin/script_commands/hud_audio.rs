@@ -57,6 +57,25 @@ fn trigger_sandboxed_screenshot(
     );
 }
 
+fn resolve_audio_asset_path(mods: &crate::mods::ModRegistry, path: &str) -> String {
+    if let Some(resolved) = mods.resolve_asset_server_path(path) {
+        return resolved;
+    }
+    let has_ext = path.ends_with(".ogg")
+        || path.ends_with(".wav")
+        || path.ends_with(".mp3")
+        || path.ends_with(".flac");
+    if !has_ext {
+        for ext in [".ogg", ".wav", ".mp3"] {
+            let candidate = format!("{path}{ext}");
+            if let Some(resolved) = mods.resolve_asset_server_path(&candidate) {
+                return resolved;
+            }
+        }
+    }
+    path.to_string()
+}
+
 pub(super) fn handle_hud_audio_cmd(
     cmd: &ScriptCommand,
     commands: &mut Commands,
@@ -110,10 +129,7 @@ pub(super) fn handle_hud_audio_cmd(
             }
         }
         ScriptCommand::PlaySfx { path, volume } => {
-            let resolved = scripts
-                .mods
-                .resolve_asset_server_path(path)
-                .unwrap_or_else(|| path.clone());
+            let resolved = resolve_audio_asset_path(&scripts.mods, path);
             let handle: Handle<AudioSource> = scripts.asset_server.load(resolved);
             spawn_one_shot(
                 commands,
@@ -136,10 +152,7 @@ pub(super) fn handle_hud_audio_cmd(
                     commands.entity(ent).despawn();
                 }
             }
-            let resolved = scripts
-                .mods
-                .resolve_asset_server_path(path)
-                .unwrap_or_else(|| path.clone());
+            let resolved = resolve_audio_asset_path(&scripts.mods, path);
             let handle: Handle<AudioSource> = scripts.asset_server.load(resolved);
             spawn_tagged_sound(
                 commands,

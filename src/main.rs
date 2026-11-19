@@ -11,9 +11,9 @@ pub use crate::core::render;
 pub use crate::core::render::animations;
 pub use crate::mods::scripting;
 
-use bevy::audio::{GlobalVolume, Volume};
+use bevy::audio::{AudioSink, AudioSinkPlayback, Volume};
 use bevy::prelude::*;
-use bevy::window::WindowFocused;
+use bevy::window::PrimaryWindow;
 use cli::LaunchFlags;
 use core::render::animations::AnimationsPlugin;
 use oxin_app::{WindowConfig, run_window};
@@ -25,25 +25,40 @@ const FOCUS_FADE_SPEED: f32 = 6.0;
 
 fn sync_focus_volume(
     time: Res<Time>,
-    mut focus_events: MessageReader<WindowFocused>,
-    mut global_volume: ResMut<GlobalVolume>,
-    mut focused: Local<Option<bool>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut sinks: Query<&mut AudioSink>,
+    added_sinks: Query<Entity, Added<AudioSink>>,
     mut current_linear: Local<Option<f32>>,
 ) {
-    let is_focused = focused.get_or_insert(true);
-    for ev in focus_events.read() {
-        *is_focused = ev.focused;
-    }
-    let target = if *is_focused { 1.0 } else { FOCUS_LOST_VOLUME };
+    let is_focused = windows.iter().next().map(|w| w.focused).unwrap_or(true);
+    let target = if is_focused { 1.0 } else { FOCUS_LOST_VOLUME };
     let cur = current_linear.get_or_insert(1.0);
-    if (*cur - target).abs() > 1e-4 {
+    let prev = *cur;
+
+    if (prev - target).abs() > 1e-4 {
         let step = time.delta_secs() * FOCUS_FADE_SPEED;
-        if *cur > target {
-            *cur = (*cur - step).max(target);
+        *cur = if prev > target {
+            (prev - step).max(target)
         } else {
-            *cur = (*cur + step).min(target);
+            (prev + step).min(target)
+        };
+    }
+
+    let ratio = if prev > 1e-4 { *cur / prev } else { 1.0 };
+    let changed = (*cur - prev).abs() > 1e-5;
+
+    if changed {
+        for mut sink in &mut sinks {
+            let scaled = (sink.volume().to_linear() * ratio).max(0.0);
+            sink.set_volume(Volume::Linear(scaled));
         }
-        global_volume.volume = Volume::Linear(*cur);
+    } else if *cur < 0.9999 {
+        for entity in &added_sinks {
+            if let Ok(mut sink) = sinks.get_mut(entity) {
+                let scaled = (sink.volume().to_linear() * *cur).max(0.0);
+                sink.set_volume(Volume::Linear(scaled));
+            }
+        }
     }
 }
 
