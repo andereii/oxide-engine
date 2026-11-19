@@ -309,14 +309,35 @@ impl NoteStyle {
     }
 
     pub fn miss_sound_assets_in(&self, mods: &ModRegistry) -> Vec<String> {
-        const DEFAULT_MISS: [&str; 3] = ["missnote1.ogg", "missnote2.ogg", "missnote3.ogg"];
+        const DEFAULT_MISS: [&str; 3] = [
+            "misses/miss-note-1.ogg",
+            "misses/miss-note-2.ogg",
+            "misses/miss-note-3.ogg",
+        ];
+        let funkin_json_path = mods
+            .resolve_file("gameplay/noteskins/funkin/funkin.json")
+            .unwrap_or_else(|| resolve_assets_dir().join("gameplay/noteskins/funkin/funkin.json"));
+        let funkin_miss_paths: Vec<String> = fs::read_to_string(&funkin_json_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<NoteskinFileRaw>(&raw).ok())
+            .and_then(|parsed| parsed.misses)
+            .and_then(|misses| misses.sounds)
+            .and_then(|sounds| sounds.path)
+            .filter(|paths| !paths.is_empty())
+            .unwrap_or_else(|| DEFAULT_MISS.iter().map(|s| (*s).to_string()).collect());
+
         let resolve_default = |idx: usize| -> String {
-            let name = DEFAULT_MISS[idx % DEFAULT_MISS.len()];
-            let fallback = format!("gameplay/noteskins/funkin/{name}");
+            let rel = &funkin_miss_paths[idx % funkin_miss_paths.len()];
+            let clean = rel.trim_start_matches("./").trim_start_matches('/');
+            let fallback = if clean.starts_with("gameplay/") {
+                clean.to_string()
+            } else {
+                format!("gameplay/noteskins/funkin/{clean}")
+            };
             mods.resolve_asset_server_path(&fallback).unwrap_or(fallback)
         };
         if !self.has_custom_miss_sounds || self.miss_sounds.is_empty() {
-            return (0..DEFAULT_MISS.len()).map(resolve_default).collect();
+            return (0..funkin_miss_paths.len()).map(resolve_default).collect();
         }
         self.miss_sounds
             .iter()

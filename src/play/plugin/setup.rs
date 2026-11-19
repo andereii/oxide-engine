@@ -156,16 +156,21 @@ pub(super) fn setup_play_scene(
         Text2d::new(""),
         TextFont {
             font: score_font.into(),
-            font_size: FontSize::Px(16.0),
+            font_size: FontSize::Px(48.0),
             ..default()
         },
         TextLayout::justify(Justify::Right),
         bevy::sprite::Text2dShadow {
-            offset: Vec2::new(1.0, -1.0),
+            offset: Vec2::new(3.0, -3.0),
             color: Color::BLACK,
         },
         bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(601.0 * 0.5 - 190.0, -SCREEN_HEIGHT * 0.4 - 30.0, 10.8),
+        Transform::from_xyz(
+            (601.0 * 0.5 - 190.0).round(),
+            (-SCREEN_HEIGHT * 0.4 - 30.0).round(),
+            10.8,
+        )
+        .with_scale(Vec3::splat(1.0 / 3.0)),
         hud_render_layer(),
         HudTextVisual,
     ));
