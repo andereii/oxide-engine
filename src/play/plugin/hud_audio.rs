@@ -1,9 +1,10 @@
 use bevy::audio::{AudioPlayer, PlaybackMode, PlaybackSettings, Volume};
 use bevy::prelude::*;
+use bevy::sprite::Anchor;
 
 use crate::audio::{PcmSfxAudio, PcmSfxCache};
 use crate::utils::constants::{
-    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT, SCREEN_WIDTH,
+    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT,
 };
 
 use super::super::scene::PlayState;
@@ -95,26 +96,22 @@ pub(super) struct HudTextSyncCache {
     initialized: bool,
 }
 
-fn compute_hud_text_layout(state: &PlayState) -> (String, Val, Val) {
+fn compute_hud_text_layout(state: &PlayState) -> (String, Anchor, Vec3) {
     let bg_y_flx = if state.player_strumline.is_downscroll {
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_DOWNSCROLL
     } else {
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
     };
-    let left_px = SCREEN_WIDTH * 0.5 + (601.0_f32 * 0.5 - 190.0);
-    let top_px = bg_y_flx + 30.0;
+    let bx = (601.0_f32 * 0.5 - 190.0).round();
+    let by = (SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0)).round();
     let text = state.score_text.clone();
-    (
-        text,
-        Val::Percent(left_px / SCREEN_WIDTH * 100.0),
-        Val::Percent(top_px / SCREEN_HEIGHT * 100.0),
-    )
+    (text, Anchor::TOP_LEFT, Vec3::new(bx, by, 10.8))
 }
 
 pub(super) fn sync_hud_text(
     state: Res<PlayState>,
     mut cache: Local<HudTextSyncCache>,
-    mut hud_text: Query<(&mut Text, &mut Node, &mut Visibility), With<HudTextVisual>>,
+    mut hud_text: Query<(&mut Text2d, &mut Anchor, &mut Transform, &mut Visibility), With<HudTextVisual>>,
 ) {
     let botplay_layout = state.is_bot_play_mode && state.custom_score_text.is_none();
     let downscroll = state.player_strumline.is_downscroll;
@@ -132,19 +129,19 @@ pub(super) fn sync_hud_text(
     cache.botplay_layout = botplay_layout;
     cache.downscroll = downscroll;
 
-    let (display_text, target_left, target_top) = compute_hud_text_layout(&state);
+    let (display_text, target_anchor, target_pos) = compute_hud_text_layout(&state);
     let vis = if state.hud_visible {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
-    for (mut text, mut node, mut visibility) in &mut hud_text {
+    for (mut text, mut anchor, mut transform, mut visibility) in &mut hud_text {
         **text = display_text.clone();
-        if node.left != target_left {
-            node.left = target_left;
+        if *anchor != target_anchor {
+            *anchor = target_anchor;
         }
-        if node.top != target_top {
-            node.top = target_top;
+        if transform.translation != target_pos {
+            transform.translation = target_pos;
         }
         if *visibility != vis {
             *visibility = vis;

@@ -7,7 +7,7 @@ use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptV
 use crate::ui::LoadingScreenState;
 use crate::utils::constants::SCREEN_HEIGHT;
 
-use super::super::camera::hud::spawn_hud_camera;
+use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
 use super::super::characters::{
     CharacterRole, CharactersResource, append_character_sidecar_scripts,
 };
@@ -152,28 +152,26 @@ pub(super) fn setup_play_scene(
         .resolve_asset_server_path("ui/fonts/VCR OSD Mono.ttf")
         .unwrap_or_else(|| "ui/fonts/VCR OSD Mono.ttf".to_string());
     let score_font: Handle<Font> = asset_server.load(score_font_path);
-    let init_left_pct = (1280.0 * 0.5 + (601.0 * 0.5 - 190.0)) / 1280.0 * 100.0;
-    let init_top_pct = (SCREEN_HEIGHT * 0.89 + 30.0) / SCREEN_HEIGHT * 100.0;
     commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(init_left_pct),
-            top: Val::Percent(init_top_pct),
-            ..default()
-        },
-        Text::new(""),
+        Text2d::new(""),
         TextFont {
             font: score_font.into(),
-            font_size: FontSize::Px(16.0),
+            font_size: FontSize::Px(20.0),
             ..default()
         },
         TextColor(Color::WHITE),
-        TextShadow {
-            offset: Vec2::new(1.0, 1.0),
+        TextLayout::justify(Justify::Right),
+        bevy::sprite::Text2dShadow {
+            offset: Vec2::new(1.5, -1.5),
             color: Color::BLACK,
         },
-        GlobalZIndex(10),
-        Pickable::IGNORE,
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(
+            (601.0_f32 * 0.5 - 190.0).round(),
+            (-SCREEN_HEIGHT * 0.4 - 30.0).round(),
+            10.8,
+        ),
+        hud_render_layer(),
         HudTextVisual,
     ));
 }
