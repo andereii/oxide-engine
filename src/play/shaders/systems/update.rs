@@ -6,7 +6,7 @@ use crate::play::characters::{CharacterActor, CharacterRole};
 use crate::play::scene::PlayState;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual, StageResource};
 use crate::play::types::{PlayPhase, SongEventData};
-use crate::ui::LoadingOverlayCamera;
+use crate::ui::{LoadingOverlayCamera, SoundTrayOverlayCamera};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::super::defs::{
@@ -52,7 +52,12 @@ pub fn update_stage_shaders(
     actors: Query<&CharacterActor>,
     mut cameras: Query<
         (Entity, Option<&mut RainCameraEffect>),
-        (With<Camera2d>, Without<HudCamera>, Without<LoadingOverlayCamera>),
+        (
+            With<Camera2d>,
+            Without<HudCamera>,
+            Without<LoadingOverlayCamera>,
+            Without<SoundTrayOverlayCamera>,
+        ),
     >,
 ) {
     if state.needs_reset {

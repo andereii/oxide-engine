@@ -5,7 +5,7 @@ use crate::mods::ModRegistry;
 use crate::play::camera::hud::HudCamera;
 use crate::play::characters::CharacterActor;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual};
-use crate::ui::LoadingOverlayCamera;
+use crate::ui::{LoadingOverlayCamera, SoundTrayOverlayCamera};
 
 use super::super::defs::{
     AdjustColorParams, CameraRainSpec, CharShaderRole, DropShadowParams, FunkinBlendMode,
@@ -176,7 +176,12 @@ pub(super) fn apply_shader_script_command(
     actors: &Query<&CharacterActor>,
     cameras: &mut Query<
         (Entity, Option<&mut RainCameraEffect>),
-        (With<Camera2d>, Without<HudCamera>, Without<LoadingOverlayCamera>),
+        (
+            With<Camera2d>,
+            Without<HudCamera>,
+            Without<LoadingOverlayCamera>,
+            Without<SoundTrayOverlayCamera>,
+        ),
     >,
 ) {
     match cmd {

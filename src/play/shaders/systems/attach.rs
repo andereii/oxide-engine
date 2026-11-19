@@ -14,7 +14,7 @@ use crate::play::scene::PlayState;
 use crate::play::stage::schema::stage_layer_z;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual};
 use crate::play::types::PlayPhase;
-use crate::ui::LoadingOverlayCamera;
+use crate::ui::{LoadingOverlayCamera, SoundTrayOverlayCamera};
 
 use super::super::defs::{
     CharShaderRole, stage_character_initial_tint, stage_character_shader, stage_prop_shader,
@@ -97,7 +97,12 @@ pub fn attach_stage_and_character_shaders(
     char_shaders: Query<(), With<ManagedSpriteShader>>,
     cameras: Query<
         (Entity, Option<&RainCameraEffect>),
-        (With<Camera2d>, Without<HudCamera>, Without<LoadingOverlayCamera>),
+        (
+            With<Camera2d>,
+            Without<HudCamera>,
+            Without<LoadingOverlayCamera>,
+            Without<SoundTrayOverlayCamera>,
+        ),
     >,
 ) {
     if state.phase == PlayPhase::Loading {
