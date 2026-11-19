@@ -6,6 +6,7 @@ use crate::play::characters::{CharacterActor, CharacterRole};
 use crate::play::scene::PlayState;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual, StageResource};
 use crate::play::types::{PlayPhase, SongEventData};
+use crate::play::PauseOverlayCamera;
 use crate::ui::{LoadingOverlayCamera, SoundTrayOverlayCamera};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
@@ -55,6 +56,7 @@ pub fn update_stage_shaders(
         (
             With<Camera2d>,
             Without<HudCamera>,
+            Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
         ),

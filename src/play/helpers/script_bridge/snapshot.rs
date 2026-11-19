@@ -103,6 +103,7 @@ impl PlayState {
             keys_disabled: self.disable_keys,
             deaths: self.death_counter,
             inst_vol: self.instrumental_volume,
+            master_volume: self.master_volume,
             p_vocal_vol: self.player_vocals_volume,
             o_vocal_vol: self.opponent_vocals_volume,
             cam_x: self.camera.follow_point[0],

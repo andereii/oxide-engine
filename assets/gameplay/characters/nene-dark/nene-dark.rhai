@@ -101,8 +101,14 @@ fn onCreate() {
     this.viz = viz_mod::new_viz_state(false);
     let target = find_slot("nene-dark");
     if target != "" {
-        char_underlay(target, "nene", 0.0, 0.0, -3);
-        let ab = abot_mod::spawn_abot_with_body(target, -95.0, 384.0, "gameplay/characters/nene-dark/abot-system-dark");
+        char_underlay(target, "nene", 0.0, 0.0, -1);
+        let ab = abot_mod::spawn_abot_with_body_z(
+            target,
+            -95.0,
+            384.0,
+            "gameplay/characters/nene-dark/abot-system-dark",
+            char_z(target) - 0.15
+        );
         viz_mod::spawn_viz(ab[0], ab[1], ab[2], false);
         set_shader("abot_body", "texture_swap");
         shader_tex("abot_body", "gameplay/characters/nene/abot-system/spritemap1.png");

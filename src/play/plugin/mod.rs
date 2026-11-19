@@ -8,7 +8,7 @@ pub(crate) mod setup;
 mod tick;
 
 use capture::{ParityCaptureState, drive_parity_capture};
-use hud_audio::sync_hud_text;
+use hud_audio::{sync_abot_visualizer_audio, sync_hud_text};
 use input::handle_play_input;
 use setup::setup_play_scene;
 use tick::tick_play_state;
@@ -34,6 +34,7 @@ use super::hud::popups::sync_popups;
 use super::notes::NoteStyle;
 use super::notes::effects::sync_note_effects;
 use super::notes::render::sync_arrow_visuals;
+use super::pausesunscene::PauseSubScenePlugin;
 use super::playlist::PlayStatePlaylist;
 use super::preload::PlayPreloadTracker;
 use super::scene::PlayState;
@@ -205,13 +206,14 @@ impl Plugin for PlayPlugin {
             .insert_resource(state)
             .add_plugins((
                 OxideAudioPlugin,
+                PauseSubScenePlugin,
                 super::shaders::FunkinShadersPlugin {
                     enabled: !self.flags.no_shaders,
                 },
             ))
             .add_systems(Startup, setup_play_scene)
             .add_systems(Update, (handle_play_input, hot_reload_assets_system, tick_play_state, ApplyDeferred).chain().before(crate::animations::sprite::step_animations))
-            .add_systems(Update, (sync_stage_props, sync_script_texts, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
+            .add_systems(Update, (sync_stage_props, sync_abot_visualizer_audio, sync_script_texts, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
 
         if let Some(capture_state) = ParityCaptureState::from_flags(&self.flags) {

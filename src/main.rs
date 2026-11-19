@@ -16,6 +16,7 @@ use core::render::animations::AnimationsPlugin;
 use oxin_app::{WindowConfig, run_window};
 use play::PlayPlugin;
 use ui::{LoadingScreenPlugin, SoundTrayPlugin};
+use utils::alphabet::AlphabetPlugin;
 
 fn main() {
     let flags = LaunchFlags::from_env_args();
@@ -40,6 +41,7 @@ fn main() {
         move |app| {
             app.add_plugins((
                 AnimationsPlugin,
+                AlphabetPlugin,
                 LoadingScreenPlugin,
                 SoundTrayPlugin,
                 PlayPlugin::with_flags(flags),

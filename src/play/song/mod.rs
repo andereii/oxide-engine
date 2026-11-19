@@ -58,6 +58,71 @@ pub fn song_asset_path_in(mods: &ModRegistry, song_id: &str, file: &str) -> Stri
     song_asset_path(song_id, file)
 }
 
+pub fn list_song_difficulties_in(
+    mods: &ModRegistry,
+    song_id: &str,
+    current_difficulty: &str,
+) -> Vec<String> {
+    const STANDARD_ORDER: &[&str] = &[
+        "easy",
+        "normal",
+        "hard",
+        "erect",
+        "nightmare",
+        "pico-easy",
+        "pico-normal",
+        "pico-hard",
+    ];
+    let meta_path = mods
+        .resolve_file(&format!("gameplay/songs/{song_id}/chart/meta.json"))
+        .or_else(|| mods.resolve_file(&format!("songs/{song_id}/chart/meta.json")))
+        .or_else(|| mods.resolve_file(&format!("songs/{song_id}/meta.json")))
+        .unwrap_or_else(|| song_root_dir(song_id).join("chart").join("meta.json"));
+
+    let Ok(meta_raw) = fs::read_to_string(&meta_path) else {
+        return vec![current_difficulty.to_string()];
+    };
+    let Ok(meta) = serde_json::from_str::<SongMetaFile>(&meta_raw) else {
+        return vec![current_difficulty.to_string()];
+    };
+
+    let want_pico = current_difficulty.to_ascii_lowercase().starts_with("pico-");
+    let mut keys: Vec<String> = meta
+        .difficulties
+        .keys()
+        .filter(|k| {
+            let lower = k.to_ascii_lowercase();
+            if want_pico {
+                lower.starts_with("pico-")
+            } else {
+                !lower.starts_with("pico-")
+            }
+        })
+        .cloned()
+        .collect();
+
+    if keys.is_empty() {
+        keys = meta.difficulties.keys().cloned().collect();
+    }
+    if keys.is_empty() {
+        keys.push(current_difficulty.to_string());
+    }
+
+    keys.sort_by(|a, b| {
+        let al = a.to_ascii_lowercase();
+        let bl = b.to_ascii_lowercase();
+        let ai = STANDARD_ORDER.iter().position(|&d| d == al);
+        let bi = STANDARD_ORDER.iter().position(|&d| d == bl);
+        match (ai, bi) {
+            (Some(ia), Some(ib)) => ia.cmp(&ib),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => al.cmp(&bl),
+        }
+    });
+    keys
+}
+
 pub fn load_song_chart_in(
     mods: &ModRegistry,
     song_id: &str,

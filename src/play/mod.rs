@@ -5,6 +5,7 @@ pub mod helpers;
 pub mod hot_reload;
 pub mod hud;
 pub mod notes;
+pub mod pausesunscene;
 pub mod playlist;
 pub mod plugin;
 pub mod preload;
@@ -14,4 +15,5 @@ pub mod song;
 pub mod stage;
 pub mod types;
 
+pub use pausesunscene::PauseOverlayCamera;
 pub use plugin::PlayPlugin;

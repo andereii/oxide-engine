@@ -89,6 +89,9 @@ pub struct PreciseInputEvent {
 pub enum PauseMode {
     Standard,
     Charting,
+    Difficulty,
+    Conversation,
+    Cutscene,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

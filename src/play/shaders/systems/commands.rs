@@ -5,6 +5,7 @@ use crate::mods::ModRegistry;
 use crate::play::camera::hud::HudCamera;
 use crate::play::characters::CharacterActor;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual};
+use crate::play::PauseOverlayCamera;
 use crate::ui::{LoadingOverlayCamera, SoundTrayOverlayCamera};
 
 use super::super::defs::{
@@ -66,11 +67,12 @@ fn collect_target_entities(
             if role == CharShaderRole::Spectator
                 && actor.id != "nene-dark"
                 && actor.id != "nene-pixel"
+                && actor.id != "nene-tankmen"
             {
                 for (d_ent, dprop, dcomp) in dynamic_props {
                     if matches!(
                         dprop.id.as_str(),
-                        "abot_body" | "abot_stereo_bg" | "abot_eye_whites" | "abot_pupil"
+                        "abot_body" | "abot_stereo_bg" | "abot_eye_whites"
                     ) || dprop.id.starts_with("abot_viz_")
                     {
                         out.push((
@@ -179,6 +181,7 @@ pub(super) fn apply_shader_script_command(
         (
             With<Camera2d>,
             Without<HudCamera>,
+            Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
         ),

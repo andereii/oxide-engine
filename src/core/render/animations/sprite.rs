@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
+use crate::utils::alphabet::AlphabetChar;
 use crate::utils::ecs::set_atlas_index;
 
 use super::controller::AnimationController;
@@ -17,7 +18,7 @@ impl Plugin for AnimationsPlugin {
 pub fn step_animations(
     time: Res<Time>,
     play_state: Option<Res<PlayState>>,
-    mut query: Query<(&mut AnimationController, Option<&mut Sprite>)>,
+    mut query: Query<(&mut AnimationController, Option<&mut Sprite>), Without<AlphabetChar>>,
 ) {
     if play_state
         .as_ref()

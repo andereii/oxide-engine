@@ -159,7 +159,11 @@ pub(super) fn tick_play_state(
     reload_cleanup: ReloadCleanupQuery,
     mut loading_screen: ResMut<LoadingScreenState>,
     mut load_pipeline: ResMut<PlayLoadPipeline>,
+    sound_tray: Option<Res<crate::ui::SoundTrayState>>,
 ) {
+    state.master_volume = sound_tray
+        .as_deref()
+        .map_or(1.0, |st| f64::from(st.effective_volume()));
     for ev in focus_events.read() {
         let kind = if ev.focused {
             HookKind::FocusGained

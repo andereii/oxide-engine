@@ -14,6 +14,7 @@ use crate::play::scene::PlayState;
 use crate::play::stage::schema::stage_layer_z;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual};
 use crate::play::types::PlayPhase;
+use crate::play::PauseOverlayCamera;
 use crate::ui::{LoadingOverlayCamera, SoundTrayOverlayCamera};
 
 use super::super::defs::{
@@ -100,6 +101,7 @@ pub fn attach_stage_and_character_shaders(
         (
             With<Camera2d>,
             Without<HudCamera>,
+            Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
         ),
@@ -192,6 +194,7 @@ pub fn attach_stage_and_character_shaders(
         if role == CharShaderRole::Spectator
             && actor.id != "nene-dark"
             && actor.id != "nene-pixel"
+            && actor.id != "nene-tankmen"
         {
             let abot_handle = materials.add(FunkinSpriteMaterial::from_config(cfg, aux_tex));
             for (d_ent, dprop, dcomp) in &dynamic_props {
@@ -240,6 +243,6 @@ pub fn attach_stage_and_character_shaders(
 fn is_abot_shader_synced_prop(id: &str) -> bool {
     matches!(
         id,
-        "abot_body" | "abot_stereo_bg" | "abot_eye_whites" | "abot_pupil"
+        "abot_body" | "abot_stereo_bg" | "abot_eye_whites"
     ) || id.starts_with("abot_viz_")
 }

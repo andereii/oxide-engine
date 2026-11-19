@@ -85,7 +85,7 @@ pub(super) fn handle_play_input(
         return;
     }
 
-    if state.phase == PlayPhase::Loading {
+    if state.phase == PlayPhase::Loading || matches!(state.phase, PlayPhase::Paused(_)) {
         return;
     }
 

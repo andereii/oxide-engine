@@ -224,6 +224,7 @@ pub fn register_gameplay_api(engine: &mut Engine) {
     });
 
     engine.register_fn("get_inst_vol", || with_ctx(|c| c.snapshot.inst_vol));
+    engine.register_fn("sound_volume", || with_ctx(|c| c.snapshot.master_volume));
     engine.register_fn("get_vocals_vol", || {
         with_ctx(|c| (c.snapshot.p_vocal_vol + c.snapshot.o_vocal_vol) * 0.5)
     });

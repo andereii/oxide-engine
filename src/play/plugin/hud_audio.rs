@@ -2,10 +2,14 @@ use bevy::audio::{AudioPlayer, PlaybackMode, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::animations::AnimationController;
 use crate::audio::{PcmSfxAudio, PcmSfxCache};
+use crate::play::stage::DynamicScriptProp;
+use crate::ui::SoundTrayState;
 use crate::utils::constants::{
     HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT,
 };
+use crate::utils::ecs::set_atlas_index;
 
 use super::super::scene::PlayState;
 use super::HudTextVisual;
@@ -145,6 +149,51 @@ pub(super) fn sync_hud_text(
         }
         if *visibility != vis {
             *visibility = vis;
+        }
+    }
+}
+
+pub(super) fn sync_abot_visualizer_audio(
+    sound_tray: Option<Res<SoundTrayState>>,
+    mut last_vol: Local<Option<f32>>,
+    mut viz_props: Query<(
+        &DynamicScriptProp,
+        &mut AnimationController,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+) {
+    let vol = sound_tray
+        .as_deref()
+        .map_or(1.0, SoundTrayState::effective_volume);
+    let prev = last_vol.replace(vol).unwrap_or(vol);
+
+    if vol <= 0.0001 {
+        for (prop, _, _, mut vis) in &mut viz_props {
+            if prop.id.starts_with("abot_viz_") && *vis != Visibility::Hidden {
+                *vis = Visibility::Hidden;
+            }
+        }
+        return;
+    }
+
+    if (vol - prev).abs() > 1e-4 && prev > 0.0001 {
+        let ratio = vol / prev;
+        for (prop, mut anim, mut sprite, mut vis) in &mut viz_props {
+            if !prop.id.starts_with("abot_viz_") || *vis == Visibility::Hidden {
+                continue;
+            }
+            let cur_level = 6_i32.saturating_sub(anim.frame_cursor as i32).clamp(1, 6);
+            let scaled = ((cur_level as f32) * ratio).round() as i32;
+            if scaled <= 0 {
+                *vis = Visibility::Hidden;
+            } else {
+                let target_frame = (6 - scaled.clamp(1, 6)) as usize;
+                anim.play("idle", true, false, target_frame);
+                if let Some(idx) = anim.current_atlas_index() {
+                    set_atlas_index(&mut sprite, idx);
+                }
+            }
         }
     }
 }

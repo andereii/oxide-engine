@@ -95,15 +95,21 @@ fn reset_viz(state) {
 
 fn pulse_viz(state) {
     if !state.active { return; }
+    let vol = clamp(sound_volume(), 0.0, 1.0);
     let i = 1;
     while i <= 7 {
         // Level in 0..=6 matching ABotVis.hx: 0 = hidden (silent), 1..=6 -> frame 5..=0.
-        let level = if i <= 2 {
+        let raw_level = if i <= 2 {
             rand_int(2, 5)
         } else if i <= 4 {
             rand_int(1, 4)
         } else {
             rand_int(0, 3)
+        };
+        let level = if vol <= 0.001 {
+            0
+        } else {
+            (raw_level.to_float() * vol).round().to_int()
         };
         let id = "abot_viz_" + i;
         if level <= 0 {

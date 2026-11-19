@@ -16,30 +16,33 @@ fn new_abot_state(owner_id) {
     }
 }
 
-fn spawn_abot_with_body(target, offset_x, offset_y, body_asset) {
+fn spawn_abot_with_body_z(target, offset_x, offset_y, body_asset, base_z) {
     let tl = char_top_left(target);
-    let gz = char_z(target);
     let ax = tl[0] + offset_x;
     let ay = tl[1] + offset_y;
 
-    spawn_rect_tl("abot_eye_whites", 160.0, 60.0, "#FFFFFF", ax + 40.0, ay + 250.0, gz - 0.10);
-    spawn_sprite_tl("abot_stereo_bg", "gameplay/characters/nene/stereo-bg.png", ax + 150.0, ay + 30.0, gz - 0.08);
+    spawn_rect_tl("abot_eye_whites", 160.0, 60.0, "#FFFFFF", ax + 40.0, ay + 250.0, base_z - 0.10);
+    spawn_sprite_tl("abot_stereo_bg", "gameplay/characters/nene/stereo-bg.png", ax + 150.0, ay + 30.0, base_z - 0.08);
     spawn_atlas(
         "abot_pupil",
         "gameplay/characters/nene/abot-eyes",
         ax + 50.0,
         ay + 238.0,
-        gz - 0.06,
+        base_z - 0.06,
         [
             #{ name: "lookLeft", start: 0, end: 16, fps: 24.0, looped: false },
             #{ name: "lookRight", start: 17, end: 31, fps: 24.0, looped: false }
         ]
     );
     play_anim_frame("abot_pupil", "lookRight", 14);
-    spawn_atlas("abot_body", body_asset, ax, ay, gz - 0.02, []);
+    spawn_atlas("abot_body", body_asset, ax, ay, base_z - 0.02, []);
     play_anim_frame("abot_body", "idle", 1);
 
-    [ax, ay, gz]
+    [ax, ay, base_z]
+}
+
+fn spawn_abot_with_body(target, offset_x, offset_y, body_asset) {
+    spawn_abot_with_body_z(target, offset_x, offset_y, body_asset, char_z(target))
 }
 
 fn spawn_abot(target, offset_x, offset_y) {
