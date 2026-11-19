@@ -27,7 +27,6 @@ fn sync_focus_volume(
     time: Res<Time>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut sinks: Query<&mut AudioSink>,
-    added_sinks: Query<Entity, Added<AudioSink>>,
     mut current_linear: Local<Option<f32>>,
 ) {
     let is_focused = windows.iter().next().map(|w| w.focused).unwrap_or(true);
@@ -47,17 +46,17 @@ fn sync_focus_volume(
     let ratio = if prev > 1e-4 { *cur / prev } else { 1.0 };
     let changed = (*cur - prev).abs() > 1e-5;
 
-    if changed {
+    if changed || *cur < 0.9999 {
         for mut sink in &mut sinks {
-            let scaled = (sink.volume().to_linear() * ratio).max(0.0);
+            let factor = if sink.is_added() {
+                *cur
+            } else if changed {
+                ratio
+            } else {
+                continue;
+            };
+            let scaled = (sink.volume().to_linear() * factor).max(0.0);
             sink.set_volume(Volume::Linear(scaled));
-        }
-    } else if *cur < 0.9999 {
-        for entity in &added_sinks {
-            if let Ok(mut sink) = sinks.get_mut(entity) {
-                let scaled = (sink.volume().to_linear() * *cur).max(0.0);
-                sink.set_volume(Volume::Linear(scaled));
-            }
         }
     }
 }
