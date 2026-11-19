@@ -157,7 +157,6 @@ pub(super) fn setup_play_scene(
         TextFont {
             font: score_font.into(),
             font_size: FontSize::Px(16.0),
-            font_smoothing: bevy::text::FontSmoothing::None,
             ..default()
         },
         TextLayout::justify(Justify::Right),

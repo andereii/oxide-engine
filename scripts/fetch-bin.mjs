@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Downloads the latest `oxide-windows` artifact from GitHub Actions
- * and places `oxide.exe` (and `oxide.pdb` if present) into `./bin/`.
+ * Downloads the latest `oxide-windows` or `oxide-linux` artifact from GitHub
+ * Actions (auto-detected from the current OS) and places the binary into `./bin/`.
  *
  * Usage:
  *   node scripts/fetch-bin.mjs [--branch <name>] [--run-id <id>]
@@ -20,7 +20,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const BIN_DIR = path.join(ROOT, "bin");
 const WORKFLOW_FILE = "build.yml";
-const ARTIFACT_NAME = "oxide-windows";
+
+function getPlatformTarget() {
+  if (process.platform === "win32") {
+    return { artifact: "oxide-windows", binary: "oxide.exe", runHint: ".\\bin\\oxide.exe" };
+  }
+  if (process.platform === "linux") {
+    return { artifact: "oxide-linux", binary: "oxide", runHint: "./bin/oxide" };
+  }
+  throw new Error(`Unsupported OS '${process.platform}'. Available artifacts: oxide-windows, oxide-linux.`);
+}
 
 function parseArgs(argv) {
   const opts = { branch: null, runId: null };
@@ -80,7 +89,7 @@ function isGhAuthenticated() {
   return res.status === 0;
 }
 
-function downloadWithGh(repo, branch, runId) {
+function downloadWithGh(repo, branch, runId, artifactName) {
   let targetRunId = runId;
   if (!targetRunId) {
     const listArgs = [
@@ -108,10 +117,10 @@ function downloadWithGh(repo, branch, runId) {
   }
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
-  console.log(`Downloading artifact '${ARTIFACT_NAME}' to bin/ ...`);
+  console.log(`Downloading artifact '${artifactName}' to bin/ ...`);
   execFileSync(
     "gh",
-    ["run", "download", targetRunId, "--repo", repo, "--name", ARTIFACT_NAME, "--dir", BIN_DIR],
+    ["run", "download", targetRunId, "--repo", repo, "--name", artifactName, "--dir", BIN_DIR],
     { cwd: ROOT, stdio: "inherit" }
   );
 }
@@ -132,7 +141,7 @@ async function ghFetch(url, token) {
   return res;
 }
 
-async function downloadWithToken(repo, branch, runId, token) {
+async function downloadWithToken(repo, branch, runId, token, artifactName) {
   let targetRunId = runId;
   if (!targetRunId) {
     const branchQuery = branch ? `&branch=${encodeURIComponent(branch)}` : "";
@@ -148,17 +157,17 @@ async function downloadWithToken(repo, branch, runId, token) {
 
   const artifactsUrl = `https://api.github.com/repos/${repo}/actions/runs/${targetRunId}/artifacts`;
   const artifactsData = await (await ghFetch(artifactsUrl, token)).json();
-  const artifact = artifactsData.artifacts?.find((a) => a.name === ARTIFACT_NAME);
+  const artifact = artifactsData.artifacts?.find((a) => a.name === artifactName);
   if (!artifact) {
-    throw new Error(`Artifact '${ARTIFACT_NAME}' not found in run #${targetRunId}.`);
+    throw new Error(`Artifact '${artifactName}' not found in run #${targetRunId}.`);
   }
 
-  console.log(`Downloading '${ARTIFACT_NAME}' (${(artifact.size_in_bytes / 1024 / 1024).toFixed(1)} MB)...`);
+  console.log(`Downloading '${artifactName}' (${(artifact.size_in_bytes / 1024 / 1024).toFixed(1)} MB)...`);
   const zipRes = await ghFetch(artifact.archive_download_url, token);
   const buffer = Buffer.from(await zipRes.arrayBuffer());
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
-  const zipPath = path.join(BIN_DIR, `${ARTIFACT_NAME}.zip`);
+  const zipPath = path.join(BIN_DIR, `${artifactName}.zip`);
   fs.writeFileSync(zipPath, buffer);
 
   console.log("Extracting into bin/ ...");
@@ -176,14 +185,15 @@ async function downloadWithToken(repo, branch, runId, token) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  const target = getPlatformTarget();
   const repo = getRepoSlug();
   const branch = opts.branch ?? getCurrentBranch();
 
   const token = loadEnvToken();
   if (token) {
-    await downloadWithToken(repo, branch, opts.runId, token);
+    await downloadWithToken(repo, branch, opts.runId, token, target.artifact);
   } else if (isGhAuthenticated()) {
-    downloadWithGh(repo, branch, opts.runId);
+    downloadWithGh(repo, branch, opts.runId, target.artifact);
   } else {
     console.error("Error: Neither an authenticated 'gh' CLI nor GITHUB_TOKEN/GH_TOKEN was found.");
     console.error("GitHub requires authentication to download Actions artifacts.");
@@ -193,9 +203,12 @@ async function main() {
     process.exit(1);
   }
 
-  const exePath = path.join(BIN_DIR, "oxide.exe");
+  const exePath = path.join(BIN_DIR, target.binary);
   if (fs.existsSync(exePath)) {
-    console.log(`\nReady! Run from project root:\n  .\\bin\\oxide.exe`);
+    if (process.platform !== "win32") {
+      fs.chmodSync(exePath, 0o755);
+    }
+    console.log(`\nReady! Run from project root:\n  ${target.runHint}`);
   } else {
     console.log(`\nExtracted files to ${BIN_DIR}`);
   }
