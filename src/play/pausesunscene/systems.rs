@@ -351,7 +351,7 @@ pub(super) fn sync_pause_subscene(
             ),
             ("PRACTICE MODE".to_string(), 143.0, 32.0, true, false, false, false),
             (
-                format!("Global Offset: {}ms", state.conductor.audio_offset_ms.round() as i32),
+                format!("Global Offset: {}ms", state.conductor.global_offset_ms.round() as i32),
                 SCREEN_HEIGHT - 72.0,
                 16.0,
                 false,
@@ -478,7 +478,7 @@ pub(super) fn handle_pause_input(
         let down_just = controls.just_pressed(&keys, Action::UiDown);
         pause.last_offset_press_s += time.delta_secs();
 
-        let mut offset = state.conductor.audio_offset_ms;
+        let mut offset = state.conductor.global_offset_ms;
         if !pause.fast_offset {
             if pause.last_offset_press_s > OFFSET_FAST_DELAY_S {
                 pause.fast_offset = true;
@@ -492,7 +492,7 @@ pub(super) fn handle_pause_input(
             offset += dir * (f64::from(time.delta_secs()) * OFFSET_FAST_RATE_MS_PER_S);
         }
         offset = offset.clamp(OFFSET_MIN_MS, OFFSET_MAX_MS);
-        state.conductor.audio_offset_ms = offset;
+        state.conductor.global_offset_ms = offset;
 
         for (meta, mut txt, _) in &mut meta_items {
             if meta.is_offset_slot {

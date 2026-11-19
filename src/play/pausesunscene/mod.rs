@@ -3,7 +3,7 @@ mod systems;
 
 use bevy::prelude::*;
 
-pub use components::{PAUSE_CAMERA_ORDER, PAUSE_RENDER_LAYER, PauseOverlayCamera, PauseSubSceneState};
+pub use components::{PauseOverlayCamera, PauseSubSceneState};
 
 pub struct PauseSubScenePlugin;
 

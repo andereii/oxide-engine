@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, PlaybackMode, PlaybackSettings, Volume};
+use bevy::input::ButtonState;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -146,10 +148,26 @@ pub(super) fn setup_soundtray(
 pub(super) fn handle_soundtray_input(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    mut key_events: MessageReader<KeyboardInput>,
     controls: Res<Controls>,
     mut state: ResMut<SoundTrayState>,
     assets: Option<Res<SoundTrayAssets>>,
 ) {
+    let mut char_up = false;
+    let mut char_down = false;
+    for ev in key_events.read() {
+        if ev.state == ButtonState::Pressed
+            && !ev.repeat
+            && let Key::Character(ref ch) = ev.logical_key
+        {
+            match ch.as_str() {
+                "+" => char_up = true,
+                "-" => char_down = true,
+                _ => {}
+            }
+        }
+    }
+
     let mut changed = false;
     let mut direction: Option<bool> = None;
 
@@ -157,12 +175,12 @@ pub(super) fn handle_soundtray_input(
         state.toggle_muted();
         state.show_tray();
         changed = true;
-    } else if controls.just_pressed(&keys, Action::VolumeUp) {
+    } else if controls.just_pressed(&keys, Action::VolumeUp) || char_up {
         state.change_volume(VOLUME_STEP);
         state.show_tray();
         changed = true;
         direction = Some(true);
-    } else if controls.just_pressed(&keys, Action::VolumeDown) {
+    } else if controls.just_pressed(&keys, Action::VolumeDown) || char_down {
         state.change_volume(-VOLUME_STEP);
         state.show_tray();
         changed = true;

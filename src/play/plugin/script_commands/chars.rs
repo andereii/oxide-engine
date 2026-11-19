@@ -45,6 +45,9 @@ pub(super) fn handle_char_cmd(
             for (_, mut actor) in scripts.actors.iter_mut() {
                 if actor_matches_target(&actor, target) {
                     let char_actor = &mut *actor;
+                    if *force {
+                        char_actor.bopper.can_play_other_anims = true;
+                    }
                     char_actor
                         .bopper
                         .play_animation(&mut char_actor.controller, anim, *force, *force);

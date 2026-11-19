@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::query::QueryFilter;
 use bevy::prelude::*;
 use oxin_app::resolve_assets_dir;
 
@@ -349,11 +350,11 @@ pub fn spawn_alphabet_text(
     root_cmd.id()
 }
 
-pub fn set_alphabet_text_alpha(
+pub fn set_alphabet_text_alpha<F: QueryFilter>(
     entity: Entity,
     alpha: f32,
     texts: &mut Query<&mut AlphabetText>,
-    chars: &mut Query<&mut Sprite, With<AlphabetChar>>,
+    chars: &mut Query<&mut Sprite, F>,
 ) {
     let alpha = alpha.clamp(0.0, 1.0);
     if let Ok(mut meta) = texts.get_mut(entity) {

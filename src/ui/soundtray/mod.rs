@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::input::Controls;
 
-pub use components::{SOUNDTRAY_CAMERA_ORDER, SOUNDTRAY_RENDER_LAYER, SoundTrayOverlayCamera};
+pub use components::SoundTrayOverlayCamera;
 use components::{BAR_COUNT, TRAY_HIDDEN_Y_FLX, TRAY_HIDE_DELAY_S, TRAY_SHOWN_Y_FLX};
 use persistence::{load_sound_preferences, snap_volume};
 
