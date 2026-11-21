@@ -222,7 +222,9 @@ pub(super) fn tick_play_state(
             &mut loading_screen,
             &mut load_pipeline,
         );
-        return;
+        if state.phase == PlayPhase::Loading {
+            return;
+        }
     }
 
     let is_paused = matches!(

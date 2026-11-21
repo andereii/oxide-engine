@@ -266,6 +266,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.3,
+      "blend": "add",
       "position": [
         -388,
         7
@@ -290,6 +291,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 0.8,
+      "blend": "multiply",
       "position": [
         -388,
         7
@@ -577,6 +579,7 @@
       "animation": null,
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         -350,
         -80
@@ -601,6 +604,7 @@
       "animation": null,
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         -100,
         170
@@ -625,6 +629,7 @@
       "animation": null,
       "visible": true,
       "opacity": 0.5,
+      "blend": "add",
       "position": [
         -100,
         230
@@ -649,6 +654,7 @@
       "animation": null,
       "visible": true,
       "opacity": 0.6,
+      "blend": "add",
       "position": [
         -200,
         660
@@ -673,6 +679,7 @@
       "animation": null,
       "visible": true,
       "opacity": 0.6,
+      "blend": "add",
       "position": [
         -200,
         500
@@ -697,6 +704,7 @@
       "animation": null,
       "visible": true,
       "opacity": 0.8,
+      "blend": "add",
       "position": [
         -200,
         540

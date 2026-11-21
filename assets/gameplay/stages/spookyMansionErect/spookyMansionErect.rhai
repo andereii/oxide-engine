@@ -18,6 +18,7 @@ fn onCreate() {
     this.char_fading = false;
     this.char_fade_elapsed = 0.0;
     reset_lightning(0.0001);
+    set_rain_sprite("bgTrees", 7.2, 0.4, "#6680CC");
 }
 
 fn lightning_off() {

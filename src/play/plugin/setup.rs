@@ -5,13 +5,17 @@ use bevy::prelude::*;
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost, ScriptValue};
 use crate::ui::LoadingScreenState;
-use crate::utils::constants::SCREEN_HEIGHT;
+use crate::utils::constants::{
+    FONT_VCR_OSD_MONO, HEALTH_BAR_WIDTH, SCORE_TEXT_FONT_SIZE, SCORE_TEXT_X_OFFSET,
+    SCORE_TEXT_Y_OFFSET, SCORE_TEXT_Z, SCREEN_HEIGHT,
+};
 
 use super::super::camera::hud::{hud_render_layer, spawn_hud_camera};
 use super::super::characters::{
     CharacterRole, CharactersResource, append_character_sidecar_scripts,
 };
 use super::super::events::append_notekind_sidecar_scripts;
+use super::super::hud::subtitles::spawn_subtitle_visuals;
 use super::super::playlist::PlayStatePlaylist;
 use super::super::preload::PlayPreloadTracker;
 use super::super::scene::PlayState;
@@ -149,14 +153,14 @@ pub(super) fn setup_play_scene(
     );
 
     let score_font_path = mods
-        .resolve_asset_server_path("ui/fonts/VCR OSD Mono.ttf")
-        .unwrap_or_else(|| "ui/fonts/VCR OSD Mono.ttf".to_string());
+        .resolve_asset_server_path(FONT_VCR_OSD_MONO)
+        .unwrap_or_else(|| FONT_VCR_OSD_MONO.to_string());
     let score_font: Handle<Font> = asset_server.load(score_font_path);
     commands.spawn((
         Text2d::new(""),
         TextFont {
-            font: score_font.into(),
-            font_size: FontSize::Px(20.0),
+            font: score_font.clone().into(),
+            font_size: FontSize::Px(SCORE_TEXT_FONT_SIZE),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -167,13 +171,15 @@ pub(super) fn setup_play_scene(
         },
         bevy::sprite::Anchor::TOP_LEFT,
         Transform::from_xyz(
-            (601.0_f32 * 0.5 - 190.0).round(),
-            (-SCREEN_HEIGHT * 0.4 - 30.0).round(),
-            10.8,
+            (HEALTH_BAR_WIDTH * 0.5 - SCORE_TEXT_X_OFFSET).round(),
+            (-SCREEN_HEIGHT * 0.4 - SCORE_TEXT_Y_OFFSET).round(),
+            SCORE_TEXT_Z,
         ),
         hud_render_layer(),
         HudTextVisual,
     ));
+
+    spawn_subtitle_visuals(&mut commands, score_font);
 }
 
 pub(crate) fn load_and_init_scripts(

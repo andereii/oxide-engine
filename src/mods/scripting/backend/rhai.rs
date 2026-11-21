@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rhai::{AST, CallFnOptions, Dynamic, Engine, Scope};
+use rhai::{AST, CallFnOptions, Dynamic, Engine, EvalAltResult, ParseError, Scope};
 
 use crate::mods::{ModRegistry, ScriptScope};
 use crate::scripting::api::ScriptContext;
@@ -21,8 +21,10 @@ use super::api::shaders::register_shader_api;
 use super::api::stage::{register_character_api, register_props_api};
 use super::api::text_tweens::register_text_tweens_timers_and_store_api;
 use super::context::{RhaiEvent, register_event_type, with_tls_context};
+use crate::scripting::diagnostics::split_rhai_position_suffix;
+
 use super::rhai_resolver::{SharedVfsModuleResolver, VfsModuleResolver, vfs_rel_for_script};
-use super::traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
+use super::traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptLoc, ScriptSource};
 
 fn build_configured_engine(resolver: Option<Arc<VfsModuleResolver>>) -> Arc<Engine> {
     let mut engine = Engine::new();
@@ -102,19 +104,21 @@ impl ScriptBackend for RhaiBackend {
         if let Some(res) = &self.resolver {
             res.clear_caches();
         }
+        if let Some(reg) = &self.registry {
+            reg.clear_script_io_memo();
+        }
     }
 
     fn compile(&self, source: ScriptSource) -> Result<Box<dyn ScriptInstance>, ScriptError> {
+        let vfs_rel =
+            vfs_rel_for_script(self.registry.as_ref(), source.path.as_deref(), &source.id);
+        let file = display_script_file(&source.mod_id, &vfs_rel, source.path.is_some());
         let mut ast = self
             .engine
             .compile(&source.code)
-            .map_err(|err| ScriptError::Compile {
-                script_id: source.id.clone(),
-                message: err.to_string(),
-            })?;
-        let source_label =
-            vfs_rel_for_script(self.registry.as_ref(), source.path.as_deref(), &source.id);
-        ast.set_source(source_label);
+            .map_err(|err| compile_failure(&source, file.clone(), err))?;
+        // `./` imports resolve against this path. It must stay the VFS path, without the mod id prefix.
+        ast.set_source(vfs_rel.as_str());
 
         let mut fn_arities = HashMap::new();
         for fn_meta in ast.iter_functions() {
@@ -128,12 +132,50 @@ impl ScriptBackend for RhaiBackend {
             scope_filter: source.scope,
             priority: source.priority,
             path: source.path,
+            file_label: file,
             ast,
             rhai_scope: Scope::new(),
             script_state: Dynamic::from_map(rhai::Map::new()),
             fn_arities,
             initialized: false,
         }))
+    }
+}
+
+fn display_script_file(mod_id: &str, rel: &str, had_path: bool) -> String {
+    let rooted = rel.starts_with('/') || rel.contains(':');
+    if had_path && !mod_id.is_empty() && !rooted {
+        format!("{mod_id}/{rel}")
+    } else {
+        rel.to_string()
+    }
+}
+
+fn compile_failure(source: &ScriptSource, file: String, err: ParseError) -> ScriptError {
+    let pos = err.position();
+    ScriptError::Compile {
+        script_id: source.id.clone(),
+        loc: ScriptLoc {
+            file,
+            line: pos.line().map(|n| n as u32),
+            column: pos.position().map(|n| n as u32),
+        },
+        message: err.err_type().to_string(),
+    }
+}
+
+fn runtime_failure(script_id: &str, file: &str, hook: &str, err: &EvalAltResult) -> ScriptError {
+    let (message, parsed_line, parsed_column) = split_rhai_position_suffix(&err.to_string());
+    let pos = err.position();
+    ScriptError::Runtime {
+        script_id: script_id.to_string(),
+        loc: ScriptLoc {
+            file: file.to_string(),
+            line: pos.line().map(|n| n as u32).or(parsed_line),
+            column: pos.position().map(|n| n as u32).or(parsed_column),
+        },
+        hook: hook.to_string(),
+        message,
     }
 }
 
@@ -144,6 +186,7 @@ pub struct RhaiScriptInstance {
     scope_filter: ScriptScope,
     priority: i32,
     path: Option<PathBuf>,
+    file_label: String,
     ast: AST,
     rhai_scope: Scope<'static>,
     script_state: Dynamic,
@@ -169,11 +212,7 @@ impl RhaiScriptInstance {
             engine.run_ast_with_scope(rhai_scope, ast)
         });
         *ctx = returned_ctx;
-        res.map_err(|err| ScriptError::Runtime {
-            script_id: self.id.clone(),
-            hook: "top_level".to_string(),
-            message: err.to_string(),
-        })
+        res.map_err(|err| runtime_failure(&self.id, &self.file_label, "top-level", &err))
     }
 
     fn resolve_hook_target(&self, hook: &HookKind) -> Option<(String, usize)> {
@@ -258,11 +297,7 @@ impl ScriptInstance for RhaiScriptInstance {
 
         match call_res {
             Ok(val) => Ok(ScriptValue::from_rhai(&val)),
-            Err(err) => Err(ScriptError::Runtime {
-                script_id: self.id.clone(),
-                hook: fn_name,
-                message: err.to_string(),
-            }),
+            Err(err) => Err(runtime_failure(&self.id, &self.file_label, &fn_name, &err)),
         }
     }
 
@@ -311,11 +346,7 @@ impl ScriptInstance for RhaiScriptInstance {
 
         match call_res {
             Ok(val) => Ok(ScriptValue::from_rhai(&val)),
-            Err(err) => Err(ScriptError::Runtime {
-                script_id: self.id.clone(),
-                hook: fn_name.to_string(),
-                message: err.to_string(),
-            }),
+            Err(err) => Err(runtime_failure(&self.id, &self.file_label, fn_name, &err)),
         }
     }
 }

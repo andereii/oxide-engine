@@ -7,7 +7,8 @@ use crate::audio::{PcmSfxAudio, PcmSfxCache};
 use crate::play::stage::DynamicScriptProp;
 use crate::ui::SoundTrayState;
 use crate::utils::constants::{
-    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, SCREEN_HEIGHT,
+    HEALTH_BAR_WIDTH, HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL,
+    SCORE_TEXT_X_OFFSET, SCORE_TEXT_Y_OFFSET, SCORE_TEXT_Z, SCREEN_HEIGHT,
 };
 use crate::utils::ecs::set_atlas_index;
 
@@ -94,7 +95,7 @@ pub(super) fn spawn_tagged_sound(
 #[derive(Default)]
 pub(super) struct HudTextSyncCache {
     score_text: String,
-    hud_visible: bool,
+    hud_alpha_bits: u32,
     botplay_layout: bool,
     downscroll: bool,
     initialized: bool,
@@ -106,22 +107,35 @@ fn compute_hud_text_layout(state: &PlayState) -> (String, Anchor, Vec3) {
     } else {
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
     };
-    let bx = (601.0_f32 * 0.5 - 190.0).round();
-    let by = (SCREEN_HEIGHT * 0.5 - (bg_y_flx + 30.0)).round();
+    let bx = (HEALTH_BAR_WIDTH * 0.5 - SCORE_TEXT_X_OFFSET).round();
+    let by = (SCREEN_HEIGHT * 0.5 - (bg_y_flx + SCORE_TEXT_Y_OFFSET)).round();
     let text = state.score_text.clone();
-    (text, Anchor::TOP_LEFT, Vec3::new(bx, by, 10.8))
+    (text, Anchor::TOP_LEFT, Vec3::new(bx, by, SCORE_TEXT_Z))
 }
 
+#[allow(clippy::type_complexity)]
 pub(super) fn sync_hud_text(
     state: Res<PlayState>,
     mut cache: Local<HudTextSyncCache>,
-    mut hud_text: Query<(&mut Text2d, &mut Anchor, &mut Transform, &mut Visibility), With<HudTextVisual>>,
+    mut hud_text: Query<
+        (
+            &mut Text2d,
+            &mut TextColor,
+            Option<&mut bevy::sprite::Text2dShadow>,
+            &mut Anchor,
+            &mut Transform,
+            &mut Visibility,
+        ),
+        With<HudTextVisual>,
+    >,
 ) {
     let botplay_layout = state.is_bot_play_mode && state.custom_score_text.is_none();
     let downscroll = state.player_strumline.is_downscroll;
+    let hud_alpha = state.hud_alpha.clamp(0.0, 1.0);
+    let hud_alpha_bits = hud_alpha.to_bits();
     if cache.initialized
         && cache.score_text == state.score_text
-        && cache.hud_visible == state.hud_visible
+        && cache.hud_alpha_bits == hud_alpha_bits
         && cache.botplay_layout == botplay_layout
         && cache.downscroll == downscroll
     {
@@ -129,18 +143,24 @@ pub(super) fn sync_hud_text(
     }
     cache.initialized = true;
     cache.score_text.clone_from(&state.score_text);
-    cache.hud_visible = state.hud_visible;
+    cache.hud_alpha_bits = hud_alpha_bits;
     cache.botplay_layout = botplay_layout;
     cache.downscroll = downscroll;
 
     let (display_text, target_anchor, target_pos) = compute_hud_text_layout(&state);
-    let vis = if state.hud_visible {
+    let vis = if hud_alpha > 0.001 {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
-    for (mut text, mut anchor, mut transform, mut visibility) in &mut hud_text {
+    for (mut text, mut text_color, shadow_opt, mut anchor, mut transform, mut visibility) in
+        &mut hud_text
+    {
         **text = display_text.clone();
+        text_color.0 = text_color.0.with_alpha(hud_alpha);
+        if let Some(mut shadow) = shadow_opt {
+            shadow.color = shadow.color.with_alpha(hud_alpha);
+        }
         if *anchor != target_anchor {
             *anchor = target_anchor;
         }

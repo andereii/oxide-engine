@@ -85,8 +85,9 @@ pub(super) fn handle_hud_audio_cmd(
 ) {
     match cmd {
         ScriptCommand::SetBarColors { opp, ply } => {
-            for (fill, mut sprite) in &mut hud_texts.bar_fills {
+            for (mut fill, mut sprite) in &mut hud_texts.bar_fills {
                 let c = if fill.is_player { ply } else { opp };
+                fill.base_alpha = c[3].clamp(0.0, 1.0);
                 sprite.color = Color::srgba(c[0], c[1], c[2], c[3]);
             }
         }
@@ -127,6 +128,24 @@ pub(super) fn handle_hud_audio_cmd(
                     icon.bop_angle_deg = *angle_deg;
                 }
             }
+        }
+        ScriptCommand::PreloadSound { path } => {
+            let resolved = scripts
+                .mods
+                .resolve_asset_server_path(path)
+                .unwrap_or_else(|| path.clone());
+            let handle: Handle<AudioSource> = scripts.asset_server.load(resolved);
+            if let Some(tr) = scripts.preload.as_deref_mut() {
+                tr.register_handle(handle.clone());
+            }
+            if !audio_res.sfx.preloaded_sounds.contains(&handle) {
+                audio_res.sfx.preloaded_sounds.push(handle.clone());
+            }
+            let _ = audio_res.sfx_cache.get_or_insert(
+                &handle,
+                &audio_res.audio_sources,
+                &mut audio_res.pcm_sfx,
+            );
         }
         ScriptCommand::PlaySfx { path, volume } => {
             let resolved = resolve_audio_asset_path(&scripts.mods, path);

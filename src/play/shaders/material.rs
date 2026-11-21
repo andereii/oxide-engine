@@ -9,8 +9,8 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2dKey, Material2dPipeline, MaterialExtension2d};
 
 use super::defs::{
-    FunkinBlendMode, SHADER_FLAG_HAS_AUX_TEX, SHADER_FLAG_IS_CHAR,
-    SHADER_FLAG_PREMULTIPLIED_INPUT, SHADER_FLAG_USE_ALT_MASK, SpriteShaderConfig,
+    FunkinBlendMode, SHADER_FLAG_HAS_AUX_TEX, SHADER_FLAG_PREMULTIPLIED_INPUT,
+    SHADER_FLAG_USE_ALT_MASK, SpriteShaderConfig,
 };
 
 #[derive(Clone, Copy, ShaderType, Debug, Reflect, PartialEq)]
@@ -26,9 +26,6 @@ pub struct FunkinSpriteUniform {
     pub sat_col2: Vec4,
     pub drop_color_and_mask: Vec4,
     pub drop_angle_and_rain: Vec4,
-    pub rain_b_and_ss_hsbc: Vec4,
-    pub ss_params: Vec4,
-    pub ss_light: Vec4,
     pub custom_0: Vec4,
     pub custom_1: Vec4,
     pub custom_2: Vec4,
@@ -40,7 +37,7 @@ impl Default for FunkinSpriteUniform {
         Self {
             flags: UVec4::ZERO,
             time_and_extra: Vec4::ZERO,
-            wiggle_and_rain: Vec4::ZERO,
+            wiggle_and_rain: Vec4::new(0.0, 0.0, 0.0, 0.8),
             hue_col0: Vec4::new(1.0, 0.0, 0.0, 0.0),
             hue_col1: Vec4::new(0.0, 1.0, 0.0, 1.0),
             hue_col2: Vec4::new(0.0, 0.0, 1.0, 0.0),
@@ -49,9 +46,6 @@ impl Default for FunkinSpriteUniform {
             sat_col2: Vec4::new(0.0, 0.0, 1.0, 0.1),
             drop_color_and_mask: Vec4::new(1.0, 1.0, 1.0, 0.5),
             drop_angle_and_rain: Vec4::new(1.0, 0.0, 0.4, 0.5),
-            rain_b_and_ss_hsbc: Vec4::new(0.8, 0.0, 0.0, 0.0),
-            ss_params: Vec4::ZERO,
-            ss_light: Vec4::ONE,
             custom_0: Vec4::ZERO,
             custom_1: Vec4::ZERO,
             custom_2: Vec4::ZERO,
@@ -70,9 +64,6 @@ impl FunkinSpriteUniform {
         let mut extra_flags = cfg.wiggle.effect_type as u32;
         if cfg.drop_shadow.use_alt_mask {
             extra_flags |= SHADER_FLAG_USE_ALT_MASK;
-        }
-        if cfg.sserafim.is_char {
-            extra_flags |= SHADER_FLAG_IS_CHAR;
         }
         if has_aux_tex {
             extra_flags |= SHADER_FLAG_HAS_AUX_TEX;
@@ -98,7 +89,7 @@ impl FunkinSpriteUniform {
                 cfg.wiggle.amplitude,
                 cfg.rain_sprite.scale,
                 cfg.rain_sprite.intensity,
-                0.0,
+                cfg.rain_sprite.rain_color[2],
             ),
             hue_col0: Vec4::new(hm[0][0], hm[0][1], hm[0][2], cfg.adjust.brightness_norm()),
             hue_col1: Vec4::new(hm[1][0], hm[1][1], hm[1][2], cfg.adjust.contrast_norm()),
@@ -117,24 +108,6 @@ impl FunkinSpriteUniform {
                 ang_sin,
                 cfg.rain_sprite.rain_color[0],
                 cfg.rain_sprite.rain_color[1],
-            ),
-            rain_b_and_ss_hsbc: Vec4::new(
-                cfg.rain_sprite.rain_color[2],
-                cfg.sserafim.adjust.hue,
-                cfg.sserafim.adjust.saturation,
-                cfg.sserafim.adjust.brightness,
-            ),
-            ss_params: Vec4::new(
-                cfg.sserafim.adjust.contrast,
-                cfg.sserafim.darken_amount,
-                cfg.sserafim.pulse_strength,
-                cfg.sserafim.truck_strength,
-            ),
-            ss_light: Vec4::new(
-                cfg.sserafim.light_color[0],
-                cfg.sserafim.light_color[1],
-                cfg.sserafim.light_color[2],
-                0.0,
             ),
             custom_0: Vec4::from_array(cfg.custom_params[0]),
             custom_1: Vec4::from_array(cfg.custom_params[1]),

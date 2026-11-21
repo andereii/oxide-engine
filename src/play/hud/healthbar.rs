@@ -6,9 +6,9 @@ use crate::play::characters::loader::CharactersResource;
 use crate::play::notes::NoteStyle;
 use crate::play::scene::PlayState;
 use crate::utils::constants::{
-    COLOR_HEALTH_BAR_GREEN, COLOR_HEALTH_BAR_RED, HEALTH_BAR_BORDER_PX,
-    HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, HEALTH_MAX, SCREEN_HEIGHT,
-    SCREEN_WIDTH,
+    COLOR_HEALTH_BAR_GREEN, COLOR_HEALTH_BAR_RED, HEALTH_BAR_BORDER_PX, HEALTH_BAR_HEIGHT,
+    HEALTH_BAR_WIDTH, HEALTH_BAR_Y_RATIO_DOWNSCROLL, HEALTH_BAR_Y_RATIO_UPSCROLL, HEALTH_MAX,
+    SCREEN_HEIGHT, SCREEN_WIDTH,
 };
 use crate::utils::ecs::{set_sprite_custom_size, set_transform_pos_scale};
 
@@ -20,11 +20,13 @@ pub struct HealthBarBgVisual {
     pub bg_image: Handle<Image>,
     pub size: [f32; 2],
     pub scale: f32,
+    pub alpha: f32,
 }
 
 #[derive(Component)]
 pub struct HealthBarFillVisual {
     pub is_player: bool,
+    pub base_alpha: f32,
 }
 
 #[derive(Default)]
@@ -42,11 +44,12 @@ pub fn spawn_health_bar(
 ) {
     let bg_image: Handle<Image> = asset_server.load(style.health_bar_asset_in(mods));
     let bg_scale = style.health_bar.scale.max(0.01);
-    let default_w = 601.0_f32 * bg_scale;
-    let default_h = 19.0_f32 * bg_scale;
+    let default_w = HEALTH_BAR_WIDTH * bg_scale;
+    let default_h = HEALTH_BAR_HEIGHT * bg_scale;
 
+    let bg_alpha = style.health_bar.alpha.clamp(0.0, 1.0);
     let mut bg_sprite = Sprite::from_image(bg_image.clone());
-    bg_sprite.color = Color::srgba(1.0, 1.0, 1.0, style.health_bar.alpha.clamp(0.0, 1.0));
+    bg_sprite.color = Color::srgba(1.0, 1.0, 1.0, bg_alpha);
     commands.spawn((
         bg_sprite,
         Transform::from_xyz(0.0, 0.0, 10.0).with_scale(Vec3::splat(bg_scale)),
@@ -55,6 +58,7 @@ pub fn spawn_health_bar(
             bg_image,
             size: [default_w, default_h],
             scale: bg_scale,
+            alpha: bg_alpha,
         },
     ));
 
@@ -78,7 +82,10 @@ pub fn spawn_health_bar(
         opp_sprite,
         Transform::from_xyz(-inner_w * 0.25, 0.0, 10.1),
         hud_render_layer(),
-        HealthBarFillVisual { is_player: false },
+        HealthBarFillVisual {
+            is_player: false,
+            base_alpha: 1.0,
+        },
     ));
 
     let mut ply_sprite = Sprite::from_color(ply_color, Vec2::new(inner_w * 0.5, inner_h));
@@ -87,7 +94,10 @@ pub fn spawn_health_bar(
         ply_sprite,
         Transform::from_xyz(inner_w * 0.25, 0.0, 10.15),
         hud_render_layer(),
-        HealthBarFillVisual { is_player: true },
+        HealthBarFillVisual {
+            is_player: true,
+            base_alpha: 1.0,
+        },
     ));
 
     spawn_health_icons(mods, commands, chars, asset_server, layouts);
@@ -100,7 +110,7 @@ pub fn sync_health_bar(
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut step_tracker: Local<HealthBarStepTracker>,
-    mut bg_query: Query<(&mut HealthBarBgVisual, &mut Transform, &mut Visibility)>,
+    mut bg_query: Query<(&mut HealthBarBgVisual, &mut Sprite, &mut Transform, &mut Visibility)>,
     mut fill_query: Query<
         (&HealthBarFillVisual, &mut Sprite, &mut Transform, &mut Visibility),
         Without<HealthBarBgVisual>,
@@ -120,7 +130,8 @@ pub fn sync_health_bar(
         return;
     }
 
-    let hud_vis = if state.hud_visible {
+    let hud_alpha = state.hud_alpha.clamp(0.0, 1.0);
+    let hud_vis = if hud_alpha > 0.001 {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -138,11 +149,12 @@ pub fn sync_health_bar(
         SCREEN_HEIGHT * HEALTH_BAR_Y_RATIO_UPSCROLL
     };
 
-    let mut bg_size = [601.0_f32, 19.0_f32];
-    for (mut bg, mut tf, mut vis) in &mut bg_query {
+    let mut bg_size = [HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT];
+    for (mut bg, mut sprite, mut tf, mut vis) in &mut bg_query {
         if *vis != hud_vis {
             *vis = hud_vis;
         }
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, bg.alpha * hud_alpha);
         if let Some(img) = images.get(&bg.bg_image) {
             bg.size = [img.width() as f32 * bg.scale, img.height() as f32 * bg.scale];
         }
@@ -165,6 +177,7 @@ pub fn sync_health_bar(
         if *vis != hud_vis {
             *vis = hud_vis;
         }
+        sprite.color = sprite.color.with_alpha(fill.base_alpha * hud_alpha);
         let (w, bx) = if fill.is_player {
             (ply_w, inner_w * 0.5 - ply_w * 0.5)
         } else {
@@ -180,6 +193,7 @@ pub fn sync_health_bar(
         if *vis != hud_vis {
             *vis = hud_vis;
         }
+        sprite.color = sprite.color.with_alpha(icon.base_alpha * hud_alpha);
         if step_hit {
             icon.on_step_hit(cur_step, step_len_ms);
         }

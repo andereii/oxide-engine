@@ -1,7 +1,8 @@
 use rhai::{Dynamic, Engine, EvalAltResult};
 
+use crate::play::hud::subtitles::parse_srt;
 use crate::scripting::api::{
-    NewTimerRequest, ScriptCommand, TweenProp, TweenTarget, parse_hex_rgba,
+    LogLevel, NewTimerRequest, ScriptCommand, TweenProp, TweenTarget, parse_hex_rgba,
 };
 use crate::scripting::backend::context::{dyn_to_f64, dyn_to_i64, runtime_err, with_ctx};
 use crate::scripting::value::ScriptValue;
@@ -101,6 +102,30 @@ pub fn register_text_tweens_timers_and_store_api(engine: &mut Engine) {
             });
         })
     });
+
+    // Subtitles (SRT tracks timed from the moment they are assigned, like V-Slice's
+    // `Subtitles.assignSubtitles(sound)` behaviour adapted to the script sandbox).
+    for name in ["subtitle_srt", "subtitles_srt"] {
+        engine.register_fn(name, |path: &str| {
+            with_ctx(|c| {
+                match c.registry.read_to_string(path) {
+                    Ok(raw) => c.commands.push(ScriptCommand::LoadSubtitles {
+                        cues: parse_srt(&raw),
+                    }),
+                    Err(err) => c.commands.push(ScriptCommand::Log {
+                        level: LogLevel::Warn,
+                        mod_id: c.current_mod_id.clone(),
+                        message: format!("subtitle_srt({path}): {err}"),
+                    }),
+                }
+            })
+        });
+    }
+    for name in ["subtitle_clear", "subtitles_clear"] {
+        engine.register_fn(name, || {
+            with_ctx(|c| c.commands.push(ScriptCommand::ClearSubtitles))
+        });
+    }
 
     // Unified Tweens (camera/char/prop/lane/sound/text + optional onComplete callback)
     engine.register_fn("tween", |target: &str, prop: &str, to: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {

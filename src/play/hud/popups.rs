@@ -201,6 +201,7 @@ pub fn sync_popups(
         return;
     }
 
+    let hud_alpha = state.hud_alpha.clamp(0.0, 1.0);
     let dt = time.delta_secs();
     let mut active_any = false;
     for (mut vis, mut sprite, mut transform, mut visibility) in &mut pool {
@@ -211,15 +212,23 @@ pub fn sync_popups(
         transform.translation.x += vis.vx * dt;
         transform.translation.y += vis.vy * dt;
         vis.age_s += dt;
-        if vis.age_s >= vis.delay_s {
+        let alpha = if vis.age_s >= vis.delay_s {
             let raw_t = ((vis.age_s - vis.delay_s) / vis.fade_s).clamp(0.0, 1.0);
             let t = if vis.is_pixel { (raw_t * 2.0).floor() * 0.5 } else { raw_t };
-            set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, vis.base_alpha * (1.0 - t)));
             if raw_t >= 1.0 {
                 vis.active = false;
                 set_visibility(&mut visibility, Visibility::Hidden);
                 continue;
             }
+            vis.base_alpha * (1.0 - t)
+        } else {
+            vis.base_alpha
+        };
+        if hud_alpha <= 0.001 {
+            set_visibility(&mut visibility, Visibility::Hidden);
+        } else {
+            set_visibility(&mut visibility, Visibility::Visible);
+            set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, alpha * hud_alpha));
         }
         active_any = true;
     }

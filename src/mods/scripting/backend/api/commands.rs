@@ -1,4 +1,5 @@
 use crate::animations::BaseAnimationData;
+use crate::play::hud::subtitles::SubtitleCue;
 
 use super::tweens::TweenProp;
 
@@ -27,6 +28,11 @@ pub enum ScriptCommand {
     SetStatus(String),
     SetScoreText(Option<String>),
     SetHudVisible(bool),
+    FadeHud {
+        alpha: f32,
+        duration_s: f64,
+        ease: String,
+    },
     TweenCameraZoom {
         target: f64,
         duration_s: f64,
@@ -259,6 +265,10 @@ pub enum ScriptCommand {
         color: Option<[f32; 4]>,
         align: Option<String>,
     },
+    LoadSubtitles {
+        cues: Vec<SubtitleCue>,
+    },
+    ClearSubtitles,
     KillNote {
         id: usize,
     },
@@ -396,6 +406,9 @@ pub enum ScriptCommand {
         path: String,
         volume: f32,
     },
+    PreloadSound {
+        path: String,
+    },
     SetShaderAdjustColor {
         target: String,
         hue: f32,
@@ -427,9 +440,24 @@ pub enum ScriptCommand {
     },
     SetCameraRain {
         scale: f32,
-        intensity: f32,
+        start_intensity: f32,
+        end_intensity: f32,
         color: [f32; 3],
         time_scale_decay: bool,
+    },
+    SetShaderOverlayBlend {
+        target: String,
+        aux_path: String,
+    },
+    SetShaderRainSprite {
+        target: String,
+        scale: f32,
+        intensity: f32,
+        color: [f32; 3],
+    },
+    SetShaderBuilding {
+        target: String,
+        alpha_shit: f32,
     },
     ClearShader {
         target: String,

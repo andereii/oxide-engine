@@ -108,6 +108,7 @@ struct StagePropRaw {
     scroll_factor: [f32; 2],
     angle: f32,
     color: String,
+    blend: Option<String>,
     #[serde(rename = "isPixel")]
     is_pixel: bool,
     #[serde(rename = "danceEvery")]
@@ -135,6 +136,7 @@ impl Default for StagePropRaw {
             scroll_factor: [1.0, 1.0],
             angle: 0.0,
             color: "#FFFFFF".to_string(),
+            blend: None,
             is_pixel: false,
             dance_every: 0.0,
             starting_animation: None,
@@ -172,6 +174,7 @@ impl StagePropRaw {
             scroll_factor: self.scroll_factor,
             angle: self.angle,
             color: self.color,
+            blend: self.blend,
             is_pixel: self.is_pixel,
             dance_every: self.dance_every,
             starting_animation: self.starting_animation,

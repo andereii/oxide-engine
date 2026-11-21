@@ -222,6 +222,47 @@ pub fn register_gameplay_api(engine: &mut Engine) {
     engine.register_fn("hud_visible", |visible: bool| {
         with_ctx(|c| c.commands.push(ScriptCommand::SetHudVisible(visible)))
     });
+    engine.register_fn(
+        "hud_visible",
+        |visible: bool, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let duration_s = dyn_to_f64(&secs)?.max(0.0);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::FadeHud {
+                    alpha: if visible { 1.0 } else { 0.0 },
+                    duration_s,
+                    ease: "quadOut".to_string(),
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "hud_fade",
+        |alpha: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
+            let duration_s = dyn_to_f64(&secs)?.max(0.0);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::FadeHud {
+                    alpha,
+                    duration_s,
+                    ease: "linear".to_string(),
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "hud_fade",
+        |alpha: Dynamic, secs: Dynamic, ease: &str| -> Result<(), Box<EvalAltResult>> {
+            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
+            let duration_s = dyn_to_f64(&secs)?.max(0.0);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::FadeHud {
+                    alpha,
+                    duration_s,
+                    ease: ease.to_string(),
+                });
+            })
+        },
+    );
 
     engine.register_fn("get_inst_vol", || with_ctx(|c| c.snapshot.inst_vol));
     engine.register_fn("sound_volume", || with_ctx(|c| c.snapshot.master_volume));
@@ -314,6 +355,15 @@ pub fn register_gameplay_api(engine: &mut Engine) {
             });
         })
     });
+    for name in ["preload_snd", "preload_sfx"] {
+        engine.register_fn(name, |path: &str| {
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::PreloadSound {
+                    path: path.to_string(),
+                });
+            })
+        });
+    }
 
     // Tagged audio channels
     register_tagged_sound_fns(engine, "play_snd");

@@ -18,7 +18,7 @@ pub(super) fn convert_screen_image_to_alpha(img: &mut Image) {
     }
 }
 
-fn screen_pixel_to_alpha(pixel: &mut [u8], is_srgb: bool) {
+pub(super) fn screen_pixel_to_alpha(pixel: &mut [u8], is_srgb: bool) {
     if pixel[3] == 0 {
         return;
     }

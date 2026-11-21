@@ -5,6 +5,7 @@ use crate::input::{
 };
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{HookKind, ScriptCommand, ScriptEvent, ScriptHost};
+use crate::ui::script_errors::ScriptErrorOverlay;
 
 use super::super::characters::CharactersResource;
 use super::super::playlist::PlayStatePlaylist;
@@ -29,7 +30,15 @@ pub(super) fn handle_play_input(
     stage_res: Option<Res<StageResource>>,
     chars_res: Option<Res<CharactersResource>>,
     dyn_props: Query<Entity, With<DynamicScriptProp>>,
+    mut overlay: ResMut<ScriptErrorOverlay>,
 ) {
+    // Shift+S opens the script log. S is also Note Down, so that chord must not hit a lane.
+    let swallow_note_s = overlay.swallow_note_s;
+    if swallow_note_s && !keys.pressed(KeyCode::KeyS) {
+        overlay.swallow_note_s = false;
+    }
+    let swallow_backspace = overlay.swallow_backspace;
+
     if controls.just_pressed(&keys, Action::ReloadMods) {
         let destroy_cmds = state.run_script_hooks(
             vec![(HookKind::Destroy, ScriptEvent::new(HookKind::Destroy))],
@@ -46,7 +55,7 @@ pub(super) fn handle_play_input(
         }
         state.apply_state_script_command(&ScriptCommand::ResetLanes, &mut playlist);
         state.custom_score_text = None;
-        state.hud_visible = true;
+        state.set_hud_visible(true, true);
         if let Err(err) = mods.reload() {
             warn!("Mod reload warning: {err}");
         }
@@ -109,6 +118,37 @@ pub(super) fn handle_play_input(
     state.script_ctrls_down = c_down;
     state.script_ctrls_hit = c_hit;
     state.script_ctrls_up = c_up;
+    if swallow_note_s {
+        retain_key(&mut state.script_keys_down, "KeyS", "S");
+        retain_key(&mut state.script_keys_hit, "KeyS", "S");
+        retain_key(&mut state.script_keys_up, "KeyS", "S");
+        if !keys.pressed(KeyCode::ArrowDown) {
+            state.script_ctrls_down.retain(|name| !is_down_control(name));
+        }
+        if !keys.just_pressed(KeyCode::ArrowDown) {
+            state.script_ctrls_hit.retain(|name| !is_down_control(name));
+        }
+        if !keys.just_released(KeyCode::ArrowDown) {
+            state.script_ctrls_up.retain(|name| !is_down_control(name));
+        }
+    }
+    if swallow_backspace {
+        state.script_keys_down.retain(|name| name != "Backspace");
+        state.script_keys_hit.retain(|name| name != "Backspace");
+        state.script_keys_up.retain(|name| name != "Backspace");
+        let other_down = keys.pressed(KeyCode::KeyX) || keys.pressed(KeyCode::Escape);
+        let other_hit = keys.just_pressed(KeyCode::KeyX) || keys.just_pressed(KeyCode::Escape);
+        let other_up = keys.just_released(KeyCode::KeyX) || keys.just_released(KeyCode::Escape);
+        if !other_down {
+            state.script_ctrls_down.retain(|name| name != "BACK");
+        }
+        if !other_hit {
+            state.script_ctrls_hit.retain(|name| name != "BACK");
+        }
+        if !other_up {
+            state.script_ctrls_up.retain(|name| name != "BACK");
+        }
+    }
 
     let note_lanes_active = !state.is_bot_play_mode
         && !state.disable_keys
@@ -119,6 +159,9 @@ pub(super) fn handle_play_input(
     if emit_press {
         let ctrl_name = state.script_ctrls_hit.first().cloned().unwrap_or_default();
         for k in keys.get_just_pressed() {
+            if swallowed_overlay_key(*k, swallow_note_s, swallow_backspace) {
+                continue;
+            }
             if note_lanes_active && controls.is_note_key(*k) {
                 continue;
             }
@@ -133,6 +176,9 @@ pub(super) fn handle_play_input(
     if emit_release {
         let ctrl_name = state.script_ctrls_up.first().cloned().unwrap_or_default();
         for k in keys.get_just_released() {
+            if swallowed_overlay_key(*k, swallow_note_s, swallow_backspace) {
+                continue;
+            }
             if note_lanes_active && controls.is_note_key(*k) {
                 continue;
             }
@@ -167,12 +213,30 @@ pub(super) fn handle_play_input(
     precise.poll_keyboard(&keys, pos_ms);
 
     for ev in precise.drain_presses() {
+        if swallow_note_s && ev.key_code == KeyCode::KeyS {
+            continue;
+        }
         let latency = precise.latency_ms(&ev);
         state.on_key_press_precise(ev.direction, Some(ev.key_code), ev.song_position_ms, latency);
     }
     for ev in precise.drain_releases() {
+        if swallow_note_s && ev.key_code == KeyCode::KeyS {
+            continue;
+        }
         let latency = precise.latency_ms(&ev);
         state.on_key_release_precise(ev.direction, Some(ev.key_code), ev.song_position_ms, latency);
     }
+}
+
+fn retain_key(names: &mut Vec<String>, raw: &str, short: &str) {
+    names.retain(|name| name != raw && name != short);
+}
+
+fn is_down_control(name: &str) -> bool {
+    matches!(name, "NOTE_DOWN" | "UI_DOWN" | "DOWN")
+}
+
+fn swallowed_overlay_key(key: KeyCode, swallow_note_s: bool, swallow_backspace: bool) -> bool {
+    (swallow_note_s && key == KeyCode::KeyS) || (swallow_backspace && key == KeyCode::Backspace)
 }
 

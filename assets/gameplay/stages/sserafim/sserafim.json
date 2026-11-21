@@ -271,6 +271,7 @@
       ],
       "file": "sserafim/lights/back-light-color",
       "animation": "sparrow",
+      "blend": "screen",
       "visible": true,
       "opacity": 0.0,
       "position": [
@@ -295,6 +296,7 @@
       ],
       "file": "sserafim/lights/back-light-white",
       "animation": "sparrow",
+      "blend": "add",
       "visible": true,
       "opacity": 0.0,
       "position": [
@@ -367,6 +369,7 @@
       ],
       "file": "sserafim/lights/truck-light-1",
       "animation": "sparrow",
+      "blend": "screen",
       "visible": true,
       "opacity": 0.0,
       "position": [

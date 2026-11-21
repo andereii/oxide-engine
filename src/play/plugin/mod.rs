@@ -21,6 +21,9 @@ use crate::cli::LaunchFlags;
 use crate::input::{Controls, CursorState, PreciseInputManager};
 use crate::mods::{ModRegistry, ModStore};
 use crate::scripting::{ScriptCommand, ScriptHost};
+use crate::ui::script_errors::{
+    ScriptErrorOverlay, spawn_script_error_overlay, update_script_error_overlay,
+};
 
 use super::camera::hud::sync_hud_camera;
 use super::characters::{
@@ -31,6 +34,7 @@ use super::hot_reload::{HotReloadState, hot_reload_assets_system};
 use super::hud::countdown::sync_countdown;
 use super::hud::healthbar::sync_health_bar;
 use super::hud::popups::sync_popups;
+use super::hud::subtitles::sync_subtitles;
 use super::notes::NoteStyle;
 use super::notes::effects::sync_note_effects;
 use super::notes::render::sync_arrow_visuals;
@@ -65,6 +69,7 @@ pub(super) struct AudioSyncState {
 #[derive(Resource, Default)]
 pub(crate) struct PlaySfxAssets {
     pub(crate) miss_sounds: Vec<Handle<AudioSource>>,
+    pub(crate) preloaded_sounds: Vec<Handle<AudioSource>>,
     pub(crate) miss_volume: f32,
     pub(crate) miss_cursor: usize,
 }
@@ -114,7 +119,7 @@ pub(super) struct ScriptHudAndTextParams<'w, 's> {
     pub(super) bar_fills: Query<
         'w,
         's,
-        (&'static super::hud::healthbar::HealthBarFillVisual, &'static mut Sprite),
+        (&'static mut super::hud::healthbar::HealthBarFillVisual, &'static mut Sprite),
         (Without<StagePropVisual>, Without<super::hud::health_icon::HealthIcon>),
     >,
     pub(super) icons: Query<
@@ -199,6 +204,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(HotReloadState::default())
             .insert_resource(PlayPreloadTracker::default())
             .init_resource::<load_pipeline::PlayLoadPipeline>()
+            .init_resource::<ScriptErrorOverlay>()
             .insert_resource(AudioSyncState {
                 was_countdown: state.is_in_countdown,
                 was_paused: false,
@@ -211,9 +217,38 @@ impl Plugin for PlayPlugin {
                     enabled: !self.flags.no_shaders,
                 },
             ))
-            .add_systems(Startup, setup_play_scene)
-            .add_systems(Update, (handle_play_input, hot_reload_assets_system, tick_play_state, ApplyDeferred).chain().before(crate::animations::sprite::step_animations))
-            .add_systems(Update, (sync_stage_props, sync_abot_visualizer_audio, sync_script_texts, sync_characters, sync_arrow_visuals, sync_note_effects, sync_countdown, sync_popups, sync_health_bar, sync_hud_camera, sync_hud_text).chain().after(crate::animations::sprite::step_animations))
+            .add_systems(Startup, (spawn_script_error_overlay, setup_play_scene))
+            .add_systems(
+                Update,
+                (
+                    update_script_error_overlay,
+                    handle_play_input,
+                    hot_reload_assets_system,
+                    tick_play_state,
+                    sync_subtitles,
+                    ApplyDeferred,
+                )
+                    .chain()
+                    .before(crate::animations::sprite::step_animations),
+            )
+            .add_systems(
+                Update,
+                (
+                    sync_stage_props,
+                    sync_abot_visualizer_audio,
+                    sync_script_texts,
+                    sync_characters,
+                    sync_arrow_visuals,
+                    sync_note_effects,
+                    sync_countdown,
+                    sync_popups,
+                    sync_health_bar,
+                    sync_hud_camera,
+                    sync_hud_text,
+                )
+                    .chain()
+                    .after(crate::animations::sprite::step_animations),
+            )
             .add_systems(PostUpdate, apply_composite_affine_transforms.after(TransformSystems::Propagate));
 
         if let Some(capture_state) = ParityCaptureState::from_flags(&self.flags) {

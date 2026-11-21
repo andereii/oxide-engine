@@ -20,6 +20,8 @@ fn onCreate() {
 
     set_prop("train", "x", TRAIN_START_X);
 
+    set_building("lights", 1.0);
+    set_adjust_color("train", -26.0, -16.0, -5.0, 0.0);
     set_adjust_color("bf", -26.0, -16.0, -5.0, 0.0);
     set_adjust_color("dad", -26.0, -16.0, -5.0, 0.0);
     set_adjust_color("gf", -26.0, -16.0, -5.0, 0.0);
@@ -127,6 +129,9 @@ fn onSongRetry() {
     this.train_sound_ms = 0.0;
     this.started_moving = false;
     this.train_x = TRAIN_START_X;
+    this.cur_light = 0;
+    this.light_alpha = 1.0;
     set_prop("train", "x", TRAIN_START_X);
+    prop_alpha("lights", 1.0);
     gf_anim("danceLeft");
 }

@@ -8,11 +8,15 @@ use bevy::prelude::*;
 
 use crate::animations::AtlasSettings;
 use crate::animations::atlas_composite::CompositeClip;
+use crate::play::characters::behavior::CompositeRenderTarget;
 
 use super::schema::StageCoordMode;
 
 pub use spawn::spawn_stage_props;
 pub use systems::{sync_script_texts, sync_stage_props};
+
+#[derive(Component)]
+pub struct StageCompositeQuad;
 
 #[derive(Component)]
 pub struct DynamicScriptProp {
@@ -45,6 +49,16 @@ pub struct StageCompositeProp {
     pub atlas_settings: AtlasSettings,
     pub stage_matrix: Option<[f32; 6]>,
     pub piece_entities: Vec<Entity>,
+    pub composite_rt: Option<CompositeRenderTarget>,
+}
+
+impl StageCompositeProp {
+    /// Despawns the backing offscreen composite RT camera and quad if allocated.
+    pub fn despawn_composite_rt(&self, commands: &mut Commands) {
+        if let Some(ref rt) = self.composite_rt {
+            rt.despawn(commands);
+        }
+    }
 }
 
 #[derive(Component)]
@@ -63,6 +77,9 @@ pub struct StagePropVisual {
     pub velocity: [f32; 2],
     pub acceleration: [f32; 2],
 }
+
+#[derive(Component, Debug, Clone)]
+pub struct StageInitialBlend(pub String);
 
 #[derive(Component)]
 pub struct StagePropPixelSampler {

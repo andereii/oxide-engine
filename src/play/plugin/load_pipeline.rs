@@ -520,6 +520,12 @@ fn finish_or_poll_all(
         &mut audio_res.pcm_sfx,
         &mut audio_res.sfx_cache,
     );
+    prewarm_sfx_handles(
+        &audio_res.sfx.preloaded_sounds,
+        &audio_res.audio_sources,
+        &mut audio_res.pcm_sfx,
+        &mut audio_res.sfx_cache,
+    );
 
     let Some(ref mut preload) = scripts.preload else {
         return;

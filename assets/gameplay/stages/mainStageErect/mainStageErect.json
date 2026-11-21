@@ -96,6 +96,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         967,
         -103
@@ -227,6 +228,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         189,
         -500
@@ -251,6 +253,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         -171,
         242
@@ -275,6 +278,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         -101,
         560
@@ -299,6 +303,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         804,
         -117

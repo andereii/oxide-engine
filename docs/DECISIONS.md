@@ -1158,3 +1158,32 @@ fail-closed (no auto-repair).
   screenshots were regenerated under `target/render-diff/` for direct
   visual comparison against native Funkin prior to any future ADR-0020
   digest re-establishment.
+
+## 2026-11-16 — Scripted song-end hold and generic SRT subtitles
+
+- **Song-end hold:** A cancelled `onSongEnd` hook now keeps `PlayState` in
+  `Playing` and suppresses the automatic end condition until a script calls
+  `end_song()`. This preserves the existing hook-cancel API and lets native-style
+  outro sequences run with live timers, camera tweens and character animations.
+- **Subtitles:** SRT parsing, cue timing and HUD rendering are generic engine
+  features exposed through `subtitle_srt(path)` / `subtitle_clear()`. Subtitle
+  text is a bottom-centered outlined `Text2d` on the HUD layer. The entity stays
+  visible and uses an empty string between cues because Bevy 0.20 can lose the
+  text layout after long `Visibility::Hidden` periods.
+- **HUD visibility:** `hud_visible(false)` now hides the strumline, note pool and
+  sustain pool in addition to the health bar/script HUD elements.
+- **QT city-stage palette:** Background/midground stage JSON `"blend"` modes
+  (`"add"` on `storeLight_add`, `"overlay"` on `overlayOverlay`) are now
+  applied natively via `StageInitialBlend` -> `FunkinBlendMode::Add` /
+  `StagePostOverlayProp`, while `qtStageCityErect.rhai` only overrides
+  foreground `overlayAdd` (`zIndex >= 400`) to `"srgb_add"`
+  (`StagePostOverlayProp`) so Oxide's linear additive pass does not wash the
+  whole palette toward pale pink.
+
+## 2026-11-21 — Stage/shader decoupling from Rust into stage JSON, Rhai, and custom WGSL
+
+- **Decision:** Moved all remaining base stage/week shader presets, prop blends, `phillyTrain` building-light sync, and `sserafim`/`spaghetti` shader & event state (`sserafimDark`, `sserafimLights`, `sserafimPulseLights`, `sserafimKick`, `sserafimCover`, `sserafimFlash`, `sserafimGuitarVibration`) out of `src/play/shaders/` into stage JSON `"blend"` fields, Rhai stage scripts, and `assets/gameplay/stages/sserafim/sserafim.wgsl`.
+- **Implementation notes:**
+  - `Shader::from_wgsl` (`src/play/shaders/systems/commands.rs`) compiles custom `.wgsl` files as raw WGSL without WESL `import` or `@if(...)` preprocessing, targeting `ExtendedMaterial2d<SpriteMeshMaterial, FunkinSpriteMaterial>` at `@group(2)` (`SpriteMaterial` at binding 0..2, `FunkinSpriteUniform` at binding 20 using `custom_0..custom_2` populated via `shader_vec`/`shader_val`).
+  - `StageShaderRuntime` now retains only generic `rain_spec` / `rain_time_*` / `tankman_alt_mask` / `next_rt_layer` state; `stage_character_shader`, `stage_character_initial_tint`, `stage_prop_shader`, `SHADER_MODE_SSERAFIM`, `SserafimParams`, and `SserafimRuntimeState` are removed.
+- **Deferred retroactivity:** External-mod retrocompatibility checks (specifically `go-go-go` `SetHealthIcon` `char: 1` Psych vs V-Slice semantics, `--no-scripts` implications of disk-only stage shader definitions, and `sserafim-gf.rhai` `CustomEvent` unwrapping / live GPU visual check of `sserafim.wgsl`) are logged in `docs/PROGRESS.md` for follow-up.

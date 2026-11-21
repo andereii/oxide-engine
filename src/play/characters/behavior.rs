@@ -117,14 +117,61 @@ pub struct CharacterUnderlayConfig {
     pub offset: [f32; 2],
 }
 
+/// Fallback offscreen render-target side length (px) when composite bounds are unavailable.
 pub const COMPOSITE_RT_SIZE: u32 = 1600;
+pub const COMPOSITE_RT_MIN_SIZE: u32 = 512;
+pub const COMPOSITE_RT_MAX_SIZE: u32 = 2048;
+const COMPOSITE_RT_PADDING: f32 = 128.0;
+
+/// Computes clamped `[width, height]` for an offscreen composite `RenderTarget`,
+/// falling back to `COMPOSITE_RT_SIZE` on any axis whose bounds are `<= 0.0` or non-finite.
+pub(crate) fn compute_composite_rt_dimensions(
+    ref_size: [f32; 2],
+    max_clip_size: [f32; 2],
+) -> [u32; 2] {
+    let axis = |r: f32, c: f32| -> u32 {
+        let r_ok = r.is_finite() && r > 0.0;
+        let c_ok = c.is_finite() && c > 0.0;
+        let extent = match (r_ok, c_ok) {
+            (true, true) => r.max(2.0 * c - r),
+            (true, false) => r,
+            (false, true) => c,
+            (false, false) => return COMPOSITE_RT_SIZE,
+        };
+        let padded = extent + COMPOSITE_RT_PADDING;
+        if !padded.is_finite() || padded <= 0.0 {
+            return COMPOSITE_RT_SIZE;
+        }
+        (padded.ceil() as u32).clamp(COMPOSITE_RT_MIN_SIZE, COMPOSITE_RT_MAX_SIZE)
+    };
+    [
+        axis(ref_size[0], max_clip_size[0]),
+        axis(ref_size[1], max_clip_size[1]),
+    ]
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CompositeRtCamera;
 
 #[derive(Clone, Debug)]
 pub struct CompositeRenderTarget {
+    #[allow(dead_code)] // Retains a strong Handle<Image> for the offscreen RT independently of camera/quad entities.
     pub image: Handle<Image>,
     pub camera_entity: Entity,
     pub quad_entity: Entity,
     pub render_layer: usize,
+}
+
+impl CompositeRenderTarget {
+    /// Despawns the offscreen RT camera and display quad entities.
+    pub fn despawn(&self, commands: &mut Commands) {
+        if self.camera_entity != Entity::PLACEHOLDER {
+            commands.entity(self.camera_entity).despawn();
+        }
+        if self.quad_entity != Entity::PLACEHOLDER {
+            commands.entity(self.quad_entity).despawn();
+        }
+    }
 }
 
 #[derive(Component)]
@@ -163,12 +210,7 @@ pub struct CharacterActor {
 impl CharacterActor {
     pub fn despawn_composite_rt(&self, commands: &mut Commands) {
         if let Some(ref rt) = self.composite_rt {
-            if rt.camera_entity != Entity::PLACEHOLDER {
-                commands.entity(rt.camera_entity).despawn();
-            }
-            if rt.quad_entity != Entity::PLACEHOLDER {
-                commands.entity(rt.quad_entity).despawn();
-            }
+            rt.despawn(commands);
         }
     }
     pub fn reset_character(&mut self) {
@@ -198,6 +240,57 @@ impl CharacterActor {
             self.data.scale[0] * self.slot.scale[0],
             self.data.scale[1] * self.slot.scale[1],
         ]
+    }
+
+    /// Computes dynamic offscreen `RenderTarget` dimensions `[width, height]` from
+    /// composite clip bounds and `idle_size` scaled by `total_scale`, clamped to
+    /// `[COMPOSITE_RT_MIN_SIZE, COMPOSITE_RT_MAX_SIZE]` with `COMPOSITE_RT_SIZE` fallback.
+    pub fn composite_rt_size(&self) -> [u32; 2] {
+        let raw_scale = self.total_scale();
+        if !raw_scale[0].is_finite()
+            || !raw_scale[1].is_finite()
+            || raw_scale[0].abs() <= f32::EPSILON
+            || raw_scale[1].abs() <= f32::EPSILON
+        {
+            return [COMPOSITE_RT_SIZE, COMPOSITE_RT_SIZE];
+        }
+        let scale = [raw_scale[0].abs(), raw_scale[1].abs()];
+        let apply_sm = self.data.effective_atlas_settings().apply_stage_matrix;
+        let mut max_clip = [0.0_f32, 0.0_f32];
+        for vis in self.clips.values() {
+            if let ClipVisual::Composite {
+                clip,
+                stage_matrix,
+                ..
+            } = vis
+            {
+                let mut bw = clip.bounds_size[0];
+                let mut bh = clip.bounds_size[1];
+                if apply_sm && let Some(sm) = stage_matrix {
+                    bw *= sm[0].abs().max(0.01);
+                    bh *= sm[3].abs().max(0.01);
+                }
+                if bw.is_finite() && bw > 0.0 {
+                    max_clip[0] = max_clip[0].max(bw * scale[0]);
+                }
+                if bh.is_finite() && bh > 0.0 {
+                    max_clip[1] = max_clip[1].max(bh * scale[1]);
+                }
+            }
+        }
+        let ref_size = [
+            if self.idle_size[0].is_finite() && self.idle_size[0] > 0.0 {
+                self.idle_size[0] * scale[0]
+            } else {
+                0.0
+            },
+            if self.idle_size[1].is_finite() && self.idle_size[1] > 0.0 {
+                self.idle_size[1] * scale[1]
+            } else {
+                0.0
+            },
+        ];
+        compute_composite_rt_dimensions(ref_size, max_clip)
     }
 
     pub fn effective_flip(&self) -> [bool; 2] {
@@ -418,4 +511,41 @@ pub fn find_count_animations(controller: &AnimationController, prefix: &str) -> 
         .collect();
     nums.sort_unstable();
     nums
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        COMPOSITE_RT_MAX_SIZE, COMPOSITE_RT_MIN_SIZE, COMPOSITE_RT_SIZE,
+        compute_composite_rt_dimensions,
+    };
+
+    #[test]
+    fn composite_rt_dimensions_fall_back_on_invalid_bounds() {
+        assert_eq!(
+            compute_composite_rt_dimensions([0.0, -5.0], [f32::NAN, f32::INFINITY]),
+            [COMPOSITE_RT_SIZE, COMPOSITE_RT_SIZE]
+        );
+    }
+
+    #[test]
+    fn composite_rt_dimensions_clamp_between_min_and_max() {
+        assert_eq!(
+            compute_composite_rt_dimensions([120.0, 200.0], [150.0, 220.0]),
+            [COMPOSITE_RT_MIN_SIZE, COMPOSITE_RT_MIN_SIZE]
+        );
+        assert_eq!(
+            compute_composite_rt_dimensions([2200.0, 1900.0], [2400.0, 2100.0]),
+            [COMPOSITE_RT_MAX_SIZE, COMPOSITE_RT_MAX_SIZE]
+        );
+    }
+
+    #[test]
+    fn composite_rt_dimensions_account_for_larger_clip_bounds_and_padding() {
+        // ref = 500, max_clip = 700 -> symmetric extent = 2*700 - 500 = 900 (+ 128 pad = 1028)
+        assert_eq!(
+            compute_composite_rt_dimensions([500.0, 600.0], [700.0, 600.0]),
+            [1028, 728]
+        );
+    }
 }

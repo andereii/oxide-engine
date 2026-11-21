@@ -6,29 +6,11 @@ pub const SHADER_MODE_BUILDING: u32 = 1 << 2;
 pub const SHADER_MODE_WIGGLE: u32 = 1 << 3;
 pub const SHADER_MODE_OVERLAY_BLEND: u32 = 1 << 4;
 pub const SHADER_MODE_RAIN_SPRITE: u32 = 1 << 5;
-pub const SHADER_MODE_SSERAFIM: u32 = 1 << 6;
 pub const SHADER_MODE_TEXTURE_SWAP: u32 = 1 << 7;
 
 pub const SHADER_FLAG_USE_ALT_MASK: u32 = 1 << 8;
-pub const SHADER_FLAG_IS_CHAR: u32 = 1 << 9;
 pub const SHADER_FLAG_HAS_AUX_TEX: u32 = 1 << 10;
 pub const SHADER_FLAG_PREMULTIPLIED_INPUT: u32 = 1 << 11;
-
-pub const PHILLY_TRAIN_LIGHT_COLORS: [u32; 5] = [
-    0xFF31A2FD,
-    0xFF31FD8C,
-    0xFFFB33F5,
-    0xFFFBA633,
-    0xFFFD4531,
-];
-
-pub const PHILLY_TRAIN_ERECT_LIGHT_COLORS: [u32; 5] = [
-    0xFFB66F43,
-    0xFF329A6D,
-    0xFF932C28,
-    0xFF2663AC,
-    0xFF502D64,
-];
 
 pub const FUNKIN_SCREEN_HEIGHT: f32 = 720.0;
 
@@ -250,29 +232,6 @@ impl Default for RainSpriteParams {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SserafimParams {
-    pub adjust: AdjustColorParams,
-    pub darken_amount: f32,
-    pub light_color: [f32; 3],
-    pub pulse_strength: f32,
-    pub truck_strength: f32,
-    pub is_char: bool,
-}
-
-impl Default for SserafimParams {
-    fn default() -> Self {
-        Self {
-            adjust: AdjustColorParams::default(),
-            darken_amount: 0.0,
-            light_color: [1.0, 1.0, 1.0],
-            pulse_strength: 0.0,
-            truck_strength: 0.0,
-            is_char: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SpriteShaderConfig {
     pub mode_flags: u32,
@@ -283,7 +242,6 @@ pub struct SpriteShaderConfig {
     pub building: BuildingParams,
     pub overlay_path: Option<String>,
     pub rain_sprite: RainSpriteParams,
-    pub sserafim: SserafimParams,
     pub custom_params: [[f32; 4]; 4],
 }
 
@@ -352,17 +310,6 @@ impl SpriteShaderConfig {
             ..Default::default()
         }
     }
-
-    pub fn sserafim(is_char: bool) -> Self {
-        Self {
-            mode_flags: SHADER_MODE_SSERAFIM,
-            sserafim: SserafimParams {
-                is_char,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -381,308 +328,11 @@ pub const fn argb_to_rgb_f32(argb: u32) -> [f32; 3] {
     [r, g, b]
 }
 
+#[allow(dead_code)] // Retained as shared ARGB-to-RGBA conversion helper for shader definitions/tests.
 pub const fn argb_to_rgba_f32(argb: u32) -> [f32; 4] {
     let a = ((argb >> 24) & 0xFF) as f32 / 255.0;
     let r = ((argb >> 16) & 0xFF) as f32 / 255.0;
     let g = ((argb >> 8) & 0xFF) as f32 / 255.0;
     let b = (argb & 0xFF) as f32 / 255.0;
     [r, g, b, a]
-}
-
-/// Returns the character shader configuration defined by Funkin's stage scripts.
-pub fn stage_character_shader(
-    stage_id: &str,
-    role: CharShaderRole,
-    char_id: &str,
-) -> Option<SpriteShaderConfig> {
-    match stage_id {
-        "mainStageErect" => Some(match role {
-            CharShaderRole::Player => SpriteShaderConfig::adjust_color(12.0, 0.0, -23.0, 7.0),
-            CharShaderRole::Spectator => SpriteShaderConfig::adjust_color(-9.0, 0.0, -30.0, -4.0),
-            CharShaderRole::Opponent => SpriteShaderConfig::adjust_color(-32.0, 0.0, -33.0, -23.0),
-        }),
-        "phillyTrainErect" => Some(SpriteShaderConfig::adjust_color(-26.0, -16.0, -5.0, 0.0)),
-        "limoRideErect" => Some(SpriteShaderConfig::adjust_color(-30.0, -20.0, -30.0, 0.0)),
-        "mallXmasErect" => Some(SpriteShaderConfig::adjust_color(5.0, 20.0, 0.0, 0.0)),
-        "phillyStreetsErect" => Some(SpriteShaderConfig::adjust_color(-5.0, -40.0, -20.0, -25.0)),
-        "schoolErect" => {
-            let color = argb_to_rgb_f32(0xFF52351D);
-            let params = match role {
-                CharShaderRole::Player => {
-                    let mask = if char_id == "pico-pixel" {
-                        "gameplay/characters/pico-pixel/pico-pixel-mask.png"
-                    } else {
-                        "gameplay/characters/bf-pixel/bf-pixel-mask.png"
-                    };
-                    DropShadowParams {
-                        adjust: AdjustColorParams::new(-10.0, -23.0, -66.0, 24.0),
-                        color,
-                        angle_deg: 90.0,
-                        distance: 5.0,
-                        strength: 1.0,
-                        threshold: 0.1,
-                        mask_threshold: 1.0,
-                        use_alt_mask: true,
-                        alt_mask_path: Some(mask.to_string()),
-                        ..Default::default()
-                    }
-                }
-                CharShaderRole::Spectator => {
-                    let mask = if char_id == "nene-pixel" {
-                        "gameplay/characters/nene-pixel/nene-pixel-mask.png"
-                    } else {
-                        "gameplay/characters/gf-pixel/gf-pixel-mask.png"
-                    };
-                    DropShadowParams {
-                        adjust: AdjustColorParams::new(-10.0, -25.0, -42.0, 5.0),
-                        color,
-                        angle_deg: 90.0,
-                        distance: 3.0,
-                        strength: 1.0,
-                        threshold: 0.3,
-                        mask_threshold: 1.0,
-                        use_alt_mask: true,
-                        alt_mask_path: Some(mask.to_string()),
-                        ..Default::default()
-                    }
-                }
-                CharShaderRole::Opponent => DropShadowParams {
-                    adjust: AdjustColorParams::new(-10.0, -23.0, -66.0, 24.0),
-                    color,
-                    angle_deg: 90.0,
-                    distance: 5.0,
-                    strength: 1.0,
-                    threshold: 0.1,
-                    mask_threshold: 1.0,
-                    use_alt_mask: true,
-                    alt_mask_path: Some("gameplay/characters/senpai/senpai-mask.png".to_string()),
-                    ..Default::default()
-                },
-            };
-            Some(SpriteShaderConfig::drop_shadow(params))
-        }
-        "tankmanBattlefieldErect" => {
-            let color = argb_to_rgb_f32(0xFFDFEF3C);
-            let base_adjust = AdjustColorParams::new(-38.0, -20.0, -46.0, -25.0);
-            let params = match role {
-                CharShaderRole::Player => DropShadowParams {
-                    adjust: base_adjust,
-                    color,
-                    angle_deg: 90.0,
-                    distance: 15.0,
-                    strength: 1.0,
-                    threshold: 0.1,
-                    ..Default::default()
-                },
-                CharShaderRole::Spectator => {
-                    let (use_alt, mask, mthr) = if char_id == "gf-tankmen" {
-                        (
-                            true,
-                            Some("gameplay/stages/tankmanBattlefieldErect/masks/mask-gf-tankmen.png".to_string()),
-                            0.4,
-                        )
-                    } else if char_id == "nene-tankmen" {
-                        (
-                            true,
-                            Some("gameplay/stages/tankmanBattlefieldErect/masks/mask-nene-tankmen.png".to_string()),
-                            0.4,
-                        )
-                    } else {
-                        (false, None, 0.5)
-                    };
-                    DropShadowParams {
-                        adjust: base_adjust,
-                        color,
-                        angle_deg: 90.0,
-                        distance: 15.0,
-                        strength: 1.0,
-                        threshold: 0.1,
-                        mask_threshold: mthr,
-                        use_alt_mask: use_alt,
-                        alt_mask_path: mask,
-                        ..Default::default()
-                    }
-                }
-                CharShaderRole::Opponent => {
-                    let mask = (char_id == "tankman-bloody").then(|| {
-                        "gameplay/stages/tankmanBattlefieldErect/masks/mask-tankman-bloody.png"
-                            .to_string()
-                    });
-                    DropShadowParams {
-                        adjust: base_adjust,
-                        color,
-                        angle_deg: 25.0,
-                        distance: 15.0,
-                        strength: 1.0,
-                        threshold: 0.3,
-                        mask_threshold: 1.0,
-                        use_alt_mask: false,
-                        alt_mask_path: mask,
-                        ..Default::default()
-                    }
-                }
-            };
-            Some(SpriteShaderConfig::drop_shadow(params))
-        }
-        "sserafim" => Some(SpriteShaderConfig::sserafim(true)),
-        _ => None,
-    }
-}
-
-/// Returns initial character color tint overrides specified by Funkin stage scripts.
-pub fn stage_character_initial_tint(stage_id: &str, role: CharShaderRole) -> Option<[f32; 4]> {
-    if stage_id == "phillyBlazin" {
-        return Some(match role {
-            CharShaderRole::Player | CharShaderRole::Opponent => argb_to_rgba_f32(0xFFDEDEDE),
-            CharShaderRole::Spectator => argb_to_rgba_f32(0xFF888888),
-        });
-    }
-    None
-}
-
-/// Returns the stage prop shader / blend configuration defined by Funkin's stage scripts.
-pub fn stage_prop_shader(stage_id: &str, prop_name: &str) -> Option<SpriteShaderConfig> {
-    match (stage_id, prop_name) {
-        ("mainStageErect", "brightLightSmall" | "orangeLight" | "lightgreen" | "lightred" | "lightAbove") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("spookyMansionErect", "bgTrees") => Some(SpriteShaderConfig::rain_sprite(
-            FUNKIN_SCREEN_HEIGHT / 200.0 * 2.0,
-            0.4,
-            argb_to_rgb_f32(0xFF6680CC),
-        )),
-        ("phillyTrain" | "phillyTrainErect", "lights") => Some(SpriteShaderConfig::building(1.0)),
-        ("phillyTrainErect", "train") => {
-            Some(SpriteShaderConfig::adjust_color(-26.0, -16.0, -5.0, 0.0))
-        }
-        ("limoRide", "limoSunset") => Some(SpriteShaderConfig::overlay_blend(
-            "gameplay/stages/limoRide/limo-overlay.png",
-        )),
-        ("limoRideErect", "limoDancer1" | "limoDancer2" | "limoDancer3" | "limoDancer4" | "limoDancer5" | "fastCar") => {
-            Some(SpriteShaderConfig::adjust_color(-30.0, -20.0, -30.0, 0.0))
-        }
-        ("limoRideErect", "shootingStar") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("mallXmasErect", "santa") => {
-            Some(SpriteShaderConfig::adjust_color(5.0, 20.0, 0.0, 0.0))
-        }
-        ("mallXmasErect", "bottomBoppers") => {
-            Some(SpriteShaderConfig::adjust_color(15.0, 0.0, 20.0, 0.0))
-        }
-        ("schoolEvil", "backTrees") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0 * 0.8,
-            4.0 * 0.4,
-            0.011,
-        )),
-        ("schoolEvil", "school") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0,
-            4.0,
-            0.017,
-        )),
-        ("schoolEvil", "street" | "trees") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0,
-            4.0,
-            0.007,
-        )),
-        ("schoolEvilErect", "backspikes") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0 * 0.8,
-            4.0 * 0.4,
-            0.011,
-        )),
-        ("schoolEvilErect", "school") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0,
-            4.0,
-            0.017,
-        )),
-        ("schoolEvilErect", "backspike") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0,
-            4.0,
-            0.01,
-        )),
-        ("schoolEvilErect", "evilstreet") => Some(SpriteShaderConfig::wiggle(
-            WiggleEffectType::Dreamy,
-            2.0,
-            4.0,
-            0.007,
-        )),
-        ("phillyBlazin", "skyAdditive" | "additionalLighten") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("phillyBlazin", "foregroundMultiply") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Multiply))
-        }
-        ("phillyStreets" | "phillyStreetsErect", name) if name.ends_with("_lightmap") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("phillyStreetsErect", "mist0" | "mist1" | "mist2" | "mist3" | "mist4" | "mist5") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("phillyStreetsErect", "grey1") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("phillyStreetsErect", "grey2") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Multiply))
-        }
-        ("sserafim", "truckLight1" | "backLightColor") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Screen))
-        }
-        ("sserafim", "backLightWhite") => {
-            Some(SpriteShaderConfig::blend_only(FunkinBlendMode::Add))
-        }
-        ("sserafim", "truckLight2" | "truckTest" | "solidCover") => None,
-        ("sserafim", _) => Some(SpriteShaderConfig::sserafim(false)),
-        _ => None,
-    }
-}
-
-/// Returns camera post-process rain configuration matching Funkin's weekend1 stages.
-pub fn stage_camera_rain(stage_id: &str, song_id: &str) -> Option<CameraRainSpec> {
-    let song_lower = song_id.to_ascii_lowercase();
-    match stage_id {
-        "phillyStreets" => {
-            let (start_intensity, end_intensity) = match song_lower.as_str() {
-                "darnell" => (0.0, 0.1),
-                "lit-up" => (0.1, 0.2),
-                "2hot" => (0.2, 0.4),
-                _ => (0.1, 0.2),
-            };
-            Some(CameraRainSpec {
-                scale: FUNKIN_SCREEN_HEIGHT / 200.0,
-                start_intensity,
-                end_intensity,
-                rain_color: argb_to_rgb_f32(0xFF6680CC),
-                time_scale_decay: false,
-            })
-        }
-        "phillyStreetsErect" => {
-            let (start_intensity, end_intensity) = match song_lower.as_str() {
-                "darnell" => (0.0, 0.01),
-                "lit-up" => (0.01, 0.02),
-                "2hot" => (0.02, 0.04),
-                _ => (0.01, 0.02),
-            };
-            Some(CameraRainSpec {
-                scale: FUNKIN_SCREEN_HEIGHT / 200.0,
-                start_intensity,
-                end_intensity,
-                rain_color: argb_to_rgb_f32(0xFFA8ADB5),
-                time_scale_decay: false,
-            })
-        }
-        "phillyBlazin" => Some(CameraRainSpec {
-            scale: FUNKIN_SCREEN_HEIGHT / 200.0,
-            start_intensity: 0.5,
-            end_intensity: 0.5,
-            rain_color: argb_to_rgb_f32(0xFF6680CC),
-            time_scale_decay: true,
-        }),
-        _ => None,
-    }
 }

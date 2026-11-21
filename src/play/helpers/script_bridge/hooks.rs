@@ -282,6 +282,7 @@ impl PlayState {
             HookKind::SongEnd => {
                 if ev.canceled {
                     self.phase = PlayPhase::Playing;
+                    self.song_end_canceled = true;
                     if let Some((removed, delta)) = self.last_song_end_popped.take() {
                         playlist.campaign_score -= delta;
                         if !removed.is_empty() {
@@ -289,6 +290,7 @@ impl PlayState {
                         }
                     }
                 } else {
+                    self.song_end_canceled = false;
                     self.last_song_end_popped = None;
                 }
             }

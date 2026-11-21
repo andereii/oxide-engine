@@ -90,7 +90,20 @@ impl PlayState {
                 true
             }
             ScriptCommand::SetHudVisible(vis) => {
-                self.hud_visible = *vis;
+                self.set_hud_visible(*vis, false);
+                true
+            }
+            ScriptCommand::FadeHud { alpha, duration_s, ease } => {
+                let parsed = EaseKind::from_name(ease, "");
+                self.fade_hud(*alpha, *duration_s, parsed);
+                true
+            }
+            ScriptCommand::LoadSubtitles { cues } => {
+                self.load_subtitles(cues.clone());
+                true
+            }
+            ScriptCommand::ClearSubtitles => {
+                self.clear_subtitles();
                 true
             }
             ScriptCommand::TweenCameraZoom { target, duration_s, ease } => {
@@ -163,27 +176,28 @@ impl PlayState {
                     self.camera.hud_flash_color = *color;
                     self.camera.hud_flash_duration_s = dur;
                     self.camera.hud_flash_timer_s = dur;
-                    self.camera.hud_flash_fade_in = false;
                 } else {
                     self.camera.flash_color = *color;
                     self.camera.flash_duration_s = dur;
                     self.camera.flash_timer_s = dur;
-                    self.camera.flash_fade_in = false;
                 }
                 true
             }
             ScriptCommand::CameraFade { color, duration_s, fade_in, hud } => {
                 let dur = (*duration_s).max(0.0);
+                let hold = !*fade_in;
                 if *hud {
-                    self.camera.hud_flash_color = *color;
-                    self.camera.hud_flash_duration_s = dur;
-                    self.camera.hud_flash_timer_s = dur;
-                    self.camera.hud_flash_fade_in = *fade_in;
+                    self.camera.hud_fade_color = *color;
+                    self.camera.hud_fade_duration_s = dur;
+                    self.camera.hud_fade_timer_s = dur;
+                    self.camera.hud_fade_in = *fade_in;
+                    self.camera.hud_fade_hold = hold;
                 } else {
-                    self.camera.flash_color = *color;
-                    self.camera.flash_duration_s = dur;
-                    self.camera.flash_timer_s = dur;
-                    self.camera.flash_fade_in = *fade_in;
+                    self.camera.fade_color = *color;
+                    self.camera.fade_duration_s = dur;
+                    self.camera.fade_timer_s = dur;
+                    self.camera.fade_in = *fade_in;
+                    self.camera.fade_hold = hold;
                 }
                 true
             }

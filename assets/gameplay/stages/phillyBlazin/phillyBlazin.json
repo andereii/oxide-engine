@@ -72,6 +72,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         -600,
         -250
@@ -154,6 +155,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "multiply",
       "position": [
         -600,
         -160
@@ -178,6 +180,7 @@
       "animation": "sparrow",
       "visible": true,
       "opacity": 1,
+      "blend": "add",
       "position": [
         -600,
         -160

@@ -18,7 +18,7 @@ struct FunkinSpriteUniform {
     flags: vec4<u32>,
     // .x = uTime, .y = building alphaShit, .z = wiggleSpeed, .w = wiggleFreq
     time_and_extra: vec4<f32>,
-    // .x = wiggleAmp, .y = rainScale, .z = rainIntensity, .w = reserved
+    // .x = wiggleAmp, .y = rainScale, .z = rainIntensity, .w = rainColor.b
     wiggle_and_rain: vec4<f32>,
     // .xyz = hueMatrix col 0, .w = brightness / 255.0
     hue_col0: vec4<f32>,
@@ -36,12 +36,6 @@ struct FunkinSpriteUniform {
     drop_color_and_mask: vec4<f32>,
     // .x = angCos, .y = angSin, .z = rainColor.r, .w = rainColor.g
     drop_angle_and_rain: vec4<f32>,
-    // .x = rainColor.b, .y = sserafim hue, .z = sserafim sat, .w = sserafim bright
-    rain_b_and_ss_hsbc: vec4<f32>,
-    // .x = sserafim contrast, .y = darkAmt, .z = pulseStrength, .w = truckStrength
-    ss_params: vec4<f32>,
-    // .xyz = lightColor, .w = reserved
-    ss_light: vec4<f32>,
     // Generic user uniforms (u0..u15 / vec0..vec3)
     custom_0: vec4<f32>,
     custom_1: vec4<f32>,
@@ -59,11 +53,9 @@ const MODE_BUILDING: u32     = 4u;
 const MODE_WIGGLE: u32       = 8u;
 const MODE_OVERLAY_BLEND: u32 = 16u;
 const MODE_RAIN_SPRITE: u32  = 32u;
-const MODE_SSERAFIM: u32     = 64u;
 const MODE_TEXTURE_SWAP: u32 = 128u;
 
 const FLAG_USE_ALT_MASK: u32 = 256u;
-const FLAG_IS_CHAR: u32      = 512u;
 const FLAG_HAS_AUX_TEX: u32  = 1024u;
 const FLAG_PREMULTIPLIED_INPUT: u32 = 2048u;
 
@@ -74,9 +66,6 @@ const EFFECT_TYPE_HEAT_WAVE_VERTICAL: u32 = 3u;
 const EFFECT_TYPE_FLAG: u32 = 4u;
 
 const LUMA_VALUE: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
-const SSERAFIM_GRAYSCALE: vec3<f32> = vec3<f32>(0.30980392, 0.60784314, 0.08235294);
-const DEG_TO_RAD: f32 = 0.017453292519943295;
-const E_CONST: f32 = 2.718281828459045;
 
 fn sample_tex_srgb(uv: vec2<f32>) -> vec4<f32> {
     let lin = textureSampleLevel(texture, texture_sampler, uv, 0.0);
@@ -196,106 +185,6 @@ fn blend_overlay(base: vec4<f32>, blend: vec4<f32>) -> vec4<f32> {
     );
 }
 
-fn ss_apply_hue_rotate(a_color: vec3<f32>, a_hue: f32) -> vec3<f32> {
-    let angle = a_hue * DEG_TO_RAD;
-    let m1 = mat3x3<f32>(
-        vec3<f32>(0.213, 0.213, 0.213),
-        vec3<f32>(0.715, 0.715, 0.715),
-        vec3<f32>(0.072, 0.072, 0.072),
-    );
-    let m2 = mat3x3<f32>(
-        vec3<f32>(0.787, -0.213, -0.213),
-        vec3<f32>(-0.715, 0.285, -0.715),
-        vec3<f32>(-0.072, -0.072, 0.928),
-    );
-    let m3 = mat3x3<f32>(
-        vec3<f32>(-0.213, 0.143, -0.787),
-        vec3<f32>(-0.715, 0.140, 0.715),
-        vec3<f32>(0.928, -0.283, 0.072),
-    );
-    let m = m1 + cos(angle) * m2 + sin(angle) * m3;
-    return m * a_color;
-}
-
-fn ss_apply_contrast(a_color: vec3<f32>, value_in: f32) -> vec3<f32> {
-    var value = 1.0 + (value_in / 100.0);
-    if value > 1.0 {
-        value = (((0.00852259 * pow(E_CONST, 4.76454 * (value - 1.0))) * 1.01) - 0.0086078159) * 10.0 + 1.0;
-    }
-    return clamp((a_color - vec3<f32>(0.25)) * value + vec3<f32>(0.25), vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
-fn ss_apply_saturation(a_color: vec3<f32>, value_in: f32) -> vec3<f32> {
-    var val = value_in;
-    if val > 0.0 {
-        val = val * 3.0;
-    }
-    val = 1.0 + (val / 100.0);
-    let grayscale = vec3<f32>(dot(a_color, SSERAFIM_GRAYSCALE));
-    return clamp(mix(grayscale, a_color, val), vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
-fn ss_apply_hsbc(color_in: vec3<f32>) -> vec3<f32> {
-    var color = color_in + vec3<f32>(fx.rain_b_and_ss_hsbc.w / 255.0);
-    color = ss_apply_hue_rotate(color, fx.rain_b_and_ss_hsbc.y);
-    color = ss_apply_contrast(color, fx.ss_params.x);
-    color = ss_apply_saturation(color, fx.rain_b_and_ss_hsbc.z);
-    return color;
-}
-
-fn hue2rgb(hue_in: f32) -> vec3<f32> {
-    let hue = fract(hue_in);
-    return clamp(
-        vec3<f32>(
-            abs(hue * 6.0 - 3.0) - 1.0,
-            2.0 - abs(hue * 6.0 - 2.0),
-            2.0 - abs(hue * 6.0 - 4.0),
-        ),
-        vec3<f32>(0.0),
-        vec3<f32>(1.0),
-    );
-}
-
-fn rgb2hsl(c: vec3<f32>) -> vec3<f32> {
-    let c_min = min(min(c.r, c.g), c.b);
-    let c_max = max(max(c.r, c.g), c.b);
-    let delta = c_max - c_min;
-    var hsl = vec3<f32>(0.0, 0.0, (c_max + c_min) * 0.5);
-    if delta != 0.0 {
-        if hsl.z < 0.5 {
-            hsl.y = delta / (c_max + c_min);
-        } else {
-            hsl.y = delta / (2.0 - c_max - c_min);
-        }
-        let delta_r = (((c_max - c.r) / 6.0) + (delta * 0.5)) / delta;
-        let delta_g = (((c_max - c.g) / 6.0) + (delta * 0.5)) / delta;
-        let delta_b = (((c_max - c.b) / 6.0) + (delta * 0.5)) / delta;
-        if c.r == c_max {
-            hsl.x = delta_b - delta_g;
-        } else if c.g == c_max {
-            hsl.x = (1.0 / 3.0) + delta_r - delta_b;
-        } else {
-            hsl.x = (2.0 / 3.0) + delta_g - delta_r;
-        }
-        hsl.x = fract(hsl.x);
-    }
-    return hsl;
-}
-
-fn hsl2rgb(hsl: vec3<f32>) -> vec3<f32> {
-    if hsl.y == 0.0 {
-        return vec3<f32>(hsl.z);
-    }
-    var b: f32;
-    if hsl.z < 0.5 {
-        b = hsl.z * (1.0 + hsl.y);
-    } else {
-        b = hsl.z + hsl.y - hsl.y * hsl.z;
-    }
-    let a = 2.0 * hsl.z - b;
-    return a + hue2rgb(hsl.x) * (b - a);
-}
-
 @fragment
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let mode_flags = fx.flags.x;
@@ -323,7 +212,7 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         let u_scale = max(fx.wiggle_and_rain.y, 0.01);
         let u_intensity = fx.wiggle_and_rain.z;
         let u_time = fx.time_and_extra.x;
-        let rain_color = vec3<f32>(fx.drop_angle_and_rain.z, fx.drop_angle_and_rain.w, fx.rain_b_and_ss_hsbc.x);
+        let rain_color = vec3<f32>(fx.drop_angle_and_rain.z, fx.drop_angle_and_rain.w, fx.wiggle_and_rain.w);
 
         let local_uv = clamp((sample_uv - frame_min) / frame_span, vec2<f32>(0.0), vec2<f32>(1.0));
         var wpos = local_uv * vec2<f32>(1280.0, 720.0);
@@ -405,40 +294,14 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         srgb_col = vec4<f32>(clamp(color3, vec3<f32>(0.0), vec3<f32>(1.0)), srgb_col.a);
     }
 
-    if (mode_flags & MODE_SSERAFIM) != 0u {
-        var out_col = ss_apply_hsbc(srgb_col.rgb);
-        let dark_amt = fx.ss_params.y;
-        let pulse_str = fx.ss_params.z;
-        let truck_str = fx.ss_params.w;
-        let combined_alpha = truck_str + pulse_str;
-        let light_mult = 0.07;
-        var dark_factor = combined_alpha * light_mult + dark_amt;
-        if dark_amt > 0.65 {
-            dark_factor = combined_alpha * (-light_mult) + dark_amt;
-        }
-        var bruh_hsl = rgb2hsl(fx.ss_light.xyz);
-        bruh_hsl.z = bruh_hsl.z * pulse_str;
-        let bruh_col = hsl2rgb(bruh_hsl);
-
-        var multiply_col: vec3<f32>;
-        if (extra_flags & FLAG_IS_CHAR) != 0u {
-            multiply_col = mix(vec3<f32>(1.0), vec3<f32>(0.0), dark_factor / 5.0);
-            multiply_col = mix(multiply_col, bruh_col, dark_factor / 3.0);
-        } else {
-            multiply_col = mix(vec3<f32>(1.0), vec3<f32>(0.0), dark_factor);
-            multiply_col = mix(multiply_col, bruh_col, dark_factor / 2.0);
-        }
-        out_col *= multiply_col;
-        srgb_col = vec4<f32>(clamp(out_col, vec3<f32>(0.0), vec3<f32>(1.0)), srgb_col.a);
-    }
-
     var lin_col = vec4<f32>(srgb_to_linear(max(srgb_col.rgb, vec3<f32>(0.0))), srgb_col.a);
+    let pre_building_a = lin_col.a;
     lin_col = sprite_functions::get_final_color(lin_col, instance_index);
 
+    // BuildingShader.hx subtracts alphaShit directly from the texture alpha while keeping
+    // the sprite's RGB tint; avoid double-attenuating by material.color.a from get_final_color.
     if (mode_flags & MODE_BUILDING) != 0u {
-        if lin_col.a > 0.0 {
-            lin_col.a = max(lin_col.a - fx.time_and_extra.y, 0.0);
-        }
+        lin_col.a = select(0.0, max(pre_building_a - fx.time_and_extra.y, 0.0), pre_building_a > 0.0);
     }
 
     // Multiply (2u) and Screen (3u) hardware blend states expect premultiplied source RGB

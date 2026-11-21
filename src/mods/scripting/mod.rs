@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod backend;
+pub mod diagnostics;
 pub mod events;
 pub mod host;
 pub mod value;

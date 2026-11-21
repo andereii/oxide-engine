@@ -1,6 +1,7 @@
 pub mod defs;
 pub mod material;
 pub mod rain_post;
+pub mod stage_blend_post;
 pub mod systems;
 
 use bevy::asset::embedded_asset;
@@ -13,9 +14,10 @@ use crate::play::stage::sync_stage_props;
 
 use material::FunkinSpriteMaterial;
 use rain_post::RainCameraEffect;
+use stage_blend_post::StageBlendPostPlugin;
 use systems::{
     PendingShaderCommands, StageShaderRuntime, attach_stage_and_character_shaders,
-    ensure_character_composite_rt, update_stage_shaders,
+    ensure_character_composite_rt, sync_stage_blend_post, update_stage_shaders,
 };
 
 pub struct FunkinShadersPlugin {
@@ -66,19 +68,24 @@ impl Plugin for FunkinShadersPlugin {
 
         embedded_asset!(app, "funkin_sprite.wesl");
         embedded_asset!(app, "funkin_rain_post.wesl");
+        embedded_asset!(app, "funkin_stage_blend_post.wesl");
 
-        app.add_plugins(SpriteMaterialPlugin::<FunkinSpriteMaterial>::default())
-            .add_plugins(FullscreenMaterialPlugin::<RainCameraEffect>::default())
-            .add_systems(
-                Update,
-                (
-                    attach_stage_and_character_shaders,
-                    ApplyDeferred,
-                    update_stage_shaders,
-                )
-                    .chain()
-                    .after(sync_stage_props)
-                    .after(sync_characters),
-            );
+        app.add_plugins((
+            SpriteMaterialPlugin::<FunkinSpriteMaterial>::default(),
+            FullscreenMaterialPlugin::<RainCameraEffect>::default(),
+            StageBlendPostPlugin,
+        ))
+        .add_systems(
+            Update,
+            (
+                attach_stage_and_character_shaders,
+                ApplyDeferred,
+                update_stage_shaders,
+                sync_stage_blend_post,
+            )
+                .chain()
+                .after(sync_stage_props)
+                .after(sync_characters),
+        );
     }
 }

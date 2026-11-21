@@ -1,6 +1,7 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use bevy::prelude::Resource;
 use oxin_app::{resolve_assets_dir, resolve_mods_dir};
@@ -32,6 +33,7 @@ pub struct ModRegistry {
     pub disabled_mods: Vec<(String, String)>,
     pub load_warnings: Vec<String>,
     pub reload_count: u64,
+    script_io: ScriptIoMemo,
 }
 
 impl Default for ModRegistry {
@@ -53,6 +55,7 @@ impl ModRegistry {
             disabled_mods: Vec::new(),
             load_warnings: Vec::new(),
             reload_count: 0,
+            script_io: ScriptIoMemo::default(),
         };
         let _ = reg.scan_mods();
         reg
@@ -60,7 +63,13 @@ impl ModRegistry {
 
     pub fn reload(&mut self) -> Result<(), ModError> {
         self.reload_count += 1;
+        self.clear_script_io_memo();
         self.scan_mods()
+    }
+
+    /// Drops remembered script file, directory, and listing results.
+    pub fn clear_script_io_memo(&self) {
+        self.script_io.clear();
     }
 
     fn scan_mods(&mut self) -> Result<(), ModError> {
@@ -192,6 +201,16 @@ impl ModRegistry {
     }
 
     pub fn resolve_dir(&self, rel: &str) -> Option<PathBuf> {
+        let key = memo_key(rel);
+        if let Some(cached) = self.script_io.dir(&key) {
+            return cached;
+        }
+        let found = self.resolve_dir_uncached(rel);
+        self.script_io.store_dir(key, found.clone());
+        found
+    }
+
+    fn resolve_dir_uncached(&self, rel: &str) -> Option<PathBuf> {
         let normalized = Self::normalize_rel_path(rel).ok()?;
         for loaded_mod in self.mods.iter().rev() {
             let candidate = loaded_mod.root.join(&normalized);
@@ -311,10 +330,16 @@ impl ModRegistry {
     }
 
     pub fn read_to_string(&self, rel: &str) -> Result<String, ModError> {
+        let key = memo_key(rel);
+        if let Some(cached) = self.script_io.text(&key) {
+            return cached_text(rel, cached);
+        }
         let path = self
             .resolve_file(rel)
             .ok_or_else(|| ModError::NotFound(rel.to_string()))?;
-        Self::read_file_string(&path)
+        let result = Self::read_file_string(&path);
+        self.script_io.store_text(key, result.as_deref().ok());
+        result
     }
 
     fn apply_json_merges(
@@ -368,6 +393,16 @@ impl ModRegistry {
     /// Reads the highest-priority base/override file for `rel`, then applies Polymod-style
     /// `_merge/<rel>` and non-empty `_append/<rel>` overlays across active mods in priority order.
     pub fn read_to_string_merged(&self, rel: &str) -> Result<String, ModError> {
+        let key = memo_key(rel);
+        if let Some(cached) = self.script_io.merged(&key) {
+            return cached_text(rel, cached);
+        }
+        let result = self.read_to_string_merged_uncached(rel);
+        self.script_io.store_merged(key, result.as_deref().ok());
+        result
+    }
+
+    fn read_to_string_merged_uncached(&self, rel: &str) -> Result<String, ModError> {
         let normalized = Self::normalize_rel_path(rel)?;
         let base_path = self
             .resolve_file_normalized(&normalized)
@@ -403,7 +438,13 @@ impl ModRegistry {
     }
 
     pub fn file_exists(&self, rel: &str) -> bool {
-        self.resolve_file(rel).is_some()
+        let key = memo_key(rel);
+        if let Some(cached) = self.script_io.file(&key) {
+            return cached;
+        }
+        let exists = self.resolve_file(rel).is_some();
+        self.script_io.store_file(key, exists);
+        exists
     }
 
     /// Converts an on-disk path under either `assets_dir` or `mods_dir` into a Bevy `AssetServer` path.
@@ -445,11 +486,18 @@ impl ModRegistry {
     }
 
     pub fn list_dir(&self, rel: &str) -> Vec<String> {
-        let trimmed = rel.trim().replace('\\', "/");
-        if trimmed.is_empty() || trimmed == "." || trimmed == "./" {
-            return self.collect_dir_names(None);
+        let key = memo_key(rel);
+        if let Some(cached) = self.script_io.listing(&key) {
+            return cached;
         }
-        self.list_dir_entries(rel)
+        let trimmed = rel.trim().replace('\\', "/");
+        let names = if trimmed.is_empty() || trimmed == "." || trimmed == "./" {
+            self.collect_dir_names(None)
+        } else {
+            self.list_dir_entries(rel)
+        };
+        self.script_io.store_listing(key, names.clone());
+        names
     }
 
     fn collect_dir_names(&self, sub: Option<&Path>) -> Vec<String> {
@@ -601,5 +649,157 @@ impl ModRegistry {
 
     pub fn active_mod_ids(&self) -> Vec<&str> {
         self.mods.iter().map(|m| m.manifest.id.as_str()).collect()
+    }
+}
+
+const SCRIPT_IO_TEXT_CAP: usize = 64;
+const SCRIPT_IO_LIST_CAP: usize = 64;
+
+fn memo_key(rel: &str) -> String {
+    rel.trim().replace('\\', "/")
+}
+
+fn cached_text(rel: &str, cached: Result<String, ()>) -> Result<String, ModError> {
+    cached.map_err(|()| ModError::NotFound(rel.to_string()))
+}
+
+/// Remembers script-facing file, directory, and listing results until a mod reload.
+#[derive(Clone, Default)]
+struct ScriptIoMemo {
+    inner: Arc<Mutex<ScriptIoMemoInner>>,
+}
+
+#[derive(Default)]
+struct ScriptIoMemoInner {
+    text: HashMap<String, Option<String>>,
+    merged: HashMap<String, Option<String>>,
+    files: HashMap<String, bool>,
+    dirs: HashMap<String, Option<PathBuf>>,
+    listings: HashMap<String, Vec<String>>,
+}
+
+impl std::fmt::Debug for ScriptIoMemo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ScriptIoMemo")
+    }
+}
+
+impl ScriptIoMemo {
+    fn clear(&self) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        inner.text.clear();
+        inner.merged.clear();
+        inner.files.clear();
+        inner.dirs.clear();
+        inner.listings.clear();
+    }
+
+    fn text(&self, key: &str) -> Option<Result<String, ()>> {
+        let inner = self.inner.lock().ok()?;
+        inner.text.get(key).map(|slot| match slot {
+            Some(text) => Ok(text.clone()),
+            None => Err(()),
+        })
+    }
+
+    fn store_text(&self, key: String, value: Option<&str>) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.text.len() >= SCRIPT_IO_TEXT_CAP && !inner.text.contains_key(&key) {
+            return;
+        }
+        if value.is_some_and(|text| text.len() > 256 * 1024) {
+            return;
+        }
+        inner.text.insert(key, value.map(str::to_string));
+    }
+
+    fn merged(&self, key: &str) -> Option<Result<String, ()>> {
+        let inner = self.inner.lock().ok()?;
+        inner.merged.get(key).map(|slot| match slot {
+            Some(text) => Ok(text.clone()),
+            None => Err(()),
+        })
+    }
+
+    fn store_merged(&self, key: String, value: Option<&str>) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.merged.len() >= SCRIPT_IO_TEXT_CAP && !inner.merged.contains_key(&key) {
+            return;
+        }
+        if value.is_some_and(|text| text.len() > 256 * 1024) {
+            return;
+        }
+        inner.merged.insert(key, value.map(str::to_string));
+    }
+
+    fn file(&self, key: &str) -> Option<bool> {
+        self.inner.lock().ok()?.files.get(key).copied()
+    }
+
+    fn store_file(&self, key: String, exists: bool) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.files.len() >= SCRIPT_IO_LIST_CAP && !inner.files.contains_key(&key) {
+            return;
+        }
+        inner.files.insert(key, exists);
+    }
+
+    fn dir(&self, key: &str) -> Option<Option<PathBuf>> {
+        self.inner.lock().ok()?.dirs.get(key).cloned()
+    }
+
+    fn store_dir(&self, key: String, found: Option<PathBuf>) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.dirs.len() >= SCRIPT_IO_LIST_CAP && !inner.dirs.contains_key(&key) {
+            return;
+        }
+        inner.dirs.insert(key, found);
+    }
+
+    fn listing(&self, key: &str) -> Option<Vec<String>> {
+        self.inner.lock().ok()?.listings.get(key).cloned()
+    }
+
+    fn store_listing(&self, key: String, names: Vec<String>) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.listings.len() >= SCRIPT_IO_LIST_CAP && !inner.listings.contains_key(&key) {
+            return;
+        }
+        inner.listings.insert(key, names);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_script_read_does_not_hit_disk_again_until_cleared() {
+        let dir = std::env::temp_dir().join(format!("oxide-vfs-memo-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("note.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let reg = ModRegistry::discover(dir.clone(), dir.join("mods-missing"));
+        assert_eq!(reg.read_to_string("note.txt").unwrap(), "hello");
+        fs::remove_file(&file).unwrap();
+        assert_eq!(reg.read_to_string("note.txt").unwrap(), "hello");
+        reg.clear_script_io_memo();
+        assert!(reg.read_to_string("note.txt").is_err());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

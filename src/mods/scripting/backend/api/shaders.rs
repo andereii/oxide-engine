@@ -70,6 +70,9 @@ fn register_shader_presets_under(
     drop_name: &str,
     wig_name: &str,
     rain_name: &str,
+    overlay_name: &str,
+    rain_sprite_name: &str,
+    building_name: &str,
 ) {
     engine.register_fn(adj_name, |target: &str, hue: Dynamic, sat: Dynamic, bright: Dynamic, contrast: Dynamic| {
         push_adjust_color(target, hue, sat, bright, contrast)
@@ -124,7 +127,8 @@ fn register_shader_presets_under(
             with_ctx(|c| {
                 c.commands.push(ScriptCommand::SetCameraRain {
                     scale,
-                    intensity,
+                    start_intensity: intensity,
+                    end_intensity: intensity,
                     color,
                     time_scale_decay: false,
                 });
@@ -140,9 +144,72 @@ fn register_shader_presets_under(
             with_ctx(|c| {
                 c.commands.push(ScriptCommand::SetCameraRain {
                     scale,
-                    intensity,
+                    start_intensity: intensity,
+                    end_intensity: intensity,
                     color,
                     time_scale_decay: decay,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        rain_name,
+        |scale: Dynamic, start_intensity: Dynamic, end_intensity: Dynamic, color_hex: &str, decay: bool| -> Result<(), Box<EvalAltResult>> {
+            let scale = dyn_to_f64(&scale)? as f32;
+            let start_intensity = dyn_to_f64(&start_intensity)? as f32;
+            let end_intensity = dyn_to_f64(&end_intensity)? as f32;
+            let color = parse_rgb_hex3(color_hex);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCameraRain {
+                    scale,
+                    start_intensity,
+                    end_intensity,
+                    color,
+                    time_scale_decay: decay,
+                });
+            })
+        },
+    );
+    engine.register_fn(overlay_name, |target: &str, aux_path: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetShaderOverlayBlend {
+                target: target.to_string(),
+                aux_path: aux_path.to_string(),
+            });
+        })
+    });
+    engine.register_fn(
+        rain_sprite_name,
+        |target: &str, scale: Dynamic, intensity: Dynamic, color_hex: &str| -> Result<(), Box<EvalAltResult>> {
+            let scale = dyn_to_f64(&scale)? as f32;
+            let intensity = dyn_to_f64(&intensity)? as f32;
+            let color = parse_rgb_hex3(color_hex);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetShaderRainSprite {
+                    target: target.to_string(),
+                    scale,
+                    intensity,
+                    color,
+                });
+            })
+        },
+    );
+    engine.register_fn(building_name, |target: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetShaderBuilding {
+                target: target.to_string(),
+                alpha_shit: 1.0,
+            });
+        })
+    });
+    engine.register_fn(
+        building_name,
+        |target: &str, alpha_shit: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let alpha_shit = dyn_to_f64(&alpha_shit)? as f32;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetShaderBuilding {
+                    target: target.to_string(),
+                    alpha_shit,
                 });
             })
         },
@@ -150,8 +217,26 @@ fn register_shader_presets_under(
 }
 
 pub fn register_shader_api(engine: &mut Engine) {
-    register_shader_presets_under(engine, "set_adjust_color", "set_drop_shadow", "set_wiggle", "set_rain");
-    register_shader_presets_under(engine, "adjust_color", "drop_shadow", "wiggle", "rain");
+    register_shader_presets_under(
+        engine,
+        "set_adjust_color",
+        "set_drop_shadow",
+        "set_wiggle",
+        "set_rain",
+        "set_overlay_blend",
+        "set_rain_sprite",
+        "set_building",
+    );
+    register_shader_presets_under(
+        engine,
+        "adjust_color",
+        "drop_shadow",
+        "wiggle",
+        "rain",
+        "overlay_blend",
+        "rain_sprite",
+        "building",
+    );
 
     for name in ["blend", "set_blend"] {
         engine.register_fn(name, |target: &str, mode: &str| {

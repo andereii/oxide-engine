@@ -1,4 +1,5 @@
 pub mod loading;
+pub mod script_errors;
 pub mod soundtray;
 
 pub use loading::{

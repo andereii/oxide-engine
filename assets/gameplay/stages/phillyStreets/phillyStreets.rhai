@@ -183,18 +183,18 @@ fn onCreate() {
     prop_pos("phillyCars2", 1200.0, 818.0);
     prop_angle("phillyCars2", 0.0);
 
-    let s = song();
-    this.rain_start = 0.0;
-    this.rain_end = 0.1;
-    if s == "lit-up" {
-        this.rain_start = 0.1;
-        this.rain_end = 0.2;
+    let s = song().to_lower();
+    this.rain_start = 0.1;
+    this.rain_end = 0.2;
+    if s == "darnell" {
+        this.rain_start = 0.0;
+        this.rain_end = 0.1;
     } else if s == "2hot" {
         this.rain_start = 0.2;
         this.rain_end = 0.4;
     }
 
-    set_rain(3.6, this.rain_start, "#6680CC");
+    set_rain(3.6, this.rain_start, this.rain_end, "#6680CC", false);
     anim("phillyTraffic", "togreen");
 }
 
@@ -278,5 +278,5 @@ fn onSongRetry() {
     prop_pos("phillyCars2", 1200.0, 818.0);
     prop_angle("phillyCars2", 0.0);
     anim("phillyTraffic", "togreen");
-    set_rain(3.6, this.rain_start, "#6680CC");
+    set_rain(3.6, this.rain_start, this.rain_end, "#6680CC", false);
 }

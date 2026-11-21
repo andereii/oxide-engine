@@ -11,6 +11,7 @@ use super::api::{
     ScriptStateSnapshot, ScriptTimer, TweenProp, TweenTarget,
 };
 use super::backend::{RhaiBackend, ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
+use super::diagnostics::{ScriptDiagKind, ScriptDiagnostic};
 use super::events::{HookKind, ScriptEvent};
 use super::value::{ScriptLanguage, ScriptValue};
 
@@ -25,6 +26,9 @@ pub struct ScriptHost {
     cached_registry: Option<(u64, usize, Arc<ModRegistry>)>,
     pub compile_errors: Vec<String>,
     pub runtime_errors: Vec<String>,
+    pub diagnostics: Vec<ScriptDiagnostic>,
+    pub log_epoch: u64,
+    next_diag_seq: u64,
 }
 
 impl Default for ScriptHost {
@@ -45,6 +49,9 @@ impl ScriptHost {
             cached_registry: None,
             compile_errors: Vec::new(),
             runtime_errors: Vec::new(),
+            diagnostics: Vec::new(),
+            log_epoch: 0,
+            next_diag_seq: 0,
         }
     }
 
@@ -99,11 +106,11 @@ impl ScriptHost {
             match ScriptSource::from_discovered(disc) {
                 Ok(source) => {
                     if let Err(err) = self.load_source(&disc.extension, source) {
-                        self.compile_errors.push(err.to_string());
+                        self.note_script_failure(&err, false);
                     }
                 }
                 Err(err) => {
-                    self.compile_errors.push(err.to_string());
+                    self.note_script_failure(&err, false);
                 }
             }
         }
@@ -115,10 +122,65 @@ impl ScriptHost {
         self.timers.clear();
         self.compile_errors.clear();
         self.runtime_errors.clear();
+        self.diagnostics.clear();
+        self.next_diag_seq = 0;
+        self.log_epoch = self.log_epoch.wrapping_add(1);
         self.cached_registry = None;
         for backend in self.backends.values() {
             backend.invalidate_caches();
         }
+    }
+
+    fn note_script_failure(&mut self, err: &ScriptError, runtime: bool) -> Option<String> {
+        if !self.push_diagnostic(ScriptDiagnostic::from_error(err)) {
+            return None;
+        }
+        let text = err.to_string();
+        if runtime {
+            push_capped(&mut self.runtime_errors, text.clone());
+        } else {
+            push_capped(&mut self.compile_errors, text.clone());
+        }
+        Some(text)
+    }
+
+    fn note_runtime_message(&mut self, file: &str, hook: Option<&str>, message: String) -> bool {
+        let fresh = self.push_diagnostic(ScriptDiagnostic {
+            kind: ScriptDiagKind::Runtime,
+            file: file.to_string(),
+            line: None,
+            column: None,
+            hook: hook.map(str::to_string),
+            message: message.clone(),
+            repeats: 1,
+            seq: 0,
+        });
+        if fresh {
+            push_capped(&mut self.runtime_errors, message);
+        }
+        fresh
+    }
+
+    fn push_diagnostic(&mut self, mut diag: ScriptDiagnostic) -> bool {
+        if let Some(existing) = self
+            .diagnostics
+            .iter_mut()
+            .rev()
+            .find(|prev| prev.same_error(&diag))
+        {
+            existing.repeats = existing.repeats.saturating_add(1);
+            return false;
+        }
+        self.next_diag_seq = self.next_diag_seq.saturating_add(1);
+        diag.seq = self.next_diag_seq;
+        diag.repeats = 1;
+        self.diagnostics.push(diag);
+        const MAX_SCRIPT_DIAGNOSTICS: usize = 64;
+        if self.diagnostics.len() > MAX_SCRIPT_DIAGNOSTICS {
+            let overflow = self.diagnostics.len() - MAX_SCRIPT_DIAGNOSTICS;
+            self.diagnostics.drain(0..overflow);
+        }
+        true
     }
 
     pub fn script_count(&self) -> usize {
@@ -181,6 +243,7 @@ impl ScriptHost {
         depth: usize,
     ) {
         let is_create = matches!(hook, HookKind::Create);
+        let mut failures = Vec::new();
         for inst in &mut self.instances {
             if event.propagation_stopped {
                 break;
@@ -189,14 +252,18 @@ impl ScriptHost {
                 continue;
             }
             if let Err(err) = inst.call_hook(hook, event, ctx) {
-                let msg = err.to_string();
-                self.runtime_errors.push(msg.clone());
-                ctx.commands.push(ScriptCommand::Log {
-                    level: LogLevel::Error,
-                    mod_id: inst.mod_id().to_string(),
-                    message: msg,
-                });
+                failures.push((inst.mod_id().to_string(), err));
             }
+        }
+        for (mod_id, err) in failures {
+            let Some(message) = self.note_script_failure(&err, true) else {
+                continue;
+            };
+            ctx.commands.push(ScriptCommand::Log {
+                level: LogLevel::Error,
+                mod_id,
+                message,
+            });
         }
         self.absorb_context_requests(ctx, depth);
     }
@@ -249,17 +316,25 @@ impl ScriptHost {
         args: &[ScriptValue],
         ctx: &mut ScriptContext,
     ) -> Option<ScriptValue> {
-        let inst = self.instances.iter_mut().find(|i| i.id() == script_id)?;
-        let out = match inst.call_fn(fn_name, args, ctx) {
+        let found = self.instances.iter().position(|inst| inst.id() == script_id)?;
+        let call_res = {
+            let inst = &mut self.instances[found];
+            let mod_id = inst.mod_id().to_string();
+            match inst.call_fn(fn_name, args, ctx) {
+                Ok(v) => Ok(v),
+                Err(err) => Err((mod_id, err)),
+            }
+        };
+        let out = match call_res {
             Ok(v) => Some(v),
-            Err(err) => {
-                let msg = err.to_string();
-                self.runtime_errors.push(msg.clone());
-                ctx.commands.push(ScriptCommand::Log {
-                    level: LogLevel::Error,
-                    mod_id: inst.mod_id().to_string(),
-                    message: msg,
-                });
+            Err((mod_id, err)) => {
+                if let Some(message) = self.note_script_failure(&err, true) {
+                    ctx.commands.push(ScriptCommand::Log {
+                        level: LogLevel::Error,
+                        mod_id,
+                        message,
+                    });
+                }
                 None
             }
         };
@@ -362,12 +437,14 @@ impl ScriptHost {
                     "custom hook '{}' exceeded max dispatch depth ({MAX_CUSTOM_HOOK_DEPTH})",
                     req.name
                 );
-                self.runtime_errors.push(msg.clone());
-                ctx.commands.push(ScriptCommand::Log {
-                    level: LogLevel::Error,
-                    mod_id: req.sender_mod_id,
-                    message: msg,
-                });
+                if self.note_runtime_message(&req.sender_script_id, Some(req.name.as_str()), msg.clone())
+                {
+                    ctx.commands.push(ScriptCommand::Log {
+                        level: LogLevel::Error,
+                        mod_id: req.sender_mod_id,
+                        message: msg,
+                    });
+                }
             }
             return;
         }
@@ -385,6 +462,14 @@ impl ScriptHost {
             self.dispatch_at_depth(&hook, &mut ev, ctx, depth + 1);
         }
     }
+}
+
+fn push_capped(log: &mut Vec<String>, text: String) {
+    const MAX_LOG_LINES: usize = 64;
+    if log.len() >= MAX_LOG_LINES {
+        return;
+    }
+    log.push(text);
 }
 
 fn emit_tween_value(target: &TweenTarget, prop: TweenProp, val: f64, ctx: &mut ScriptContext) {
@@ -562,5 +647,136 @@ fn emit_tween_value(target: &TweenTarget, prop: TweenProp, val: f64, ctx: &mut S
             });
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::ScriptHost;
+    use super::super::api::ScriptStateSnapshot;
+    use super::super::backend::ScriptSource;
+    use super::super::diagnostics::ScriptDiagKind;
+    use super::super::events::{HookKind, ScriptEvent};
+    use crate::mods::{DiscoveredScript, ModRegistry, ModStore, ScriptScope};
+
+    #[test]
+    fn script_failures_keep_file_and_line() {
+        let dir = std::env::temp_dir().join(format!("oxide-script-err-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.rhai");
+        fs::write(&path, "fn onCreate() {\n    let x = ;\n}\n").unwrap();
+
+        let mods = ModRegistry::discover(dir.clone(), dir.join("mods-missing"));
+        let mut host = ScriptHost::with_registry(mods.clone());
+        let discovered = DiscoveredScript {
+            id: "demo:bad.rhai".into(),
+            mod_id: "demo".into(),
+            name: "bad".into(),
+            extension: "rhai".into(),
+            rel_path: "bad.rhai".into(),
+            path,
+            scope: ScriptScope::Global,
+            priority: 0,
+        };
+        host.load_discovered(std::slice::from_ref(&discovered));
+        assert_eq!(host.diagnostics.len(), 1, "{:?}", host.compile_errors);
+        assert_eq!(host.diagnostics[0].kind, ScriptDiagKind::Compile);
+        assert_eq!(host.diagnostics[0].file, "demo/bad.rhai");
+        assert_eq!(host.diagnostics[0].line, Some(2));
+
+        let source = ScriptSource::inline(
+            "runtime.rhai",
+            "demo",
+            "fn onCreate() {\n    missing;\n}\n",
+        );
+        host.load_source("rhai", source).unwrap();
+        let mut store = ModStore::with_root(&dir);
+        let mut ctx = host.make_context(ScriptStateSnapshot::empty_placeholder(), &mods, &mut store);
+        let mut event = ScriptEvent::new(HookKind::Create);
+        host.dispatch(&HookKind::Create, &mut event, &mut ctx);
+        host.dispatch(&HookKind::Create, &mut event, &mut ctx);
+
+        let runtime: Vec<_> = host
+            .diagnostics
+            .iter()
+            .filter(|diag| diag.kind == ScriptDiagKind::Runtime)
+            .collect();
+        assert_eq!(runtime.len(), 1, "{:?}", host.runtime_errors);
+        assert_eq!(runtime[0].file, "runtime.rhai");
+        assert_eq!(runtime[0].line, Some(2));
+        assert!(runtime[0].repeats >= 2, "repeats {}", runtime[0].repeats);
+        assert_eq!(host.runtime_errors.len(), 1, "{:?}", host.runtime_errors);
+        assert!(
+            runtime[0].message.to_lowercase().contains("not found"),
+            "{}",
+            runtime[0].message
+        );
+
+        let import = ScriptSource::inline(
+            "import-miss.rhai",
+            "demo",
+            "fn onCreate() {\n    import \"./MissingWeekendModule\" as missing_mod;\n}\n",
+        );
+        host.load_source("rhai", import).unwrap();
+        let mut event = ScriptEvent::new(HookKind::Create);
+        host.dispatch(&HookKind::Create, &mut event, &mut ctx);
+        let before = host.runtime_errors.len();
+        host.dispatch(&HookKind::Create, &mut event, &mut ctx);
+        assert_eq!(host.runtime_errors.len(), before);
+        let import_err = host
+            .diagnostics
+            .iter()
+            .find(|diag| diag.file == "import-miss.rhai")
+            .expect("import miss");
+        assert!(import_err.repeats >= 2, "repeats {}", import_err.repeats);
+        assert!(
+            import_err.message.to_lowercase().contains("module"),
+            "{}",
+            import_err.message
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relative_import_resolves_next_to_the_script() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxide-rel-import-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let nene = dir.join("gameplay/characters/nene");
+        fs::create_dir_all(&nene).unwrap();
+        fs::write(nene.join("ABotAtlasSprite.rhai"), "fn marker() { 1 }\n").unwrap();
+        let script_path = nene.join("nene.rhai");
+        let code = "fn onCreate() {\n    import \"./ABotAtlasSprite\" as abot_mod;\n}\n";
+        fs::write(&script_path, code).unwrap();
+
+        let mods = ModRegistry::discover(dir.clone(), dir.join("mods-missing"));
+        let mut host = ScriptHost::with_registry(mods.clone());
+        let source = super::super::backend::ScriptSource {
+            id: "assets:gameplay/characters/nene/nene.rhai".into(),
+            mod_id: "assets".into(),
+            name: "nene".into(),
+            scope: ScriptScope::Global,
+            priority: 0,
+            path: Some(script_path),
+            code: code.into(),
+        };
+        host.load_source("rhai", source).unwrap();
+        let mut store = ModStore::with_root(&dir);
+        let mut ctx = host.make_context(ScriptStateSnapshot::empty_placeholder(), &mods, &mut store);
+        let mut event = ScriptEvent::new(HookKind::Create);
+        host.dispatch(&HookKind::Create, &mut event, &mut ctx);
+        assert!(
+            host.runtime_errors.is_empty(),
+            "{:?}",
+            host.runtime_errors
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

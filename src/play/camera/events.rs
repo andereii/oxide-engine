@@ -222,6 +222,46 @@ impl PlayState {
                     force,
                 });
             }
+            "SetHealthIcon" => {
+                let side = match event.raw_value.get("char") {
+                    Some(v) => {
+                        if let Some(idx) = scalar_int(v) {
+                            match idx {
+                                0 => "bf".to_string(),
+                                1 => "dad".to_string(),
+                                2 => "gf".to_string(),
+                                _ => idx.to_string(),
+                            }
+                        } else if let Some(s) =
+                            v.as_str().map(str::trim).filter(|s| !s.is_empty())
+                        {
+                            s.to_string()
+                        } else {
+                            "bf".to_string()
+                        }
+                    }
+                    None => "bf".to_string(),
+                };
+                if let Some(char_id) = get_string(&event.raw_value, "id")
+                    .or_else(|| get_string(&event.raw_value, "charId"))
+                    .or_else(|| get_string(&event.raw_value, "icon"))
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                {
+                    self.pending_event_commands.push(ScriptCommand::SetIcon {
+                        side: side.clone(),
+                        char_id,
+                    });
+                }
+                if let Some(scale) =
+                    get_float(&event.raw_value, "scale").filter(|s| s.is_finite())
+                {
+                    self.pending_event_commands.push(ScriptCommand::SetIconScale {
+                        side,
+                        scale: scale as f32,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -293,4 +333,59 @@ fn get_bool(v: &Value, key: &str) -> Option<bool> {
 
 fn get_string(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(ToString::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::play::types::PlayStateParams;
+
+    use super::*;
+
+    #[test]
+    fn set_health_icon_maps_native_char_indices_and_scale() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        let ev_dad = parse_raw_song_event(
+            1000.0,
+            "SetHealthIcon".to_string(),
+            json!({ "char": 1, "id": "tankman-bloody", "scale": 1.25 }),
+        );
+        state.apply_due_song_event(&ev_dad);
+
+        assert_eq!(state.pending_event_commands.len(), 2);
+        assert!(matches!(
+            &state.pending_event_commands[0],
+            ScriptCommand::SetIcon { side, char_id } if side == "dad" && char_id == "tankman-bloody"
+        ));
+        assert!(matches!(
+            &state.pending_event_commands[1],
+            ScriptCommand::SetIconScale { side, scale }
+                if side == "dad" && (*scale - 1.25).abs() < 1e-5
+        ));
+
+        state.pending_event_commands.clear();
+        let ev_bf = parse_raw_song_event(
+            2000.0,
+            "SetHealthIcon".to_string(),
+            json!({ "char": 0, "charId": "pico" }),
+        );
+        state.apply_due_song_event(&ev_bf);
+        assert!(matches!(
+            state.pending_event_commands.as_slice(),
+            [ScriptCommand::SetIcon { side, char_id }] if side == "bf" && char_id == "pico"
+        ));
+
+        state.pending_event_commands.clear();
+        let ev_str = parse_raw_song_event(
+            3000.0,
+            "SetHealthIcon".to_string(),
+            json!({ "char": "gf", "icon": "nene" }),
+        );
+        state.apply_due_song_event(&ev_str);
+        assert!(matches!(
+            state.pending_event_commands.as_slice(),
+            [ScriptCommand::SetIcon { side, char_id }] if side == "gf" && char_id == "nene"
+        ));
+    }
 }

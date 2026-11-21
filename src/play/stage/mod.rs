@@ -10,5 +10,6 @@ pub use loader::{
 };
 pub use sync::{
     DynamicScriptProp, DynamicScriptText, StageCompositePiece, StageCompositeProp,
-    StagePropVisual, StageSyncState, spawn_stage_props, sync_script_texts, sync_stage_props,
+    StageCompositeQuad, StageInitialBlend, StagePropVisual, StageSyncState, spawn_stage_props,
+    sync_script_texts, sync_stage_props,
 };

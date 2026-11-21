@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use crate::animations::{AnimationController, Bopper};
 use crate::play::scene::PlayState;
+use crate::play::shaders::stage_blend_post::StagePostOverlayProp;
 use crate::play::types::PlayPhase;
 use crate::utils::conductor::advance_step_range;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
@@ -14,7 +15,8 @@ use crate::utils::ecs::{
 
 use super::super::schema::StageCoordMode;
 use super::composite::{
-    StagePiecesQuery, composite_frame_info, hide_composite_pieces, sync_composite_prop_pieces,
+    StagePiecesQuery, StageQuadsQuery, composite_frame_info, hide_composite_prop,
+    sync_composite_prop_pieces,
 };
 use super::{
     DynamicScriptProp, DynamicScriptText, StageAtlasFrameSizes, StageCompositeProp,
@@ -37,8 +39,10 @@ pub fn sync_stage_props(
         Option<&StageCompositeProp>,
         Option<&StageAtlasFrameSizes>,
         Option<&mut StagePropPixelSampler>,
+        Option<&StagePostOverlayProp>,
     )>,
     mut pieces: StagePiecesQuery,
+    mut quads: StageQuadsQuery,
 ) {
     let paused = matches!(
         state.phase,
@@ -72,13 +76,14 @@ pub fn sync_stage_props(
         composite_opt,
         frame_sizes_opt,
         sampler_opt,
+        post_ov_opt,
     ) in &mut animated_props
     {
         apply_pixel_sampler(sampler_opt, composite_opt, &sprite.image, &mut images);
         step_prop_physics(&mut vis, dt);
 
         let is_hud = dyn_opt.is_some_and(|d| d.hud);
-        let is_hidden = !vis.visible || (is_hud && !state.hud_visible);
+        let is_hidden = !vis.visible || (is_hud && state.hud_alpha <= 0.001);
         let prop_zoom = if is_hud { 1.0 } else { zoom };
         let eff_scroll_x = if is_hud {
             0.0
@@ -131,7 +136,7 @@ pub fn sync_stage_props(
                 };
 
             if is_hidden {
-                hide_composite_pieces(&composite.piece_entities, &mut pieces);
+                hide_composite_prop(composite, &mut pieces, &mut quads);
                 continue;
             }
 
@@ -148,6 +153,7 @@ pub fn sync_stage_props(
                 eff_scroll_y,
                 prop_zoom,
                 &mut pieces,
+                &mut quads,
             );
             continue;
         }
@@ -247,7 +253,14 @@ pub fn sync_stage_props(
             Quat::from_rotation_z(base_rot + rot_delta),
         );
         set_sprite_flip(&mut sprite, eff_flip_x, eff_flip_y);
-        set_visibility(&mut visibility, Visibility::Visible);
+        set_visibility(
+            &mut visibility,
+            if post_ov_opt.is_some() {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            },
+        );
     }
 }
 
@@ -297,7 +310,7 @@ pub fn sync_script_texts(
     let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
 
     for (txt, mut tf, mut vis) in &mut texts {
-        let hidden = !txt.visible || (txt.hud && !state.hud_visible);
+        let hidden = !txt.visible || (txt.hud && state.hud_alpha <= 0.001);
         if hidden {
             set_visibility(&mut vis, Visibility::Hidden);
             continue;

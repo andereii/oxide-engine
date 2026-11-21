@@ -111,17 +111,19 @@ pub fn sync_note_effects(
         }
     }
 
+    let hud_alpha = state.hud_alpha.clamp(0.0, 1.0);
     let p_strum = &state.player_strumline;
     for (vis, mut sprite, anim, mut transform, mut visibility) in &mut splashes {
         if !vis.active {
             continue;
         }
-        if !style.splash_enabled || !p_strum.show_notesplash {
+        if !style.splash_enabled || !p_strum.show_notesplash || hud_alpha <= 0.001 {
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
+        set_visibility(&mut visibility, Visibility::Visible);
         let mod_alpha = p_strum.receptors.get(vis.lane).map_or(1.0, |r| r.mod_alpha);
-        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.splash_alpha * mod_alpha));
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.splash_alpha * mod_alpha * hud_alpha));
         apply_frame_transform(
             &mut transform,
             &anim,
@@ -145,7 +147,11 @@ pub fn sync_note_effects(
 
     for (mut cov, mut sprite, mut anim, mut transform, mut visibility) in &mut covers {
         let strum = if cov.is_player { &state.player_strumline } else { &state.opponent_strumline };
-        if !style.hold_cover_enabled || !strum.show_notesplash || (strum.middlescroll && !strum.is_player) {
+        if !style.hold_cover_enabled
+            || !strum.show_notesplash
+            || (strum.middlescroll && !strum.is_player)
+            || hud_alpha <= 0.001
+        {
             cov.phase = HoldCoverPhase::Hidden;
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
@@ -162,7 +168,7 @@ pub fn sync_note_effects(
             continue;
         }
         let mod_alpha = strum.receptors.get(cov.lane).map_or(1.0, |r| r.mod_alpha);
-        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha * mod_alpha));
+        set_sprite_color(&mut sprite, Color::srgba(1.0, 1.0, 1.0, style.hold_cover_alpha * mod_alpha * hud_alpha));
         apply_frame_transform(
             &mut transform,
             &anim,
@@ -288,6 +294,7 @@ fn xorshift32(state: &mut u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::blend_alpha::screen_pixel_to_alpha;
     use super::*;
     use crate::animations::SparrowAtlas;
     use crate::play::notes::skin::NoteStyle;

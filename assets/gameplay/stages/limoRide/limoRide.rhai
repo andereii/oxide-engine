@@ -13,6 +13,7 @@ fn onCreate() {
     this.fast_car_vx = 0.0;
     this.fast_car_can_drive = true;
     prop_pos("fastCar", -12600.0, rand_int(350, 380) * 1.0);
+    set_overlay_blend("limoSunset", "gameplay/stages/limoRide/limo-overlay.png");
 }
 
 fn onUpdate() {

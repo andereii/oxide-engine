@@ -27,12 +27,14 @@ use crate::play::shaders::systems::StageShaderRuntime;
 use crate::play::song::load_song_chart_in;
 use crate::play::stage::schema::StageCharacterSlot;
 use crate::play::stage::{
-    DynamicScriptProp, StageCompositePiece, StagePropVisual, StageResource, StageSyncState,
-    load_stage_resource, spawn_stage_props,
+    DynamicScriptProp, StageCompositePiece, StageCompositeProp, StageCompositeQuad,
+    StagePropVisual, StageResource, StageSyncState, load_stage_resource, spawn_stage_props,
 };
 use crate::scripting::ScriptHost;
 use crate::utils::conductor::SongTimeChange;
-use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::utils::constants::{
+    HEALTH_BAR_HEIGHT, HEALTH_BAR_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH,
+};
 
 #[derive(SystemParam)]
 pub(crate) struct HotReloadRes<'w> {
@@ -57,8 +59,10 @@ pub(crate) struct HotReloadRes<'w> {
 
 #[derive(SystemParam)]
 pub(crate) struct HotReloadQueries<'w, 's> {
-    pub(super) stage_props: Query<'w, 's, Entity, (With<StagePropVisual>, Without<DynamicScriptProp>)>,
+    pub(super) stage_props:
+        Query<'w, 's, (Entity, Option<&'static StageCompositeProp>), (With<StagePropVisual>, Without<DynamicScriptProp>)>,
     pub(super) stage_pieces: Query<'w, 's, Entity, With<StageCompositePiece>>,
+    pub(super) stage_quads: Query<'w, 's, Entity, With<StageCompositeQuad>>,
     pub(super) dyn_props: Query<'w, 's, Entity, With<DynamicScriptProp>>,
     pub(super) actors: Query<'w, 's, (Entity, &'static mut CharacterActor)>,
     pub(super) health_icons: Query<'w, 's, Entity, With<HealthIcon>>,
@@ -158,7 +162,13 @@ pub(super) fn reload_stage_domain(
         }
     };
 
-    for entity in &q.stage_props {
+    for (entity, comp_opt) in &q.stage_props {
+        if let Some(comp) = comp_opt {
+            comp.despawn_composite_rt(commands);
+        }
+        commands.entity(entity).despawn();
+    }
+    for entity in &q.stage_quads {
         commands.entity(entity).despawn();
     }
     for entity in &q.stage_pieces {
@@ -424,9 +434,10 @@ pub(super) fn reload_skin_domain(
     for (mut bg, mut sprite) in &mut q.health_bar_bg {
         bg.bg_image = hb_handle.clone();
         bg.scale = hb_scale;
-        bg.size = [601.0 * hb_scale, 19.0 * hb_scale];
+        bg.size = [HEALTH_BAR_WIDTH * hb_scale, HEALTH_BAR_HEIGHT * hb_scale];
+        bg.alpha = new_style.health_bar.alpha.clamp(0.0, 1.0);
         sprite.image = hb_handle.clone();
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, new_style.health_bar.alpha.clamp(0.0, 1.0));
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, bg.alpha * res.state.hud_alpha.clamp(0.0, 1.0));
     }
 
     match load_noteskin_assets(&res.mods, &new_style, &res.asset_server, &mut res.mut_layouts) {
@@ -482,7 +493,7 @@ pub(super) fn reload_scripts_domain(
     }
 
     *res.script_host = ScriptHost::with_registry(res.mods.clone());
-    res.state.hud_visible = true;
+    res.state.set_hud_visible(true, true);
 
     let stage_script_source = res
         .stage_res

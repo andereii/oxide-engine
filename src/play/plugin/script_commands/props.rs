@@ -395,13 +395,25 @@ pub(crate) fn despawn_prop_by_id(
 ) {
     if let Some(pending_ent) = pending_spawned.remove(id) {
         commands.queue(move |world: &mut World| {
-            let pieces = world
+            let (pieces, rt) = world
                 .get::<StageCompositeProp>(pending_ent)
-                .map(|c| c.piece_entities.clone())
+                .map(|c| (c.piece_entities.clone(), c.composite_rt.clone()))
                 .unwrap_or_default();
             for p in pieces {
                 if world.get_entity(p).is_ok() {
                     world.despawn(p);
+                }
+            }
+            if let Some(rt) = rt {
+                if rt.camera_entity != Entity::PLACEHOLDER
+                    && world.get_entity(rt.camera_entity).is_ok()
+                {
+                    world.despawn(rt.camera_entity);
+                }
+                if rt.quad_entity != Entity::PLACEHOLDER
+                    && world.get_entity(rt.quad_entity).is_ok()
+                {
+                    world.despawn(rt.quad_entity);
                 }
             }
             if world.get_entity(pending_ent).is_ok() {
@@ -420,6 +432,7 @@ pub(crate) fn despawn_prop_by_id(
                 for &piece in &comp.piece_entities {
                     commands.entity(piece).despawn();
                 }
+                comp.despawn_composite_rt(commands);
             }
             commands.entity(entity).despawn();
         }
@@ -688,6 +701,7 @@ fn spawn_animated_script_prop(
                 atlas_settings: AtlasSettings::default(),
                 stage_matrix: atlas.stage_matrix,
                 piece_entities,
+                composite_rt: None,
             };
             let mut ec = commands.spawn((
                 placeholder,

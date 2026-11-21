@@ -26,6 +26,7 @@ pub(super) struct VfsModuleResolver {
     registry: ModRegistry,
     cache: Mutex<HashMap<PathBuf, Shared<Module>>>,
     resolution_cache: Mutex<HashMap<(Option<String>, String), PathBuf>>,
+    misses: Mutex<HashSet<(Option<String>, String)>>,
     loading: Mutex<HashSet<PathBuf>>,
 }
 
@@ -48,6 +49,7 @@ impl VfsModuleResolver {
             registry,
             cache: Mutex::new(HashMap::new()),
             resolution_cache: Mutex::new(HashMap::new()),
+            misses: Mutex::new(HashSet::new()),
             loading: Mutex::new(HashSet::new()),
         }
     }
@@ -66,6 +68,21 @@ impl VfsModuleResolver {
         if let Ok(mut resolution_cache) = self.resolution_cache.lock() {
             resolution_cache.clear();
         }
+        if let Ok(mut misses) = self.misses.lock() {
+            misses.clear();
+        }
+        self.registry.clear_script_io_memo();
+    }
+
+    fn remember_miss(&self, key: (Option<String>, String)) {
+        let Ok(mut misses) = self.misses.lock() else {
+            return;
+        };
+        const MISS_CAP: usize = 256;
+        if misses.len() >= MISS_CAP && !misses.contains(&key) {
+            return;
+        }
+        misses.insert(key);
     }
 
     fn candidate_paths(source_path: Option<&str>, raw_path: &str) -> Vec<String> {
@@ -135,6 +152,17 @@ impl ModuleResolver for VfsModuleResolver {
         pos: Position,
     ) -> Result<Shared<Module>, Box<EvalAltResult>> {
         let lookup_key = (source_path.map(str::to_string), path.to_string());
+        if self
+            .misses
+            .lock()
+            .ok()
+            .is_some_and(|misses| misses.contains(&lookup_key))
+        {
+            return Err(Box::new(EvalAltResult::ErrorModuleNotFound(
+                path.to_string(),
+                pos,
+            )));
+        }
         let cached_disk_path = self
             .resolution_cache
             .lock()
@@ -147,9 +175,13 @@ impl ModuleResolver for VfsModuleResolver {
             return Ok(cached.clone());
         }
 
-        let (disk_path, vfs_rel) = self
-            .resolve_vfs_target(source_path, path)
-            .ok_or_else(|| Box::new(EvalAltResult::ErrorModuleNotFound(path.to_string(), pos)))?;
+        let Some((disk_path, vfs_rel)) = self.resolve_vfs_target(source_path, path) else {
+            self.remember_miss(lookup_key);
+            return Err(Box::new(EvalAltResult::ErrorModuleNotFound(
+                path.to_string(),
+                pos,
+            )));
+        };
 
         if let Ok(cache) = self.cache.lock()
             && let Some(cached) = cache.get(&disk_path)
@@ -183,25 +215,38 @@ impl ModuleResolver for VfsModuleResolver {
             path: disk_path.clone(),
         };
 
-        let code = fs::read_to_string(&disk_path).map_err(|err| {
-            Box::new(EvalAltResult::ErrorInModule(
-                vfs_rel.clone(),
-                format!("failed to read module '{}': {err}", disk_path.display()).into(),
-                pos,
-            ))
-        })?;
+        let code = match fs::read_to_string(&disk_path) {
+            Ok(code) => code,
+            Err(err) => {
+                self.remember_miss(lookup_key);
+                return Err(Box::new(EvalAltResult::ErrorInModule(
+                    vfs_rel.clone(),
+                    format!("failed to read module '{}': {err}", disk_path.display()).into(),
+                    pos,
+                )));
+            }
+        };
 
-        let mut module_ast = engine.compile(&code).map_err(|err| {
-            Box::new(EvalAltResult::ErrorInModule(
-                vfs_rel.clone(),
-                Box::new(EvalAltResult::from(err)),
-                pos,
-            ))
-        })?;
+        let mut module_ast = match engine.compile(&code) {
+            Ok(ast) => ast,
+            Err(err) => {
+                self.remember_miss(lookup_key);
+                return Err(Box::new(EvalAltResult::ErrorInModule(
+                    vfs_rel.clone(),
+                    Box::new(EvalAltResult::from(err)),
+                    pos,
+                )));
+            }
+        };
         module_ast.set_source(vfs_rel.clone());
 
-        let mut module = Module::eval_ast_as_new(Scope::new(), &module_ast, engine)
-            .map_err(|err| Box::new(EvalAltResult::ErrorInModule(vfs_rel.clone(), err, pos)))?;
+        let mut module = match Module::eval_ast_as_new(Scope::new(), &module_ast, engine) {
+            Ok(module) => module,
+            Err(err) => {
+                self.remember_miss(lookup_key);
+                return Err(Box::new(EvalAltResult::ErrorInModule(vfs_rel, err, pos)));
+            }
+        };
         module.build_index();
 
         let shared = Shared::new(module);

@@ -133,15 +133,42 @@ pub(crate) fn apply_ecs_script_commands(
             }
             ScriptCommand::SetCameraRain {
                 scale,
-                intensity,
+                start_intensity,
+                end_intensity,
                 color,
                 time_scale_decay,
             } => {
                 scripts.pending_shaders.0.push(ShaderScriptCommand::SetCameraRain {
                     scale: *scale,
-                    intensity: *intensity,
+                    start_intensity: *start_intensity,
+                    end_intensity: *end_intensity,
                     color: *color,
                     time_scale_decay: *time_scale_decay,
+                });
+            }
+            ScriptCommand::SetShaderOverlayBlend { target, aux_path } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetOverlayBlend {
+                    target: target.clone(),
+                    aux_path: aux_path.clone(),
+                });
+            }
+            ScriptCommand::SetShaderRainSprite {
+                target,
+                scale,
+                intensity,
+                color,
+            } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetRainSprite {
+                    target: target.clone(),
+                    scale: *scale,
+                    intensity: *intensity,
+                    color: *color,
+                });
+            }
+            ScriptCommand::SetShaderBuilding { target, alpha_shit } => {
+                scripts.pending_shaders.0.push(ShaderScriptCommand::SetBuilding {
+                    target: target.clone(),
+                    alpha_shit: *alpha_shit,
                 });
             }
             ScriptCommand::SetBlendMode { target, mode } => {
@@ -179,6 +206,7 @@ pub(crate) fn apply_ecs_script_commands(
             | ScriptCommand::SetIconScale { .. }
             | ScriptCommand::SetIconBop { .. }
             | ScriptCommand::PlaySfx { .. }
+            | ScriptCommand::PreloadSound { .. }
             | ScriptCommand::PlaySound { .. }
             | ScriptCommand::StopSound(_)
             | ScriptCommand::PauseSound { .. }

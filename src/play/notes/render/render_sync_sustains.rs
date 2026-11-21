@@ -15,6 +15,7 @@ pub(super) fn sync_sustain_body_pool(
     strum: &Strumline,
     is_player: bool,
     style: &NoteStyle,
+    hud_alpha: f32,
     sustain_indices: [(usize, usize, f32, f32); 4],
     scratch: &mut PoolSyncScratch,
     bodies: &mut Query<
@@ -45,7 +46,7 @@ pub(super) fn sync_sustain_body_pool(
             continue;
         };
         scratch.assigned_indices.push(idx);
-        apply_body_geom(strum, style, vis_pos, note, &vis, &mut sprite, &mut transform, &mut visibility);
+        apply_body_geom(strum, style, vis_pos, note, &vis, hud_alpha, &mut sprite, &mut transform, &mut visibility);
     }
 
     for idx in start..end {
@@ -65,17 +66,19 @@ pub(super) fn sync_sustain_body_pool(
             vis.raw_width_px = raw_w;
             vis.end_raw_h = end_h;
             set_atlas_index(&mut sprite, body_idx);
-            apply_body_geom(strum, style, vis_pos, note, &vis, &mut sprite, &mut transform, &mut visibility);
+            apply_body_geom(strum, style, vis_pos, note, &vis, hud_alpha, &mut sprite, &mut transform, &mut visibility);
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_body_geom(
     strum: &Strumline,
     style: &NoteStyle,
     vis_pos: f64,
     note: &NoteSprite,
     vis: &SustainBodyVisual,
+    hud_alpha: f32,
     sprite: &mut Mut<'_, Sprite>,
     transform: &mut Mut<'_, Transform>,
     visibility: &mut Mut<'_, Visibility>,
@@ -96,7 +99,7 @@ fn apply_body_geom(
     );
     let flip_x = { let s: &Mut<'_, Sprite> = &*sprite; s.flip_x };
     set_sprite_flip(sprite, flip_x, geom.flip_y);
-    set_sprite_color(sprite, Color::srgba(1.0, 1.0, 1.0, geom.alpha * mod_alpha));
+    set_sprite_color(sprite, Color::srgba(1.0, 1.0, 1.0, geom.alpha * mod_alpha * hud_alpha));
     set_sprite_custom_size(
         sprite,
         Some(Vec2::new(
@@ -110,6 +113,7 @@ pub(super) fn sync_sustain_end_pool(
     strum: &Strumline,
     is_player: bool,
     style: &NoteStyle,
+    hud_alpha: f32,
     sustain_indices: [(usize, usize, f32, f32); 4],
     scratch: &mut PoolSyncScratch,
     ends: &mut Query<
@@ -140,7 +144,7 @@ pub(super) fn sync_sustain_end_pool(
             continue;
         };
         scratch.assigned_indices.push(idx);
-        apply_end_geom(strum, style, vis_pos, note, &vis, &mut sprite, &mut transform, &mut visibility);
+        apply_end_geom(strum, style, vis_pos, note, &vis, hud_alpha, &mut sprite, &mut transform, &mut visibility);
     }
 
     for idx in start..end {
@@ -160,17 +164,19 @@ pub(super) fn sync_sustain_end_pool(
             vis.end_raw_w = raw_w;
             vis.end_raw_h = end_h;
             set_atlas_index(&mut sprite, end_idx);
-            apply_end_geom(strum, style, vis_pos, note, &vis, &mut sprite, &mut transform, &mut visibility);
+            apply_end_geom(strum, style, vis_pos, note, &vis, hud_alpha, &mut sprite, &mut transform, &mut visibility);
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_end_geom(
     strum: &Strumline,
     style: &NoteStyle,
     vis_pos: f64,
     note: &NoteSprite,
     vis: &SustainEndVisual,
+    hud_alpha: f32,
     sprite: &mut Mut<'_, Sprite>,
     transform: &mut Mut<'_, Transform>,
     visibility: &mut Mut<'_, Visibility>,
@@ -191,7 +197,7 @@ fn apply_end_geom(
     );
     let flip_x = { let s: &Mut<'_, Sprite> = &*sprite; s.flip_x };
     set_sprite_flip(sprite, flip_x, geom.flip_y);
-    set_sprite_color(sprite, Color::srgba(1.0, 1.0, 1.0, geom.alpha * mod_alpha));
+    set_sprite_color(sprite, Color::srgba(1.0, 1.0, 1.0, geom.alpha * mod_alpha * hud_alpha));
     set_sprite_custom_size(
         sprite,
         if geom.end_height_px + 0.5 < vis.end_raw_h * style.sustains_scale {

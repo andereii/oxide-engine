@@ -302,11 +302,19 @@ pub struct CameraState {
     pub flash_color: [f32; 4],
     pub flash_timer_s: f64,
     pub flash_duration_s: f64,
-    pub flash_fade_in: bool,
     pub hud_flash_color: [f32; 4],
     pub hud_flash_timer_s: f64,
     pub hud_flash_duration_s: f64,
-    pub hud_flash_fade_in: bool,
+    pub fade_color: [f32; 4],
+    pub fade_timer_s: f64,
+    pub fade_duration_s: f64,
+    pub fade_in: bool,
+    pub fade_hold: bool,
+    pub hud_fade_color: [f32; 4],
+    pub hud_fade_timer_s: f64,
+    pub hud_fade_duration_s: f64,
+    pub hud_fade_in: bool,
+    pub hud_fade_hold: bool,
 }
 
 impl Default for CameraState {
@@ -339,11 +347,19 @@ impl Default for CameraState {
             flash_color: [1.0, 1.0, 1.0, 0.0],
             flash_timer_s: 0.0,
             flash_duration_s: 0.0,
-            flash_fade_in: false,
             hud_flash_color: [1.0, 1.0, 1.0, 0.0],
             hud_flash_timer_s: 0.0,
             hud_flash_duration_s: 0.0,
-            hud_flash_fade_in: false,
+            fade_color: [0.0, 0.0, 0.0, 0.0],
+            fade_timer_s: 0.0,
+            fade_duration_s: 0.0,
+            fade_in: false,
+            fade_hold: false,
+            hud_fade_color: [0.0, 0.0, 0.0, 0.0],
+            hud_fade_timer_s: 0.0,
+            hud_fade_duration_s: 0.0,
+            hud_fade_in: false,
+            hud_fade_hold: false,
         }
     }
 }

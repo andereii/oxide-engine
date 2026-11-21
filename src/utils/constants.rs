@@ -30,6 +30,14 @@ pub const HEALTH_ICON_ANGLE_HALF_LIFE: f64 = 0.512;
 pub const HEALTH_BAR_Y_RATIO_UPSCROLL: f32 = 0.9;
 pub const HEALTH_BAR_Y_RATIO_DOWNSCROLL: f32 = 0.1;
 pub const HEALTH_BAR_BORDER_PX: f32 = 4.0;
+pub const HEALTH_BAR_WIDTH: f32 = 601.0;
+pub const HEALTH_BAR_HEIGHT: f32 = 19.0;
+
+pub const FONT_VCR_OSD_MONO: &str = "ui/fonts/VCR OSD Mono.ttf";
+pub const SCORE_TEXT_FONT_SIZE: f32 = 20.0;
+pub const SCORE_TEXT_X_OFFSET: f32 = 190.0;
+pub const SCORE_TEXT_Y_OFFSET: f32 = 30.0;
+pub const SCORE_TEXT_Z: f32 = 10.8;
 
 pub const HEALTH_KILLER_BONUS: f64 = 2.0 / 100.0 * HEALTH_MAX;
 pub const HEALTH_SICK_BONUS: f64 = 1.5 / 100.0 * HEALTH_MAX;

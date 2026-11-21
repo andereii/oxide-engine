@@ -19,6 +19,7 @@ fn onCreate() {
     this.light_alpha = 1.0;
 
     set_prop("train", "x", TRAIN_START_X);
+    set_building("lights", 1.0);
 }
 
 fn onUpdate() {
@@ -121,7 +122,10 @@ fn onSongRetry() {
     this.train_sound_ms = 0.0;
     this.started_moving = false;
     this.train_x = TRAIN_START_X;
+    this.cur_light = 0;
+    this.light_alpha = 1.0;
     set_prop("train", "x", TRAIN_START_X);
+    prop_alpha("lights", 1.0);
     gf_anim("danceLeft");
 }
 

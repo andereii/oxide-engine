@@ -7,8 +7,8 @@ use super::super::loader::{StagePropKind, StageResource};
 use super::super::paths::parse_hex_color;
 use super::super::schema::{StageCoordMode, composite_piece_z, stage_layer_z};
 use super::{
-    StageAtlasFrameSizes, StageCompositePiece, StageCompositeProp, StagePropPixelSampler,
-    StagePropVisual,
+    StageAtlasFrameSizes, StageCompositePiece, StageCompositeProp, StageInitialBlend,
+    StagePropPixelSampler, StagePropVisual,
 };
 
 pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
@@ -22,7 +22,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
             Visibility::Hidden
         };
 
-        match &resolved.visual {
+        let mut prop_entity = match &resolved.visual {
             StagePropKind::StaticImage { texture, size } => {
                 let mut sprite = Sprite::from_image(texture.clone());
                 sprite.color = tint;
@@ -48,7 +48,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         is_pixel: d.is_pixel,
                         sampler_applied: false,
                     },
-                ));
+                ))
             }
             StagePropKind::SolidColor { color } => {
                 let solid_tint = apply_opacity(*color, d.opacity);
@@ -76,7 +76,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         stage.coord_mode,
                         size,
                     ),
-                ));
+                ))
             }
             StagePropKind::AnimatedAtlas {
                 texture,
@@ -127,7 +127,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         visual,
                         atlas_sizes,
                         pixel_sampler,
-                    ));
+                    ))
                 } else {
                     commands.spawn((
                         sprite,
@@ -137,7 +137,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         visual,
                         atlas_sizes,
                         pixel_sampler,
-                    ));
+                    ))
                 }
             }
             StagePropKind::CompositeAtlas {
@@ -195,6 +195,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     atlas_settings: *atlas_settings,
                     stage_matrix: *stage_matrix,
                     piece_entities,
+                    composite_rt: None,
                 };
                 let pixel_sampler = StagePropPixelSampler {
                     is_pixel: d.is_pixel,
@@ -213,7 +214,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         visual,
                         composite,
                         pixel_sampler,
-                    ));
+                    ))
                 } else {
                     commands.spawn((
                         placeholder,
@@ -223,9 +224,12 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                         visual,
                         composite,
                         pixel_sampler,
-                    ));
+                    ))
                 }
             }
+        };
+        if let Some(blend) = d.blend.as_ref().filter(|b| !b.trim().is_empty()) {
+            prop_entity.insert(StageInitialBlend(blend.clone()));
         }
     }
 }

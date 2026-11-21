@@ -119,6 +119,26 @@ pub fn sync_arrow_visuals(
         apply_pixel_noteskin_samplers(assets, &mut sampler_cache, &mut images);
     }
 
+    // `hud_visible(false)` fades the whole HUD, including the strumline and notes.
+    // Receptors keep their Visibility component and scale alpha by `state.hud_alpha`.
+    let hud_alpha = state.hud_alpha.clamp(0.0, 1.0);
+    if hud_alpha <= 0.001 {
+        for (_, mut sprite, _, _) in &mut receptors {
+            let color = sprite.color.with_alpha(0.0);
+            set_sprite_color(&mut sprite, color);
+        }
+        for (_, _, _, _, mut visibility) in &mut notes {
+            set_visibility(&mut visibility, Visibility::Hidden);
+        }
+        for (_, _, _, _, mut visibility) in &mut sustain_bodies {
+            set_visibility(&mut visibility, Visibility::Hidden);
+        }
+        for (_, _, _, _, mut visibility) in &mut sustain_ends {
+            set_visibility(&mut visibility, Visibility::Hidden);
+        }
+        return;
+    }
+
     let fallback_style;
     let style = if let Some(s) = skin_assets.as_ref() {
         &s.style
@@ -135,12 +155,13 @@ pub fn sync_arrow_visuals(
         .map(|s| s.sustain_indices)
         .unwrap_or([(0, 0, 52.0, 44.0); 4]);
 
-    sync_receptors(&mut state, style, &mut receptors);
+    sync_receptors(&mut state, style, hud_alpha, &mut receptors);
     for is_player in [false, true] {
         sync_note_pool(
             strumline(&state, is_player),
             is_player,
             style,
+            hud_alpha,
             note_frames,
             &mut scratch,
             &mut notes,
@@ -149,6 +170,7 @@ pub fn sync_arrow_visuals(
             strumline(&state, is_player),
             is_player,
             style,
+            hud_alpha,
             sustain_indices,
             &mut scratch,
             &mut sustain_bodies,
@@ -157,6 +179,7 @@ pub fn sync_arrow_visuals(
             strumline(&state, is_player),
             is_player,
             style,
+            hud_alpha,
             sustain_indices,
             &mut scratch,
             &mut sustain_ends,
@@ -167,6 +190,7 @@ pub fn sync_arrow_visuals(
 fn sync_receptors(
     state: &mut PlayState,
     style: &NoteStyle,
+    hud_alpha: f32,
     receptors: &mut Query<(
         &mut ReceptorVisual,
         &mut Sprite,
@@ -215,7 +239,7 @@ fn sync_receptors(
                 1.0,
                 1.0,
                 1.0,
-                style.strum_alpha * rec_state.alpha * rec_state.mod_alpha * middle_alpha,
+                style.strum_alpha * rec_state.alpha * rec_state.mod_alpha * middle_alpha * hud_alpha,
             ),
         );
 
@@ -239,6 +263,7 @@ fn sync_note_pool(
     strum: &Strumline,
     is_player: bool,
     style: &NoteStyle,
+    hud_alpha: f32,
     note_frames: [(usize, [f32; 2], bool); 4],
     scratch: &mut PoolSyncScratch,
     notes: &mut Query<
@@ -270,7 +295,7 @@ fn sync_note_pool(
         };
         scratch.assigned_indices.push(idx);
         let (_, f_off, rotated) = note_frames[vis.lane];
-        apply_note_transform(strum, style, vis_pos, note, f_off, rotated, &mut sprite, &mut transform, &mut visibility);
+        apply_note_transform(strum, style, vis_pos, note, f_off, rotated, hud_alpha, &mut sprite, &mut transform, &mut visibility);
     }
 
     for idx in start..end {
@@ -287,7 +312,7 @@ fn sync_note_pool(
             vis.lane = note.lane.index();
             let (tex_idx, f_off, rotated) = note_frames[vis.lane];
             set_atlas_index(&mut sprite, tex_idx);
-            apply_note_transform(strum, style, vis_pos, note, f_off, rotated, &mut sprite, &mut transform, &mut visibility);
+            apply_note_transform(strum, style, vis_pos, note, f_off, rotated, hud_alpha, &mut sprite, &mut transform, &mut visibility);
         }
     }
 }
@@ -300,6 +325,7 @@ fn apply_note_transform(
     note: &NoteSprite,
     frame_offset: [f32; 2],
     rotated: bool,
+    hud_alpha: f32,
     sprite: &mut Mut<'_, Sprite>,
     transform: &mut Mut<'_, Transform>,
     visibility: &mut Mut<'_, Visibility>,
@@ -339,6 +365,6 @@ fn apply_note_transform(
     let tint = if note.desaturated { 0.65 } else { 1.0 };
     set_sprite_color(
         sprite,
-        Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha * mod_alpha),
+        Color::srgba(tint, tint, tint, style.notes_alpha * note.alpha * mod_alpha * hud_alpha),
     );
 }

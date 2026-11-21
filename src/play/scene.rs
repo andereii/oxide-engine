@@ -8,9 +8,13 @@ use crate::utils::constants::{
     DEFAULT_BOP_INTENSITY, DEFAULT_CAMERA_ANGLE_DEG, DEFAULT_ZOOM_OFFSET, DEFAULT_ZOOM_RATE,
     HEALTH_MIN, HEALTH_STARTING,
 };
+use crate::utils::easing::EaseKind;
+
+const HUD_FADE_DURATION_S: f64 = 0.5;
 
 use super::hud::judgement::Tallies;
 use super::hud::popups::PopupEvent;
+use super::hud::subtitles::SubtitleCue;
 use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
 use super::types::{CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent, SongChart, SongEventData};
@@ -75,6 +79,8 @@ pub struct PlayState {
     pub score_text: String,
     pub custom_score_text: Option<String>,
     pub hud_visible: bool,
+    pub hud_alpha: f32,
+    pub hud_alpha_tween: Option<LinearTween>,
     pub master_volume: f64,
     pub strums_swapped: bool,
     pub pending_hooks: Vec<(HookKind, ScriptEvent)>,
@@ -119,6 +125,10 @@ pub struct PlayState {
     pub last_hud_key: (i64, u32, u32, i32),
     pub last_raw_audio_ms: Option<f64>,
     pub audio_finished: bool,
+    pub song_end_canceled: bool,
+    pub subtitle_cues: Vec<SubtitleCue>,
+    pub subtitle_elapsed_ms: f64,
+    pub subtitle_text: String,
     pub pending_shader_events: Vec<SongEventData>,
     pub pending_event_commands: Vec<ScriptCommand>,
 }
@@ -185,6 +195,8 @@ impl PlayState {
             score_text: String::new(),
             custom_score_text: None,
             hud_visible: true,
+            hud_alpha: 1.0,
+            hud_alpha_tween: None,
             master_volume: 1.0,
             strums_swapped: false,
             pending_hooks: Vec::new(),
@@ -229,6 +241,10 @@ impl PlayState {
             last_hud_key: (i64::MIN, u32::MAX, u32::MAX, i32::MIN),
             last_raw_audio_ms: None,
             audio_finished: false,
+            song_end_canceled: false,
+            subtitle_cues: Vec::new(),
+            subtitle_elapsed_ms: 0.0,
+            subtitle_text: String::new(),
             pending_shader_events: Vec::new(),
             pending_event_commands: Vec::new(),
         };
@@ -238,10 +254,46 @@ impl PlayState {
 
     pub fn create(&mut self) {
         self.generate_song();
-        self.player_strumline.fade_in_arrows();
-        self.opponent_strumline.fade_in_arrows();
         self.start_countdown();
         self.update_score_text();
+    }
+
+    /// Updates HUD visibility, using a short alpha fade during active play or outro while
+    /// keeping explicit cutscene hides (`is_in_cutscene` / `countdown_paused`) immediate.
+    pub fn set_hud_visible(&mut self, visible: bool, immediate: bool) {
+        let target = if visible { 1.0_f32 } else { 0.0_f32 };
+        let cutscene_hide = !visible && (self.is_in_cutscene || self.countdown_paused);
+        let duration_s = if immediate || cutscene_hide {
+            0.0
+        } else {
+            HUD_FADE_DURATION_S
+        };
+        self.fade_hud(target, duration_s, Some(EaseKind::QuadOut));
+    }
+
+    /// Fades HUD alpha toward `alpha` over `duration_s` using `ease` (`None` snaps immediately).
+    pub fn fade_hud(&mut self, alpha: f32, duration_s: f64, ease: Option<EaseKind>) {
+        if !alpha.is_finite() || !duration_s.is_finite() || duration_s < 0.0 {
+            return;
+        }
+        let target = alpha.clamp(0.0, 1.0);
+        self.hud_visible = target > 0.001;
+        let Some(ease_kind) = ease else {
+            self.hud_alpha = target;
+            self.hud_alpha_tween = None;
+            return;
+        };
+        if duration_s <= 0.0 || (self.hud_alpha - target).abs() <= 0.001 {
+            self.hud_alpha = target;
+            self.hud_alpha_tween = None;
+            return;
+        }
+        self.hud_alpha_tween = Some(LinearTween::eased(
+            f64::from(self.hud_alpha),
+            f64::from(target),
+            duration_s,
+            ease_kind,
+        ));
     }
 
     pub fn enter_loading_phase(&mut self) {
@@ -265,6 +317,8 @@ impl PlayState {
         self.countdown_ticks_remaining = 4;
         self.countdown_timer_s = 0.0;
         self.pending_countdown_step = Some(0);
+        self.player_strumline.fade_in_arrows();
+        self.opponent_strumline.fade_in_arrows();
         let offset_ms = self.start_timestamp_ms - self.conductor.beat_length_ms() * 4.0;
         self.conductor.update(offset_ms);
         self.status_message = "3... 2... 1... GO!".to_string();
@@ -310,6 +364,7 @@ impl PlayState {
         self.update_health_bar(elapsed_s);
         self.update_score_text();
         self.advance_tweens(elapsed_s);
+        self.update_subtitles(elapsed_s);
 
         let tick = self.sync_song_clock(elapsed_s, audio_time_ms);
 
@@ -358,6 +413,7 @@ impl PlayState {
         if !self.is_in_countdown
             && self.conductor.song_position_ms >= self.chart.length_ms
             && self.audio_finished
+            && !self.song_end_canceled
         {
             if self.loop_song {
                 self.pending_hooks.push((
@@ -377,6 +433,8 @@ impl PlayState {
         self.needs_reset = false;
         self.is_player_dying = false;
         self.audio_finished = false;
+        self.song_end_canceled = false;
+        self.clear_subtitles();
         self.countdown_paused = false;
         self.health = HEALTH_STARTING;
         self.health_lerp = HEALTH_STARTING;
@@ -387,7 +445,7 @@ impl PlayState {
         self.pending_popups.clear();
         self.pending_song_event_reverts.clear();
         self.custom_score_text = None;
-        self.hud_visible = true;
+        self.set_hud_visible(true, true);
         self.popups_visible = true;
         self.popup_offset = [0.0, 0.0];
         self.strums_swapped = false;
@@ -422,14 +480,18 @@ impl PlayState {
         self.camera.hud_zoom_intensity = (DEFAULT_BOP_INTENSITY - 1.0) * 2.0;
         self.camera.zoom_rate = DEFAULT_ZOOM_RATE;
         self.camera.zoom_rate_offset = DEFAULT_ZOOM_OFFSET;
+        self.camera.flash_timer_s = 0.0;
+        self.camera.hud_flash_timer_s = 0.0;
+        self.camera.fade_timer_s = 0.0;
+        self.camera.fade_hold = false;
+        self.camera.hud_fade_timer_s = 0.0;
+        self.camera.hud_fade_hold = false;
         self.player_strumline.clean();
         self.opponent_strumline.clean();
         self.player_strumline.use_custom_render_distance = false;
         self.opponent_strumline.use_custom_render_distance = false;
         self.rebuild_scroll_velocities();
         self.regen_note_data(self.start_timestamp_ms);
-        self.player_strumline.fade_in_arrows();
-        self.opponent_strumline.fade_in_arrows();
         self.pending_shader_events.clear();
         self.pending_event_commands.clear();
         self.pending_hooks
@@ -472,7 +534,43 @@ impl PlayState {
         ));
     }
 
+    pub fn load_subtitles(&mut self, cues: Vec<SubtitleCue>) {
+        self.subtitle_cues = cues;
+        self.subtitle_elapsed_ms = 0.0;
+        self.subtitle_text.clear();
+    }
+
+    pub fn clear_subtitles(&mut self) {
+        self.subtitle_cues.clear();
+        self.subtitle_elapsed_ms = 0.0;
+        self.subtitle_text.clear();
+    }
+
+    fn update_subtitles(&mut self, elapsed_s: f64) {
+        if self.subtitle_cues.is_empty() {
+            if !self.subtitle_text.is_empty() {
+                self.subtitle_text.clear();
+            }
+            return;
+        }
+
+        self.subtitle_elapsed_ms += elapsed_s.max(0.0) * 1000.0 * self.playback_rate.max(0.0);
+        let mut text = String::new();
+        for cue in &self.subtitle_cues {
+            if self.subtitle_elapsed_ms >= cue.start_ms && self.subtitle_elapsed_ms <= cue.end_ms {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&cue.text);
+            }
+        }
+        if self.subtitle_text != text {
+            self.subtitle_text = text;
+        }
+    }
+
     pub fn end_song(&mut self, playlist: &mut PlayStatePlaylist) {
+        self.song_end_canceled = false;
         self.phase = PlayPhase::Ended;
         self.last_song_end_popped = None;
         if playlist.is_story_mode {
@@ -526,5 +624,101 @@ impl PlayState {
             }
         }
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use crate::play::types::PlayStateParams;
+    use crate::utils::easing::EaseKind;
+
+    use super::PlayState;
+
+    #[test]
+    fn hud_visible_fades_out_during_play_but_snaps_on_initial_cutscene() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        assert!((state.hud_alpha - 1.0).abs() < 1e-5);
+
+        // Simulated `onCountdownStart` cutscene setup hides immediately via explicit cutscene state.
+        state.is_in_cutscene = true;
+        state.countdown_paused = true;
+        state.set_hud_visible(false, false);
+        assert!(!state.hud_visible);
+        assert!((state.hud_alpha - 0.0).abs() < 1e-5);
+        assert!(state.hud_alpha_tween.is_none());
+
+        // Revealing after cutscene fades in smoothly, then hiding during gameplay fades out smoothly.
+        state.is_in_cutscene = false;
+        state.countdown_paused = false;
+        state.set_hud_visible(true, false);
+        assert!(state.hud_visible);
+        assert!(state.hud_alpha_tween.is_some());
+        state.advance_tweens(1.0);
+        assert!((state.hud_alpha - 1.0).abs() < 1e-5);
+
+        state.start_song();
+        state.set_hud_visible(false, false);
+        assert!(!state.hud_visible);
+        assert!(state.hud_alpha_tween.is_some());
+        state.advance_tweens(0.25);
+        assert!(state.hud_alpha > 0.01 && state.hud_alpha < 0.99);
+        state.advance_tweens(0.3);
+        assert!((state.hud_alpha - 0.0).abs() < 1e-5);
+        assert!(state.hud_alpha_tween.is_none());
+    }
+
+    #[test]
+    fn hud_visible_does_not_snap_during_normal_countdown_without_cutscene() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        assert!(
+            state.starting_song
+                && state.is_in_countdown
+                && state.countdown_ticks_remaining == 4
+        );
+        state.set_hud_visible(false, false);
+        assert!(!state.hud_visible);
+        assert!(state.hud_alpha_tween.is_some());
+        assert!((state.hud_alpha - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn fade_hud_supports_partial_alpha_and_instant_snap() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        state.fade_hud(0.4, 1.0, Some(EaseKind::Linear));
+        assert!(state.hud_visible);
+        assert!(state.hud_alpha_tween.is_some());
+        state.advance_tweens(0.5);
+        assert!((state.hud_alpha - 0.7).abs() < 1e-4);
+        state.advance_tweens(0.5);
+        assert!((state.hud_alpha - 0.4).abs() < 1e-5);
+        assert!(state.hud_alpha_tween.is_none());
+
+        state.fade_hud(0.0, 0.5, None);
+        assert!(!state.hud_visible);
+        assert!((state.hud_alpha - 0.0).abs() < 1e-5);
+        assert!(state.hud_alpha_tween.is_none());
+
+        state.fade_hud(1.0, 0.0, Some(EaseKind::QuadOut));
+        assert!(state.hud_visible);
+        assert!((state.hud_alpha - 1.0).abs() < 1e-5);
+        assert!(state.hud_alpha_tween.is_none());
+    }
+
+    #[test]
+    fn start_countdown_retriggers_strumline_fade_in_after_cutscene() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        // Simulate a 4s cutscene elapsing while HUD was hidden, finishing initial fade-in tweens.
+        state.countdown_paused = true;
+        for _ in 0..8 {
+            state.player_strumline.update_notes(0.5, 0.0, 0.0);
+            state.opponent_strumline.update_notes(0.5, 0.0, 0.0);
+        }
+        assert!((state.player_strumline.receptors[0].alpha - 1.0).abs() < 1e-5);
+
+        state.start_countdown();
+        for lane in 0..state.player_strumline.receptors.len() {
+            assert!((state.player_strumline.receptors[lane].alpha - 0.0).abs() < 1e-5);
+            assert!((state.player_strumline.receptors[lane].y_offset - (-10.0)).abs() < 1e-5);
+            assert!((state.opponent_strumline.receptors[lane].alpha - 0.0).abs() < 1e-5);
+        }
+    }
 }

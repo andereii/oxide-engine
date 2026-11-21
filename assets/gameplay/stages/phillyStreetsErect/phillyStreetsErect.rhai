@@ -195,14 +195,22 @@ fn onCreate() {
     prop_angle("phillyCars2", 0.0);
     tint_mist();
 
-    let s = song();
-    this.rain_start = 0.0;
-    if s == "lit-up" {
-        this.rain_start = 0.01;
+    set_adjust_color("bf", -5.0, -40.0, -20.0, -25.0);
+    set_adjust_color("dad", -5.0, -40.0, -20.0, -25.0);
+    set_adjust_color("gf", -5.0, -40.0, -20.0, -25.0);
+
+    let s = song().to_lower();
+    this.rain_start = 0.01;
+    this.rain_end = 0.02;
+    if s == "darnell" {
+        this.rain_start = 0.0;
+        this.rain_end = 0.01;
     } else if s == "2hot" {
         this.rain_start = 0.02;
+        this.rain_end = 0.04;
     }
 
+    set_rain(3.6, this.rain_start, this.rain_end, "#A8ADB5", false);
     anim("phillyTraffic", "togreen");
 }
 
@@ -297,5 +305,5 @@ fn onSongRetry() {
     prop_angle("phillyCars2", 0.0);
     tint_mist();
     anim("phillyTraffic", "togreen");
-    set_rain(3.6, this.rain_start, "#A8ADB5");
+    set_rain(3.6, this.rain_start, this.rain_end, "#A8ADB5", false);
 }

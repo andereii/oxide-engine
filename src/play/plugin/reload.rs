@@ -17,7 +17,7 @@ use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
 use super::super::shaders::systems::ShaderScriptCommand;
 use super::super::song::{SongSelection, load_song_chart_in};
-use super::super::stage::StageCompositePiece;
+use super::super::stage::{StageCompositePiece, StageCompositeQuad};
 use super::super::types::{PlayPhase, PlayStateParams, SongChart};
 use super::load_pipeline::{PlayLoadPipeline, begin_play_scene_load};
 use super::{AudioTickParams, ScriptHudAndTextParams, ScriptTickParams};
@@ -28,6 +28,7 @@ pub(super) type ReloadCleanupQuery<'w, 's> = Query<
     Entity,
     Or<(
         With<StageCompositePiece>,
+        With<StageCompositeQuad>,
         With<CountdownGraphicVisual>,
         With<HealthBarBgVisual>,
         With<HealthBarFillVisual>,
@@ -134,7 +135,10 @@ pub(super) fn execute_song_reload(
     for (ent, _, _, _, _, _) in &hud_texts.texts {
         commands.entity(ent).despawn();
     }
-    for (ent, _, _, _, _, _) in &scripts.props {
+    for (ent, _, _, _, _, comp_opt) in &scripts.props {
+        if let Some(comp) = comp_opt {
+            comp.despawn_composite_rt(commands);
+        }
         commands.entity(ent).despawn();
     }
     for (ent, actor) in &scripts.actors {
@@ -152,6 +156,7 @@ pub(super) fn execute_song_reload(
         commands.entity(ent).despawn();
     }
     audio_res.audio.despawn_all(commands);
+    audio_res.sfx.preloaded_sounds.clear();
 
     selection.song_id = song_id;
     if let Some(d) = diff_opt {

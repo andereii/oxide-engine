@@ -9,6 +9,24 @@ use crate::scripting::api::ScriptContext;
 use crate::scripting::events::{HookKind, ScriptEvent};
 use crate::scripting::value::{ScriptLanguage, ScriptValue};
 
+/// File and optional 1-based line/column for a script failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptLoc {
+    pub file: String,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+}
+
+impl std::fmt::Display for ScriptLoc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.line, self.column) {
+            (Some(line), Some(column)) => write!(f, "{}:{line}:{column}", self.file),
+            (Some(line), None) => write!(f, "{}:{line}", self.file),
+            _ => f.write_str(&self.file),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ScriptError {
     #[error("failed to read script {path}: {source}")]
@@ -19,11 +37,16 @@ pub enum ScriptError {
     },
     #[error("no scripting backend registered for extension '.{0}'")]
     UnsupportedExtension(String),
-    #[error("compile error in {script_id}: {message}")]
-    Compile { script_id: String, message: String },
-    #[error("runtime error in {script_id} ({hook}): {message}")]
+    #[error("compile error in {loc}: {message}")]
+    Compile {
+        script_id: String,
+        loc: ScriptLoc,
+        message: String,
+    },
+    #[error("runtime error in {loc} ({hook}): {message}")]
     Runtime {
         script_id: String,
+        loc: ScriptLoc,
         hook: String,
         message: String,
     },

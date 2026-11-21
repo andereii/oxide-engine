@@ -5,4 +5,4 @@ mod rhai_resolver;
 pub mod traits;
 
 pub use rhai::RhaiBackend;
-pub use traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptSource};
+pub use traits::{ScriptBackend, ScriptError, ScriptInstance, ScriptLoc, ScriptSource};

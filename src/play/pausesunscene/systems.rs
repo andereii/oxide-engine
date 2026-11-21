@@ -12,7 +12,7 @@ use crate::utils::alphabet::{
     AlphabetChar, AlphabetFontCache, AlphabetText, AtlasFont, set_alphabet_text_alpha,
     spawn_alphabet_text,
 };
-use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::utils::constants::{FONT_VCR_OSD_MONO, SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::easing::EaseKind;
 
 use super::super::plugin::PendingSongReload;
@@ -332,7 +332,7 @@ pub(super) fn sync_pause_subscene(
         ));
 
         let font_handle: Handle<Font> =
-            asset_server.load(resolve_asset(mods_ref, "ui/fonts/VCR OSD Mono.ttf"));
+            asset_server.load(resolve_asset(mods_ref, FONT_VCR_OSD_MONO));
         let right_x = SCREEN_WIDTH * 0.5 - 20.0;
 
         let diff_title = to_title_case(&state.current_difficulty);

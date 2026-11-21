@@ -417,18 +417,24 @@ fn push_sprite_piece(
     });
 }
 
+/// Resolves the active child frame index for a symbol instance, returning `None`
+/// when `SingleFrame` (`SF`) points past the end of the symbol (`first_frame >= dur`)
+/// or when the target symbol has no frames (`dur == 0`), matching `flixel-animate`.
 fn resolve_child_tick(
     loop_mode: &str,
     first_frame: usize,
     last_frame: isize,
     rel_tick: usize,
     dur: usize,
-) -> usize {
-    let max_idx = dur.saturating_sub(1);
-    let start = first_frame.min(max_idx);
-    if loop_mode.eq_ignore_ascii_case("SF") || loop_mode.eq_ignore_ascii_case("singleframe") {
-        return start;
+) -> Option<usize> {
+    if dur == 0 {
+        return None;
     }
+    if loop_mode.eq_ignore_ascii_case("SF") || loop_mode.eq_ignore_ascii_case("singleframe") {
+        return (first_frame < dur).then_some(first_frame);
+    }
+    let max_idx = dur - 1;
+    let start = first_frame.min(max_idx);
     let end = if last_frame >= 0 && (last_frame as usize) >= start {
         (last_frame as usize).min(max_idx)
     } else {
@@ -436,9 +442,9 @@ fn resolve_child_tick(
     };
     let span = end.saturating_sub(start).saturating_add(1).max(1);
     if loop_mode.eq_ignore_ascii_case("PO") || loop_mode.eq_ignore_ascii_case("playonce") {
-        (start + rel_tick).min(end)
+        Some((start + rel_tick).min(end))
     } else {
-        start + (rel_tick % span)
+        Some(start + (rel_tick % span))
     }
 }
 
@@ -475,24 +481,25 @@ fn collect_tick(
             }
             if let Some(sym) = &elem.symbol_name {
                 if let Some(sub_layers) = find_symbol_layers(atlas, sym) {
-                    let dur = layers_duration(sub_layers).max(1);
-                    let child_tick = resolve_child_tick(
+                    let dur = layers_duration(sub_layers);
+                    if let Some(child_tick) = resolve_child_tick(
                         &elem.loop_mode,
                         elem.first_frame,
                         elem.last_frame,
                         rel_tick,
                         dur,
-                    );
-                    collect_tick(
-                        atlas,
-                        indices,
-                        sub_layers,
-                        child_tick,
-                        combined,
-                        elem_color,
-                        depth + 1,
-                        out,
-                    );
+                    ) {
+                        collect_tick(
+                            atlas,
+                            indices,
+                            sub_layers,
+                            child_tick,
+                            combined,
+                            elem_color,
+                            depth + 1,
+                            out,
+                        );
+                    }
                 } else if let Some(bm) = &elem.bitmap_fallback {
                     push_sprite_piece(
                         atlas,
@@ -532,4 +539,23 @@ fn mul_affine(a: [f32; 6], b: [f32; 6]) -> [f32; 6] {
         a[0] * b[4] + a[2] * b[5] + a[4],
         a[1] * b[4] + a[3] * b[5] + a[5],
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_child_tick;
+
+    #[test]
+    fn single_frame_out_of_range_returns_none() {
+        assert_eq!(resolve_child_tick("SF", 8, -1, 0, 2), None);
+        assert_eq!(resolve_child_tick("singleframe", 2, -1, 5, 2), None);
+        assert_eq!(resolve_child_tick("SF", 1, -1, 5, 2), Some(1));
+        assert_eq!(resolve_child_tick("LP", 0, -1, 0, 0), None);
+    }
+
+    #[test]
+    fn loop_and_play_once_ticks_clamp_within_span() {
+        assert_eq!(resolve_child_tick("PO", 1, -1, 10, 4), Some(3));
+        assert_eq!(resolve_child_tick("LP", 1, 2, 3, 4), Some(2));
+    }
 }
