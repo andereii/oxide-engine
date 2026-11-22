@@ -23,6 +23,8 @@ fn parse_text_anchor(align: &str) -> Anchor {
 pub(super) fn handle_text_cmd(
     cmd: &ScriptCommand,
     commands: &mut Commands,
+    asset_server: &AssetServer,
+    mods: &crate::mods::ModRegistry,
     texts: &mut TextsQuery,
 ) {
     match cmd {
@@ -42,14 +44,26 @@ pub(super) fn handle_text_cmd(
                     commands.entity(ent).despawn();
                 }
             }
-            let _ = font;
+            let mut text_font = TextFont {
+                font_size: FontSize::Px(*size),
+                ..default()
+            };
+            if let Some(font_name) = font.as_deref()
+                && !font_name.trim().is_empty()
+            {
+                let rel = if font_name.contains('/') {
+                    font_name.to_string()
+                } else {
+                    format!("ui/fonts/{font_name}")
+                };
+                if let Some(srv) = mods.resolve_asset_server_path(&rel) {
+                    text_font.font = asset_server.load(srv);
+                }
+            }
             let anchor = parse_text_anchor(align);
             let mut ec = commands.spawn((
                 Text2d::new(text.clone()),
-                TextFont {
-                    font_size: FontSize::Px(*size),
-                    ..default()
-                },
+                text_font,
                 TextColor(Color::srgba(color[0], color[1], color[2], color[3])),
                 anchor,
                 Transform::from_xyz(0.0, 0.0, *z),
@@ -90,6 +104,21 @@ pub(super) fn handle_text_cmd(
                     }
                     if let Some(al) = align {
                         *anchor = parse_text_anchor(al);
+                    }
+                }
+            }
+        }
+        ScriptCommand::SetTextFont { id, font } => {
+            let rel = if font.contains('/') {
+                font.clone()
+            } else {
+                format!("ui/fonts/{font}")
+            };
+            if let Some(srv) = mods.resolve_asset_server_path(&rel) {
+                let handle: Handle<Font> = asset_server.load(srv);
+                for (_, txt, _, mut tf, _, _) in texts.iter_mut() {
+                    if txt.id == *id {
+                        tf.font = handle.clone();
                     }
                 }
             }

@@ -134,6 +134,8 @@ pub(super) struct ScriptHudAndTextParams<'w, 's> {
     >,
     pub(super) pending_reload: ResMut<'w, PendingSongReload>,
     pub(super) pending_seek: ResMut<'w, PendingSongSeek>,
+    pub(super) dialogue: ResMut<'w, super::cutscene::DialogueRuntime>,
+    pub(super) video: ResMut<'w, super::cutscene::VideoCutsceneState>,
 }
 
 impl Plugin for PlayPlugin {
@@ -213,6 +215,7 @@ impl Plugin for PlayPlugin {
             .add_plugins((
                 OxideAudioPlugin,
                 PauseSubScenePlugin,
+                super::cutscene::CutscenePlugin,
                 super::shaders::FunkinShadersPlugin {
                     enabled: !self.flags.no_shaders,
                 },

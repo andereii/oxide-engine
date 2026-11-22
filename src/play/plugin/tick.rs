@@ -252,6 +252,8 @@ pub(super) fn tick_play_state(
     if state.needs_reset {
         audio_res.audio.pause(&mut audio_res.sinks);
         audio_res.sync.was_countdown = true;
+        hud_texts.dialogue.queue_cleanup();
+        hud_texts.video.queue_cleanup();
     }
 
     if let Some(seek_ms) = hud_texts.pending_seek.0.take() {
@@ -277,6 +279,11 @@ pub(super) fn tick_play_state(
             );
         }
     }
+
+    state.cutscene_dialogue_active = hud_texts.dialogue.active;
+    state.cutscene_video_active = hud_texts.video.active;
+    state.cutscene_dialogue_speaker = hud_texts.dialogue.current_speaker_id.clone();
+    state.cutscene_dialogue_box = hud_texts.dialogue.current_box_id.clone();
 
     let hooks = std::mem::take(&mut state.pending_hooks);
     let mut ecs_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();

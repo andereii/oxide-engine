@@ -196,6 +196,8 @@ pub(super) fn execute_song_reload(
         next_state.status_message = err;
     }
     *state = next_state;
+    hud_texts.dialogue.queue_cleanup();
+    hud_texts.video.queue_cleanup();
     audio_res.sync.was_countdown = state.is_in_countdown;
     audio_res.sync.was_paused = false;
 

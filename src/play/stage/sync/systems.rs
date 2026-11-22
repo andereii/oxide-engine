@@ -83,7 +83,8 @@ pub fn sync_stage_props(
         step_prop_physics(&mut vis, dt);
 
         let is_hud = dyn_opt.is_some_and(|d| d.hud);
-        let is_hidden = !vis.visible || (is_hud && state.hud_alpha <= 0.001);
+        let is_cutscene_overlay = is_hud && vis.z_layer >= 50.0;
+        let is_hidden = !vis.visible || (is_hud && !is_cutscene_overlay && state.hud_alpha <= 0.001);
         let prop_zoom = if is_hud { 1.0 } else { zoom };
         let eff_scroll_x = if is_hud {
             0.0
@@ -310,7 +311,8 @@ pub fn sync_script_texts(
     let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
 
     for (txt, mut tf, mut vis) in &mut texts {
-        let hidden = !txt.visible || (txt.hud && state.hud_alpha <= 0.001);
+        let is_cutscene_overlay = txt.hud && txt.z_layer >= 50.0;
+        let hidden = !txt.visible || (txt.hud && !is_cutscene_overlay && state.hud_alpha <= 0.001);
         if hidden {
             set_visibility(&mut vis, Visibility::Hidden);
             continue;

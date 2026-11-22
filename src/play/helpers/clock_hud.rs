@@ -12,6 +12,10 @@ use super::super::scene::PlayState;
 
 impl PlayState {
     pub(crate) fn sync_song_clock(&mut self, elapsed_s: f64, audio_time_ms: Option<f64>) -> ConductorUpdate {
+        if self.is_in_countdown && self.countdown_paused {
+            self.last_raw_audio_ms = None;
+            return ConductorUpdate::default();
+        }
         let delta_ms = elapsed_s * 1000.0 * self.playback_rate;
         let prev_pos = self.conductor.song_position_ms;
         let predicted_ms = prev_pos + delta_ms;

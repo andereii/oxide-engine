@@ -196,7 +196,14 @@ pub(super) fn handle_play_input(
             state.resume();
             return;
         } else if state.may_pause_game {
-            state.pause(PauseMode::Standard);
+            let mode = if state.cutscene_dialogue_active {
+                PauseMode::Conversation
+            } else if state.cutscene_video_active {
+                PauseMode::Cutscene
+            } else {
+                PauseMode::Standard
+            };
+            state.pause(mode);
             return;
         }
     }
