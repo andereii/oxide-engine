@@ -16,7 +16,8 @@ use crate::play::camera::hud::hud_render_layer;
 use crate::play::playlist::PlayStatePlaylist;
 use crate::play::scene::PlayState;
 use crate::play::types::PlayPhase;
-use crate::scripting::{HookKind, ScriptEvent, parse_hex_rgba};
+use crate::scripting::api::parse_hex_rgba;
+use crate::scripting::{HookKind, ScriptEvent};
 use crate::ui::SoundTrayState;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use crate::utils::ecs::{set_atlas_index, set_visibility};
@@ -272,12 +273,10 @@ fn to_base_anims(defs: &[DialogueAnimDef]) -> Vec<BaseAnimationData> {
             } else {
                 [0.0, 0.0]
             },
-            frame_rate: if d.frame_rate > 0.0 { d.frame_rate } else { 24.0 },
+            frame_rate: (if d.frame_rate > 0.0 { d.frame_rate } else { 24.0 }) as f32,
             looped: d.looped,
-            flip_x: false,
-            flip_y: false,
             frame_indices: d.frame_indices.clone(),
-            asset_path: None,
+            ..Default::default()
         })
         .collect()
 }
@@ -540,7 +539,8 @@ fn apply_current_entry_visuals(
                 ..default()
             };
             if let Some(font_srv) = resolve_font_path(mods, &bdata.text.font_family) {
-                text_font.font = asset_server.load(font_srv);
+                let h: Handle<Font> = asset_server.load(font_srv);
+                text_font.font = h.into();
             }
             let wrap_w = if bdata.text.width > 10.0 {
                 bdata.text.width
@@ -832,7 +832,7 @@ pub fn tick_dialogue_system(
     // Advance box/speaker animations
     for (mut spr, _, ctrl_opt, _, _, is_box, _) in &mut sprites {
         if let Some(mut ctrl) = ctrl_opt {
-            ctrl.update(dt);
+            ctrl.update(dt as f32, None);
             if let Some(idx) = ctrl.current_atlas_index() {
                 set_atlas_index(&mut spr, idx);
             }

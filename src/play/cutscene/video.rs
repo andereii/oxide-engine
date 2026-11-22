@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -60,7 +61,7 @@ pub struct VideoCutsceneState {
     pub skip_prompt_shown: bool,
     pub stream_ended: bool,
     pub child: Option<Child>,
-    pub frame_rx: Option<Receiver<Vec<u8>>>,
+    pub frame_rx: Option<Mutex<Receiver<Vec<u8>>>>,
     pub texture_handle: Option<Handle<Image>>,
     pub backdrop_entity: Option<Entity>,
     pub frame_entity: Option<Entity>,
@@ -300,7 +301,7 @@ pub fn tick_video_cutscene_system(
 
                 vid.active = true;
                 vid.child = Some(child);
-                vid.frame_rx = Some(rx);
+                vid.frame_rx = Some(Mutex::new(rx));
                 vid.elapsed_s = 0.0;
                 vid.frame_accum_s = 0.0;
                 vid.can_skip = false;
@@ -354,7 +355,8 @@ pub fn tick_video_cutscene_system(
                     ..default()
                 };
                 if let Some(font_srv) = mods.resolve_asset_server_path("ui/fonts/VCR OSD Mono.ttf") {
-                    skip_font.font = asset_server.load(font_srv);
+                    let h: Handle<Font> = asset_server.load(font_srv);
+                    skip_font.font = h.into();
                 }
                 let skip_ent = commands
                     .spawn((
@@ -427,7 +429,9 @@ pub fn tick_video_cutscene_system(
     let frame_period = 1.0 / VIDEO_FPS;
     while vid.frame_accum_s >= frame_period {
         vid.frame_accum_s -= frame_period;
-        if let Some(rx) = vid.frame_rx.as_ref() {
+        if let Some(rx_lock) = vid.frame_rx.as_ref()
+            && let Ok(rx) = rx_lock.lock()
+        {
             match rx.try_recv() {
                 Ok(bytes) => {
                     if let Some(tex_h) = vid.texture_handle.as_ref()

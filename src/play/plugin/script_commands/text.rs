@@ -57,7 +57,8 @@ pub(super) fn handle_text_cmd(
                     format!("ui/fonts/{font_name}")
                 };
                 if let Some(srv) = mods.resolve_asset_server_path(&rel) {
-                    text_font.font = asset_server.load(srv);
+                    let h: Handle<Font> = asset_server.load(srv);
+                    text_font.font = h.into();
                 }
             }
             let anchor = parse_text_anchor(align);
@@ -118,7 +119,7 @@ pub(super) fn handle_text_cmd(
                 let handle: Handle<Font> = asset_server.load(srv);
                 for (_, txt, _, mut tf, _, _) in texts.iter_mut() {
                     if txt.id == *id {
-                        tf.font = handle.clone();
+                        tf.font = handle.clone().into();
                     }
                 }
             }
