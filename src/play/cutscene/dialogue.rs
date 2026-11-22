@@ -796,7 +796,7 @@ pub fn tick_dialogue_system(
         if let Some(mut px) = px_opt
             && px.is_pixel
             && !px.applied
-            && let Some(img) = images.get_mut(&spr.image)
+            && let Some(mut img) = images.get_mut(&spr.image)
         {
             img.sampler = ImageSampler::nearest();
             px.applied = true;

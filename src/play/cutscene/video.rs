@@ -429,23 +429,27 @@ pub fn tick_video_cutscene_system(
     let frame_period = 1.0 / VIDEO_FPS;
     while vid.frame_accum_s >= frame_period {
         vid.frame_accum_s -= frame_period;
+        let mut ended = false;
         if let Some(rx_lock) = vid.frame_rx.as_ref()
             && let Ok(rx) = rx_lock.lock()
         {
             match rx.try_recv() {
                 Ok(bytes) => {
                     if let Some(tex_h) = vid.texture_handle.as_ref()
-                        && let Some(img) = images.get_mut(tex_h)
+                        && let Some(mut img) = images.get_mut(tex_h)
                     {
                         img.data = Some(bytes);
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    vid.stream_ended = true;
-                    break;
+                    ended = true;
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
             }
+        }
+        if ended {
+            vid.stream_ended = true;
+            break;
         }
     }
 
