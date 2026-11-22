@@ -462,6 +462,7 @@ pub(super) fn handle_pause_input(
     mut pending_reload: ResMut<PendingSongReload>,
     mut dialogue: ResMut<crate::play::cutscene::DialogueRuntime>,
     mut video: ResMut<crate::play::cutscene::VideoCutsceneState>,
+    mut app_scene: ResMut<crate::ui::AppScene>,
     mut exit: MessageWriter<AppExit>,
     mut menu_entries: Query<&mut PauseMenuEntryVisual>,
     mut meta_items: Query<(&PauseMetadataItem, &mut Text2d, &mut Visibility), Without<PauseBackgroundVisual>>,
@@ -616,7 +617,12 @@ pub(super) fn handle_pause_input(
                 }
                 PauseMenuAction::ExitToMenu | PauseMenuAction::ReturnToChartEditor => {
                     pause.allow_input = false;
-                    exit.write(AppExit::Success);
+                    if app_scene.started_from_cli {
+                        exit.write(AppExit::Success);
+                    } else {
+                        app_scene.exit_to_menu_requested = true;
+                        state.resume();
+                    }
                 }
             }
         }

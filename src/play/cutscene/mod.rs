@@ -17,7 +17,8 @@ impl Plugin for CutscenePlugin {
                 (
                     dialogue::tick_dialogue_system,
                     video::tick_video_cutscene_system,
-                ),
+                )
+                    .run_if(crate::ui::in_play_scene),
             );
     }
 }

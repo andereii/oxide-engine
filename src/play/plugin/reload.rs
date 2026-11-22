@@ -186,6 +186,7 @@ pub(super) fn execute_song_reload(
         practice_mode: state.is_practice_mode,
         bot_play_mode: state.is_bot_play_mode,
         minimal_mode: state.is_minimal_mode,
+        downscroll: state.player_strumline.is_downscroll,
         start_timestamp_ms: 0.0,
         playback_rate: state.playback_rate,
         ..default()

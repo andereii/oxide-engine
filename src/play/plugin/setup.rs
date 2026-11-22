@@ -134,23 +134,17 @@ pub(crate) fn seed_stage_and_chars_into_state(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn setup_play_scene(
-    mut commands: Commands,
-    mods: Res<ModRegistry>,
-    asset_server: Res<AssetServer>,
-    mut state: ResMut<PlayState>,
-    mut preload: ResMut<PlayPreloadTracker>,
-    mut loading_screen: ResMut<LoadingScreenState>,
-    mut load_pipeline: ResMut<PlayLoadPipeline>,
+pub(super) fn ensure_play_hud_spawned(
+    commands: &mut Commands,
+    mods: &ModRegistry,
+    asset_server: &AssetServer,
+    app_scene: &mut crate::ui::AppScene,
 ) {
-    spawn_hud_camera(&mut commands);
-    begin_play_scene_load(
-        &mut state,
-        Some(&mut preload),
-        &mut loading_screen,
-        &mut load_pipeline,
-    );
+    if app_scene.play_hud_spawned {
+        return;
+    }
+    app_scene.play_hud_spawned = true;
+    spawn_hud_camera(commands);
 
     let score_font_path = mods
         .resolve_asset_server_path(FONT_VCR_OSD_MONO)
@@ -179,7 +173,31 @@ pub(super) fn setup_play_scene(
         HudTextVisual,
     ));
 
-    spawn_subtitle_visuals(&mut commands, score_font);
+    spawn_subtitle_visuals(commands, score_font);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn setup_play_scene(
+    mut commands: Commands,
+    mods: Res<ModRegistry>,
+    asset_server: Res<AssetServer>,
+    mut app_scene: ResMut<crate::ui::AppScene>,
+    mut state: ResMut<PlayState>,
+    mut preload: ResMut<PlayPreloadTracker>,
+    mut loading_screen: ResMut<LoadingScreenState>,
+    mut load_pipeline: ResMut<PlayLoadPipeline>,
+) {
+    if app_scene.current != crate::ui::ActiveScene::Play {
+        state.enter_loading_phase();
+        return;
+    }
+    ensure_play_hud_spawned(&mut commands, &mods, &asset_server, &mut app_scene);
+    begin_play_scene_load(
+        &mut state,
+        Some(&mut preload),
+        &mut loading_screen,
+        &mut load_pipeline,
+    );
 }
 
 pub(crate) fn load_and_init_scripts(

@@ -62,7 +62,7 @@ impl Plugin for FunkinShadersPlugin {
             .init_resource::<StageShaderRuntime>();
 
         if !self.enabled {
-            app.add_systems(Update, drain_disabled_shader_queues);
+            app.add_systems(Update, drain_disabled_shader_queues.run_if(crate::ui::in_play_scene));
             return;
         }
 
@@ -85,7 +85,8 @@ impl Plugin for FunkinShadersPlugin {
             )
                 .chain()
                 .after(sync_stage_props)
-                .after(sync_characters),
+                .after(sync_characters)
+                .run_if(crate::ui::in_play_scene),
         );
     }
 }
