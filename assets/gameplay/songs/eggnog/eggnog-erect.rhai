@@ -21,6 +21,7 @@ fn onCreate() {
 fn onSongRetry() {
     this.cutscene_skipped = false;
     this.can_skip = false;
+    char_vis("dad", true);
     cleanup_eggnog_cutscene();
 }
 
@@ -59,7 +60,7 @@ fn start_eggnog_cutscene() {
         santa_z - 0.05,
         []
     );
-    set_char_vis("dad", false);
+    char_vis("dad", false);
     spawn_atlas(
         "eggnog_parents_shoot",
         "gameplay/stages/mallXmasErect/cutscene/parents-shoot",

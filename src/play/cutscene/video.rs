@@ -106,7 +106,7 @@ fn find_ffmpeg() -> Option<String> {
     Some("ffmpeg".to_string())
 }
 
-fn decode_video_audio_wav(ffmpeg_bin: &str, video_path: &Path) -> Option<Vec<u8>> {
+fn decode_video_audio_ogg(ffmpeg_bin: &str, video_path: &Path) -> Option<Vec<u8>> {
     let mut cmd = Command::new(ffmpeg_bin);
     cmd.args([
         "-v",
@@ -118,8 +118,12 @@ fn decode_video_audio_wav(ffmpeg_bin: &str, video_path: &Path) -> Option<Vec<u8>
         "2",
         "-ar",
         "44100",
+        "-c:a",
+        "libvorbis",
+        "-q:a",
+        "4",
         "-f",
-        "wav",
+        "ogg",
         "pipe:1",
     ])
     .stdout(Stdio::piped())
@@ -380,10 +384,10 @@ pub fn tick_video_cutscene_system(
                     .id();
                 vid.skip_text_entity = Some(skip_ent);
 
-                // Audio
-                if let Some(wav_bytes) = decode_video_audio_wav(&ffmpeg_bin, &video_file) {
+                // Audio (decoded to Ogg Vorbis so Bevy's vorbis decoder accepts it cleanly)
+                if let Some(ogg_bytes) = decode_video_audio_ogg(&ffmpeg_bin, &video_file) {
                     let audio_handle = audio_sources.add(AudioSource {
-                        bytes: wav_bytes.into(),
+                        bytes: ogg_bytes.into(),
                     });
                     let audio_ent = commands
                         .spawn((

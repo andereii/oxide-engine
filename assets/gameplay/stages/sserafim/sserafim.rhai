@@ -195,6 +195,11 @@ fn sync_hsbc_all(state) {
     for t in prop_targets() {
         shader_vec(t, "vec0", state.hue, state.sat, state.bright, state.contrast);
     }
+    for t in ["sserafim_cutscene", "sserafim_gf", "sserafim_bf"] {
+        if prop_exists(t) {
+            shader_vec(t, "vec0", state.hue, state.sat, state.bright, state.contrast);
+        }
+    }
 }
 
 fn sync_params_all(state) {
@@ -203,6 +208,11 @@ fn sync_params_all(state) {
     }
     for t in prop_targets() {
         shader_vec(t, "vec1", state.darken_amount, state.pulse_strength, state.truck_strength, 0.0);
+    }
+    for t in ["sserafim_cutscene", "sserafim_gf", "sserafim_bf"] {
+        if prop_exists(t) {
+            shader_vec(t, "vec1", state.darken_amount, state.pulse_strength, state.truck_strength, 1.0);
+        }
     }
 }
 
@@ -482,11 +492,25 @@ fn sserafim_set_cutscene_vis(in_cutscene) {
         }
     }
     if char_exists("gf") {
-        set_char_vis("gf", false);
+        char_vis("gf", false);
+    }
+    if char_exists("bf") {
+        char_vis("bf", !in_cutscene);
+    }
+    if char_exists("dad") {
+        char_vis("dad", !in_cutscene);
     }
     if prop_exists("sserafim_cutscene") {
         prop_vis("sserafim_cutscene", in_cutscene);
     }
+}
+
+fn sserafim_attach_shader_to(id, state) {
+    if !prop_exists(id) || state == () { return; }
+    shader(id, sserafim_shader());
+    shader_vec(id, "vec0", state.hue, state.sat, state.bright, state.contrast);
+    shader_vec(id, "vec1", state.darken_amount, state.pulse_strength, state.truck_strength, 1.0);
+    shader_vec(id, "vec2", state.light_color[0], state.light_color[1], state.light_color[2], 0.0);
 }
 
 fn sserafim_create_cutscene_sprites() {
@@ -500,6 +524,7 @@ fn sserafim_create_cutscene_sprites() {
             []
         );
         prop_scroll("sserafim_cutscene", 0.94, 0.94);
+        sserafim_attach_shader_to("sserafim_cutscene", this.s);
     }
     if !prop_exists("sserafim_gf") {
         spawn_atlas(
@@ -516,6 +541,7 @@ fn sserafim_create_cutscene_sprites() {
         prop_scroll("sserafim_gf", 0.95, 0.95);
         prop_alpha("sserafim_gf", 0.5);
         prop_vis("sserafim_gf", false);
+        sserafim_attach_shader_to("sserafim_gf", this.s);
     }
     if !prop_exists("sserafim_bf") {
         spawn_atlas(
@@ -531,6 +557,7 @@ fn sserafim_create_cutscene_sprites() {
         );
         prop_scroll("sserafim_bf", 0.99, 0.99);
         prop_vis("sserafim_bf", false);
+        sserafim_attach_shader_to("sserafim_bf", this.s);
     }
     if !prop_exists("sserafim_end1") {
         spawn_hud_sprite("sserafim_end1", "gameplay/stages/sserafim/end/end-1", 640.0, 360.0, 90.0);
@@ -544,7 +571,26 @@ fn sserafim_create_cutscene_sprites() {
     }
 }
 
+fn sserafim_cancel_cutscene_timers() {
+    for fn_name in [
+        "sserafim_cs_sound",
+        "sserafim_cs_tap1_on",
+        "sserafim_cs_tap_off",
+        "sserafim_cs_tap2_on",
+        "sserafim_cs_truck_approach",
+        "sserafim_cs_truck_close",
+        "sserafim_cs_crash",
+        "sserafim_cs_fade_out",
+        "sserafim_cs_getup",
+        "sserafim_cs_finish",
+        "sserafim_enable_skip"
+    ] {
+        cancel_timer(fn_name);
+    }
+}
+
 fn sserafim_cleanup_cutscene() {
+    sserafim_cancel_cutscene_timers();
     for id in ["sserafim_cutscene", "sserafim_gf", "sserafim_bf", "sserafim_end1", "sserafim_end2", "sserafim_skip_txt"] {
         if prop_exists(id) {
             despawn(id);
@@ -694,6 +740,7 @@ fn sserafim_enable_skip() {
 }
 
 fn sserafim_do_skip() {
+    sserafim_cancel_cutscene_timers();
     stop_snd("sserafim_start_sfx");
     fade("#FF000000", 0.5, true, true);
     if prop_exists("sserafim_skip_txt") { despawn("sserafim_skip_txt"); }
@@ -775,7 +822,7 @@ fn onCountdownStart(ev) {
 }
 
 fn onBeatHit() {
-    if this.s == () {
+    if this.s == () || in_cutscene() {
         return;
     }
     this.s = handle_beat_hit(this.s, beat());
