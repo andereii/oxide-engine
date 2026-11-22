@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 use std::io::Read;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -105,25 +107,26 @@ fn find_ffmpeg() -> Option<String> {
 }
 
 fn decode_video_audio_wav(ffmpeg_bin: &str, video_path: &Path) -> Option<Vec<u8>> {
-    let out = Command::new(ffmpeg_bin)
-        .args([
-            "-v",
-            "error",
-            "-i",
-            &video_path.to_string_lossy(),
-            "-vn",
-            "-ac",
-            "2",
-            "-ar",
-            "44100",
-            "-f",
-            "wav",
-            "pipe:1",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+    let mut cmd = Command::new(ffmpeg_bin);
+    cmd.args([
+        "-v",
+        "error",
+        "-i",
+        &video_path.to_string_lossy(),
+        "-vn",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-f",
+        "wav",
+        "pipe:1",
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let out = cmd.output().ok()?;
     if out.status.success() && !out.stdout.is_empty() {
         Some(out.stdout)
     } else {
@@ -138,25 +141,26 @@ fn spawn_video_frame_stream(
     let filter = format!(
         "fps={VIDEO_FPS},scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2"
     );
-    let mut child = Command::new(ffmpeg_bin)
-        .args([
-            "-v",
-            "error",
-            "-i",
-            &video_path.to_string_lossy(),
-            "-an",
-            "-vf",
-            &filter,
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgba",
-            "pipe:1",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+    let mut cmd = Command::new(ffmpeg_bin);
+    cmd.args([
+        "-v",
+        "error",
+        "-i",
+        &video_path.to_string_lossy(),
+        "-an",
+        "-vf",
+        &filter,
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgba",
+        "pipe:1",
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let mut child = cmd.spawn().ok()?;
 
     let mut stdout = child.stdout.take()?;
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(4);
