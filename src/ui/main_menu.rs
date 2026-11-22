@@ -472,9 +472,9 @@ pub fn tick_main_menu_system(
     mut menu: ResMut<MainMenuState>,
     entities: Query<Entity, With<MainMenuEntity>>,
     mut items_q: Query<(&MainMenuItemVisual, &mut Sprite, &mut AnimationController, &mut Transform, &mut Visibility)>,
-    mut mag_q: Query<&mut Visibility, (With<MainMenuMagentaBg>, Without<MainMenuItemVisual>)>,
+    mut mag_q: Query<&mut Visibility, (With<MainMenuMagentaBg>, Without<MainMenuItemVisual>, Without<MainMenuSubOverlay>, Without<MainMenuOverlayText>)>,
     mut bg_q: Query<(&MainMenuBg, &mut Transform), Without<MainMenuItemVisual>>,
-    mut sub_bg_q: Query<&mut Visibility, (With<MainMenuSubOverlay>, Without<MainMenuItemVisual>, Without<MainMenuMagentaBg>)>,
+    mut sub_bg_q: Query<&mut Visibility, (With<MainMenuSubOverlay>, Without<MainMenuItemVisual>, Without<MainMenuMagentaBg>, Without<MainMenuOverlayText>)>,
     mut sub_txt_q: Query<(&mut Text2d, &mut Visibility), (With<MainMenuOverlayText>, Without<MainMenuSubOverlay>, Without<MainMenuItemVisual>, Without<MainMenuMagentaBg>)>,
 ) {
     if app_scene.current != ActiveScene::MainMenu {

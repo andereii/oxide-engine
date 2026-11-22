@@ -1,12 +1,14 @@
 use bevy::app::AppExit;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::animations::animate_atlas::AnimateAtlas;
 use crate::animations::atlas_composite::{
     CompositeClip, FlxAnimateTransformParams, build_composite_clip, compose_flx_piece_bevy_affine,
     modulate_color,
 };
-use crate::animations::{AnimateAtlas, AnimationController, BaseAnimationData};
+use crate::animations::{AnimationController, BaseAnimationData};
 use crate::input::{Action, Controls};
 use crate::mods::ModRegistry;
 use crate::utils::alphabet::{AlphabetFontCache, AtlasFont, spawn_alphabet_text};
@@ -439,6 +441,59 @@ fn do_skip_intro(
     shared.trigger_flash([1.0, 1.0, 1.0], 4.0);
 }
 
+#[derive(SystemParam)]
+pub struct TitleQueries<'w, 's> {
+    scene_entities: Query<'w, 's, Entity, With<TitleSceneEntity>>,
+    ng_vis_q: Query<
+        'w,
+        's,
+        &'static mut Visibility,
+        (With<TitleNgSprite>, Without<TitleStartPiece>),
+    >,
+    logo_gf_q: Query<
+        'w,
+        's,
+        (
+            &'static mut Sprite,
+            &'static mut AnimationController,
+            Option<&'static TitleLogoSprite>,
+            Option<&'static TitleGfSprite>,
+        ),
+        (
+            Without<TitleStartPiece>,
+            Without<TitleNgSprite>,
+            Without<IsDefaultUiCamera>,
+        ),
+    >,
+    start_pieces_q: Query<
+        'w,
+        's,
+        (
+            &'static TitleStartPiece,
+            &'static mut Sprite,
+            &'static mut Transform,
+            &'static mut Visibility,
+        ),
+        (
+            Without<TitleLogoSprite>,
+            Without<TitleGfSprite>,
+            Without<TitleNgSprite>,
+            Without<IsDefaultUiCamera>,
+        ),
+    >,
+    cam_q: Query<
+        'w,
+        's,
+        (&'static mut Transform, &'static mut Projection),
+        (
+            With<Camera2d>,
+            With<IsDefaultUiCamera>,
+            Without<TitleSceneEntity>,
+            Without<TitleStartPiece>,
+        ),
+    >,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn tick_title_system(
     time: Res<Time>,
@@ -449,25 +504,15 @@ pub fn tick_title_system(
     mut alpha_cache: ResMut<AlphabetFontCache>,
     keys: Res<ButtonInput<KeyCode>>,
     controls: Res<Controls>,
-    mut app_scene: ResMut<AppScene>,
+    app_scene: Res<AppScene>,
     mut shared: ResMut<MenuSharedState>,
     mut title: ResMut<TitleState>,
     mut exit: MessageWriter<AppExit>,
-    scene_entities: Query<Entity, With<TitleSceneEntity>>,
-    mut ng_vis_q: Query<&mut Visibility, With<TitleNgSprite>>,
-    mut logo_gf_q: Query<
-        (&mut Sprite, &mut AnimationController, Option<&TitleLogoSprite>, Option<&TitleGfSprite>),
-        (Without<TitleStartPiece>, Without<IsDefaultUiCamera>),
-    >,
-    mut start_pieces_q: Query<
-        (&TitleStartPiece, &mut Sprite, &mut Transform, &mut Visibility),
-        (Without<TitleLogoSprite>, Without<TitleGfSprite>, Without<IsDefaultUiCamera>),
-    >,
-    mut cam_q: Query<(&mut Transform, &mut Projection), (With<Camera2d>, With<IsDefaultUiCamera>, Without<TitleSceneEntity>)>,
+    mut queries: TitleQueries,
 ) {
     if app_scene.current != ActiveScene::Title {
         if title.active {
-            cleanup_title_scene(&mut commands, &mut title, &scene_entities);
+            cleanup_title_scene(&mut commands, &mut title, &queries.scene_entities);
         }
         return;
     }
@@ -481,7 +526,7 @@ pub fn tick_title_system(
         title.cur_wacky = load_wacky_pair(&mods);
         title.last_beat = 0;
         title.cheat_pos = 0;
-        for (mut tf, mut proj) in &mut cam_q {
+        for (mut tf, mut proj) in &mut queries.cam_q {
             tf.translation = Vec3::ZERO;
             tf.rotation = Quat::IDENTITY;
             if let Projection::Orthographic(ref mut ortho) = *proj {
@@ -525,7 +570,7 @@ pub fn tick_title_system(
     }
 
     // Step logo & GF sprite animations
-    for (mut spr, mut ctrl, _, _) in &mut logo_gf_q {
+    for (mut spr, mut ctrl, _, _) in &mut queries.logo_gf_q {
         ctrl.update(dt, None);
         if let Some(idx) = ctrl.current_atlas_index() {
             set_atlas_index(&mut spr, idx);
@@ -580,7 +625,7 @@ pub fn tick_title_system(
                             &["newgrounds"],
                         );
                         if let Some(ng) = title.ng_entity
-                            && let Ok(mut vis) = ng_vis_q.get_mut(ng)
+                            && let Ok(mut vis) = queries.ng_vis_q.get_mut(ng)
                         {
                             *vis = Visibility::Visible;
                         }
@@ -588,7 +633,7 @@ pub fn tick_title_system(
                     8 => {
                         clear_cred_texts(&mut commands, &mut title);
                         if let Some(ng) = title.ng_entity
-                            && let Ok(mut vis) = ng_vis_q.get_mut(ng)
+                            && let Ok(mut vis) = queries.ng_vis_q.get_mut(ng)
                         {
                             *vis = Visibility::Hidden;
                         }
@@ -660,7 +705,7 @@ pub fn tick_title_system(
 
         if title.skipped_intro {
             title.dance_left = !title.dance_left;
-            for (_, mut ctrl, is_logo, is_gf) in &mut logo_gf_q {
+            for (_, mut ctrl, is_logo, is_gf) in &mut queries.logo_gf_q {
                 if is_logo.is_some() {
                     ctrl.play("bump", true, false, 0);
                 } else if is_gf.is_some() {
@@ -706,7 +751,7 @@ pub fn tick_title_system(
                 screen_size: [SCREEN_WIDTH, SCREEN_HEIGHT],
                 zoom: 1.0,
             };
-            for (piece_idx_comp, mut spr, mut tf, mut vis) in &mut start_pieces_q {
+            for (piece_idx_comp, mut spr, mut tf, mut vis) in &mut queries.start_pieces_q {
                 if let Some(piece) = pieces.get(piece_idx_comp.0) {
                     if let Some((tex, layout)) = textures
                         .get(piece.spritemap_idx)
