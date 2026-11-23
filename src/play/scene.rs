@@ -14,7 +14,9 @@ const HUD_FADE_DURATION_S: f64 = 0.5;
 
 use super::hud::judgement::Tallies;
 use super::hud::popups::PopupEvent;
-use super::hud::subtitles::SubtitleCue;
+use super::hud::subtitles::{
+    SubtitleConfig, SubtitleConfigPatch, SubtitleCue, parse_subtitles_auto,
+};
 use super::notes::{NoteKindManager, Strumline};
 use super::playlist::PlayStatePlaylist;
 use super::types::{CameraState, LinearTween, PauseMode, PlayPhase, PlayStateParams, PreciseInputEvent, SongChart, SongEventData};
@@ -132,8 +134,21 @@ pub struct PlayState {
     pub audio_finished: bool,
     pub song_end_canceled: bool,
     pub subtitle_cues: Vec<SubtitleCue>,
+    pub subtitle_config: SubtitleConfig,
+    pub subtitle_default_config: SubtitleConfig,
     pub subtitle_elapsed_ms: f64,
+    pub subtitle_time_ms: f64,
+    pub subtitle_sync_to_song: bool,
     pub subtitle_text: String,
+    pub subtitle_active_index: Option<usize>,
+    pub subtitle_prev_index: Option<usize>,
+    pub subtitle_exiting_index: Option<usize>,
+    pub subtitle_next_index: Option<usize>,
+    pub subtitle_transition_elapsed_s: f64,
+    pub subtitle_bar_elapsed_s: f64,
+    pub subtitle_outgoing_text: String,
+    pub subtitle_outgoing_elapsed_s: f64,
+    pub subtitle_last_ended_ms: Option<f64>,
     pub pending_shader_events: Vec<SongEventData>,
     pub pending_event_commands: Vec<ScriptCommand>,
 }
@@ -253,8 +268,21 @@ impl PlayState {
             audio_finished: false,
             song_end_canceled: false,
             subtitle_cues: Vec::new(),
+            subtitle_config: SubtitleConfig::default(),
+            subtitle_default_config: SubtitleConfig::default(),
             subtitle_elapsed_ms: 0.0,
+            subtitle_time_ms: 0.0,
+            subtitle_sync_to_song: false,
             subtitle_text: String::new(),
+            subtitle_active_index: None,
+            subtitle_prev_index: None,
+            subtitle_exiting_index: None,
+            subtitle_next_index: None,
+            subtitle_transition_elapsed_s: 1.0,
+            subtitle_bar_elapsed_s: 0.0,
+            subtitle_outgoing_text: String::new(),
+            subtitle_outgoing_elapsed_s: 1.0,
+            subtitle_last_ended_ms: None,
             pending_shader_events: Vec::new(),
             pending_event_commands: Vec::new(),
         };
@@ -548,36 +576,141 @@ impl PlayState {
         ));
     }
 
+    fn reset_subtitle_playback_state(&mut self) {
+        self.subtitle_elapsed_ms = 0.0;
+        self.subtitle_time_ms = 0.0;
+        self.subtitle_text.clear();
+        self.subtitle_active_index = None;
+        self.subtitle_prev_index = None;
+        self.subtitle_exiting_index = None;
+        self.subtitle_next_index = None;
+        self.subtitle_transition_elapsed_s = self.subtitle_config.transition_duration_s.max(1.0);
+        self.subtitle_bar_elapsed_s = 0.0;
+        self.subtitle_outgoing_text.clear();
+        self.subtitle_outgoing_elapsed_s = self.subtitle_config.exit_duration_s.max(1.0);
+        self.subtitle_last_ended_ms = None;
+    }
+
     pub fn load_subtitles(&mut self, cues: Vec<SubtitleCue>) {
         self.subtitle_cues = cues;
-        self.subtitle_elapsed_ms = 0.0;
-        self.subtitle_text.clear();
+        self.subtitle_sync_to_song = false;
+        self.reset_subtitle_playback_state();
+    }
+
+    pub fn load_song_subtitles(&mut self, cues: Vec<SubtitleCue>) {
+        self.subtitle_cues = cues;
+        self.subtitle_sync_to_song = true;
+        self.reset_subtitle_playback_state();
+    }
+
+    pub fn load_subtitles_from_text(&mut self, raw: &str, path_hint: Option<&str>, sync_to_song: bool) {
+        let cues = parse_subtitles_auto(raw, path_hint, &self.subtitle_config);
+        self.subtitle_cues = cues;
+        self.subtitle_sync_to_song = sync_to_song;
+        self.reset_subtitle_playback_state();
+    }
+
+    pub fn apply_subtitle_config_patch(&mut self, patch: &SubtitleConfigPatch) {
+        self.subtitle_config.apply_patch(patch);
+    }
+
+    pub fn reset_subtitle_config(&mut self) {
+        self.subtitle_config = self.subtitle_default_config.clone();
     }
 
     pub fn clear_subtitles(&mut self) {
         self.subtitle_cues.clear();
-        self.subtitle_elapsed_ms = 0.0;
-        self.subtitle_text.clear();
+        self.subtitle_sync_to_song = false;
+        self.reset_subtitle_playback_state();
     }
 
     fn update_subtitles(&mut self, elapsed_s: f64) {
+        let dt = elapsed_s.max(0.0);
         if self.subtitle_cues.is_empty() {
             if !self.subtitle_text.is_empty() {
                 self.subtitle_text.clear();
             }
+            self.subtitle_active_index = None;
+            self.subtitle_prev_index = None;
+            self.subtitle_exiting_index = None;
+            self.subtitle_next_index = None;
             return;
         }
 
-        self.subtitle_elapsed_ms += elapsed_s.max(0.0) * 1000.0 * self.playback_rate.max(0.0);
+        let cur_ms = if self.subtitle_sync_to_song {
+            self.conductor.song_position_ms
+        } else {
+            self.subtitle_elapsed_ms += dt * 1000.0 * self.playback_rate.max(0.0);
+            self.subtitle_elapsed_ms
+        };
+        self.subtitle_time_ms = cur_ms;
+
+        // Find primary active cue (last cue whose window covers cur_ms)
+        let mut active_idx: Option<usize> = None;
         let mut text = String::new();
-        for cue in &self.subtitle_cues {
-            if self.subtitle_elapsed_ms >= cue.start_ms && self.subtitle_elapsed_ms <= cue.end_ms {
+        for (idx, cue) in self.subtitle_cues.iter().enumerate() {
+            if cur_ms >= cue.start_ms && cur_ms <= cue.end_ms {
+                active_idx = Some(idx);
                 if !text.is_empty() {
                     text.push('\n');
                 }
                 text.push_str(&cue.text);
             }
         }
+
+        // Track bar changes for smooth ScrollThreeLine & BounceLetters transitions
+        if active_idx != self.subtitle_active_index {
+            if let Some(old_idx) = self.subtitle_active_index {
+                self.subtitle_outgoing_text = self.subtitle_cues[old_idx].text.clone();
+                self.subtitle_outgoing_elapsed_s = 0.0;
+                self.subtitle_last_ended_ms = Some(self.subtitle_cues[old_idx].end_ms.min(cur_ms));
+            }
+            if active_idx.is_some() {
+                self.subtitle_exiting_index = self.subtitle_prev_index;
+                self.subtitle_transition_elapsed_s = 0.0;
+                self.subtitle_bar_elapsed_s = 0.0;
+            }
+            self.subtitle_active_index = active_idx;
+        } else {
+            self.subtitle_transition_elapsed_s += dt;
+            self.subtitle_bar_elapsed_s += dt;
+            self.subtitle_outgoing_elapsed_s += dt;
+        }
+
+        // Compute previous and upcoming cue indices for multi-line scroll template
+        if let Some(cur) = active_idx {
+            self.subtitle_prev_index = cur.checked_sub(1);
+            self.subtitle_next_index = if cur + 1 < self.subtitle_cues.len() {
+                Some(cur + 1)
+            } else {
+                None
+            };
+        } else {
+            let mut last_past: Option<usize> = None;
+            let mut first_future: Option<usize> = None;
+            for (idx, cue) in self.subtitle_cues.iter().enumerate() {
+                if cue.end_ms < cur_ms {
+                    last_past = Some(idx);
+                } else if cue.start_ms > cur_ms {
+                    first_future = Some(idx);
+                    break;
+                }
+            }
+            self.subtitle_prev_index = last_past;
+            self.subtitle_next_index = first_future;
+
+            // Optional idle placeholder between bars (e.g. "...", "♪", or "" for nothing)
+            if !self.subtitle_config.idle_text.is_empty() && first_future.is_some() {
+                let silence_ms = last_past
+                    .map(|idx| cur_ms - self.subtitle_cues[idx].end_ms)
+                    .or_else(|| self.subtitle_last_ended_ms.map(|t| cur_ms - t))
+                    .unwrap_or(cur_ms);
+                if silence_ms >= self.subtitle_config.gap_threshold_ms {
+                    text = self.subtitle_config.idle_text.clone();
+                }
+            }
+        }
+
         if self.subtitle_text != text {
             self.subtitle_text = text;
         }
@@ -734,5 +867,62 @@ mod tests {
             assert!((state.player_strumline.receptors[lane].y_offset - (-10.0)).abs() < 1e-5);
             assert!((state.opponent_strumline.receptors[lane].alpha - 0.0).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn song_subtitles_sync_to_conductor_position() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        state.load_song_subtitles(vec![super::super::hud::subtitles::SubtitleCue {
+            start_ms: 18_000.0,
+            end_ms: 19_200.0,
+            text: "That's how you do it!".to_string(),
+            segments: Vec::new(),
+        }]);
+        state.conductor.update(18_500.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_text, "That's how you do it!");
+        assert_eq!(state.subtitle_active_index, Some(0));
+
+        state.conductor.update(19_500.0);
+        state.update_subtitles(0.016);
+        assert!(state.subtitle_text.is_empty());
+        assert_eq!(state.subtitle_active_index, None);
+    }
+
+    #[test]
+    fn idle_text_shows_between_bars_after_gap_threshold() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        state.subtitle_config.idle_text = "...".to_string();
+        state.subtitle_config.gap_threshold_ms = 500.0;
+        state.load_song_subtitles(vec![
+            super::super::hud::subtitles::SubtitleCue {
+                start_ms: 1_000.0,
+                end_ms: 2_000.0,
+                text: "Bar one".to_string(),
+                segments: Vec::new(),
+            },
+            super::super::hud::subtitles::SubtitleCue {
+                start_ms: 5_000.0,
+                end_ms: 6_000.0,
+                text: "Bar two".to_string(),
+                segments: Vec::new(),
+            },
+        ]);
+
+        state.conductor.update(1_500.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_text, "Bar one");
+
+        // 200ms after bar one ended (< 500ms threshold): nothing shown
+        state.conductor.update(2_200.0);
+        state.update_subtitles(0.016);
+        assert!(state.subtitle_text.is_empty());
+
+        // 600ms after bar one ended (>= 500ms threshold): idle placeholder shown
+        state.conductor.update(2_600.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_text, "...");
+        assert_eq!(state.subtitle_prev_index, Some(0));
+        assert_eq!(state.subtitle_next_index, Some(1));
     }
 }

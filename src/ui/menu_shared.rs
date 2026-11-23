@@ -28,6 +28,8 @@ pub struct PendingSongLaunch {
     pub playlist_songs: Vec<String>,
 }
 
+use crate::play::hud::subtitles::{SubtitleConfig, SubtitleHighlightMode, SubtitleTemplate};
+
 #[derive(Debug, Clone, Default)]
 pub struct MenuGameplayOptions {
     pub downscroll: bool,
@@ -35,6 +37,37 @@ pub struct MenuGameplayOptions {
     pub botplay: bool,
     pub practice_mode: bool,
     pub no_shaders: bool,
+    pub subtitle_template: SubtitleTemplate,
+    pub subtitle_highlight: SubtitleHighlightMode,
+    /// 0 = none (""), 1 = "...", 2 = "♪"
+    pub subtitle_idle_preset: usize,
+}
+
+impl MenuGameplayOptions {
+    pub fn subtitle_idle_text(&self) -> &'static str {
+        match self.subtitle_idle_preset % 3 {
+            1 => "...",
+            2 => "♪",
+            _ => "",
+        }
+    }
+
+    pub fn subtitle_idle_label(&self) -> &'static str {
+        match self.subtitle_idle_preset % 3 {
+            1 => "DOTS (...)",
+            2 => "NOTE (♪)",
+            _ => "NONE",
+        }
+    }
+
+    pub fn to_subtitle_config(&self) -> SubtitleConfig {
+        SubtitleConfig {
+            template: self.subtitle_template,
+            highlight_mode: self.subtitle_highlight,
+            idle_text: self.subtitle_idle_text().to_string(),
+            ..SubtitleConfig::default()
+        }
+    }
 }
 
 #[derive(Resource, Debug, Clone)]

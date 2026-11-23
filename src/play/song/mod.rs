@@ -9,6 +9,9 @@ use bevy::prelude::Resource;
 use oxin_app::resolve_assets_dir;
 
 use crate::mods::ModRegistry;
+use crate::play::hud::subtitles::{
+    SubtitleConfig, SubtitleConfigPatch, SubtitleCue, parse_subtitles_auto,
+};
 use crate::utils::constants::{DEFAULT_DIFFICULTY, DEFAULT_VARIATION};
 
 use super::notes::SongNoteData;
@@ -204,4 +207,132 @@ pub fn load_song_chart_in(
     chart.length_ms = max_end_ms + 2000.0;
 
     Ok(chart)
+}
+
+fn effective_subtitle_variation(chart: &SongChart) -> Option<String> {
+    let var = chart.variation.trim();
+    if !var.is_empty() && !var.eq_ignore_ascii_case(DEFAULT_VARIATION) {
+        return Some(var.to_ascii_lowercase());
+    }
+    let diff = chart.difficulty.trim().to_ascii_lowercase();
+    if diff == "pico" || diff.starts_with("pico-") {
+        return Some("pico".to_string());
+    }
+    if diff == "erect" || diff == "nightmare" {
+        return Some("erect".to_string());
+    }
+    None
+}
+
+/// Loaded song lyrics track + optional per-song config sidecar (`subtitles.json`).
+pub struct LoadedSongLyrics {
+    pub cues: Vec<SubtitleCue>,
+    pub config_patch: Option<SubtitleConfigPatch>,
+}
+
+/// Loads `song-lyrics[-{variation}].lrc` or `.srt` (plus optional `subtitles.json` sidecar)
+/// for a song when present in base assets or active mods.
+pub fn load_song_lyrics_for_chart_with_config(
+    mods: &ModRegistry,
+    chart: &SongChart,
+    base_config: &SubtitleConfig,
+) -> Option<LoadedSongLyrics> {
+    let song_id = chart.song_id.trim();
+    if song_id.is_empty() {
+        return None;
+    }
+    let var = effective_subtitle_variation(chart);
+    let stem = match &var {
+        Some(v) => format!("song-lyrics-{v}"),
+        None => "song-lyrics".to_string(),
+    };
+
+    // Optional per-song JSON config override (e.g. subtitles.json or song-lyrics[-var].json)
+    let mut effective_cfg = base_config.clone();
+    let mut config_patch: Option<SubtitleConfigPatch> = None;
+    for cfg_rel in [
+        format!("gameplay/songs/{song_id}/subtitles/subtitles.json"),
+        format!("songs/{song_id}/subtitles/subtitles.json"),
+        format!("gameplay/songs/{song_id}/subtitles/{stem}.json"),
+        format!("songs/{song_id}/subtitles/{stem}.json"),
+    ] {
+        if let Ok(raw_cfg) = mods.read_to_string_merged(&cfg_rel)
+            && let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw_cfg)
+        {
+            let patch = SubtitleConfigPatch::from_json_value(&val);
+            effective_cfg.apply_patch(&patch);
+            config_patch = Some(patch);
+        }
+    }
+
+    for ext in ["lrc", "srt"] {
+        let file_name = format!("{stem}.{ext}");
+        for rel in [
+            format!("gameplay/songs/{song_id}/subtitles/{file_name}"),
+            format!("songs/{song_id}/subtitles/{file_name}"),
+        ] {
+            if let Ok(raw) = mods.read_to_string_merged(&rel) {
+                let cues = parse_subtitles_auto(&raw, Some(&rel), &effective_cfg);
+                if !cues.is_empty() {
+                    return Some(LoadedSongLyrics { cues, config_patch });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Loads `song-lyrics[-{variation}].lrc` or `.srt` using default subtitle configuration.
+#[cfg(test)]
+pub fn load_song_lyrics_for_chart(
+    mods: &ModRegistry,
+    chart: &SongChart,
+) -> Option<Vec<SubtitleCue>> {
+    load_song_lyrics_for_chart_with_config(mods, chart, &SubtitleConfig::default())
+        .map(|loaded| loaded.cues)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_song_lyrics_for_chart;
+    use crate::mods::ModRegistry;
+    use crate::play::types::SongChart;
+    use std::path::PathBuf;
+
+    fn base_assets_registry() -> ModRegistry {
+        let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        ModRegistry::discover(assets_dir.clone(), assets_dir.join("__no_mods__"))
+    }
+
+    #[test]
+    fn loads_vslice_song_lyrics_for_all_subtitled_songs_and_variations() {
+        let mods = base_assets_registry();
+
+        for (song_id, difficulty, variation, expected_first) in [
+            ("tutorial", "hard", "default", "That's how you do it!"),
+            ("monster", "hard", "default", "Guess it's time,"),
+            ("winter-horrorland", "hard", "default", "Your skin is freezing,"),
+            ("stress", "hard", "default", "Heh."),
+            ("stress", "pico-hard", "default", "Ugh, redheads."),
+            ("stress", "pico-hard", "pico", "Ugh, redheads."),
+        ] {
+            let chart = SongChart {
+                song_id: song_id.to_string(),
+                difficulty: difficulty.to_string(),
+                variation: variation.to_string(),
+                ..Default::default()
+            };
+            let cues = load_song_lyrics_for_chart(&mods, &chart)
+                .unwrap_or_else(|| panic!("expected lyrics for {song_id} ({difficulty}/{variation})"));
+            assert_eq!(cues[0].text, expected_first);
+        }
+
+        let no_lyrics = SongChart {
+            song_id: "bopeebo".to_string(),
+            difficulty: "hard".to_string(),
+            variation: "default".to_string(),
+            ..Default::default()
+        };
+        assert!(load_song_lyrics_for_chart(&mods, &no_lyrics).is_none());
+    }
 }

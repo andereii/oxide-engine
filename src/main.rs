@@ -45,6 +45,7 @@ fn main() {
             botplay: flags.bot_play_mode,
             practice_mode: flags.practice_mode,
             no_shaders: flags.no_shaders,
+            ..Default::default()
         },
     };
 

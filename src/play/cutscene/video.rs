@@ -106,6 +106,31 @@ fn find_ffmpeg() -> Option<String> {
     Some("ffmpeg".to_string())
 }
 
+fn extract_embedded_subtitles_srt(ffmpeg_bin: &str, video_path: &Path) -> Option<String> {
+    let mut cmd = Command::new(ffmpeg_bin);
+    cmd.args([
+        "-v",
+        "error",
+        "-i",
+        &video_path.to_string_lossy(),
+        "-map",
+        "0:s:0",
+        "-f",
+        "srt",
+        "pipe:1",
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let out = cmd.output().ok()?;
+    if out.status.success() && !out.stdout.is_empty() {
+        String::from_utf8(out.stdout).ok()
+    } else {
+        None
+    }
+}
+
 fn decode_video_audio_ogg(ffmpeg_bin: &str, video_path: &Path) -> Option<Vec<u8>> {
     let mut cmd = Command::new(ffmpeg_bin);
     cmd.args([
@@ -403,13 +428,20 @@ pub fn tick_video_cutscene_system(
                     vid.audio_entity = Some(audio_ent);
                 }
 
-                // Optional matching .srt subtitles
+                // Optional matching .srt subtitles, falling back to embedded MKV/container subtitle stream
                 let srt_rel = Path::new(&path)
                     .with_extension("srt")
                     .to_string_lossy()
                     .replace('\\', "/");
                 if let Ok(raw_srt) = mods.read_to_string_merged(&srt_rel) {
                     state.load_subtitles(parse_srt(&raw_srt));
+                } else if let Some(raw_srt) =
+                    extract_embedded_subtitles_srt(&ffmpeg_bin, &video_file)
+                {
+                    let cues = parse_srt(&raw_srt);
+                    if !cues.is_empty() {
+                        state.load_subtitles(cues);
+                    }
                 }
             }
         }
@@ -481,5 +513,39 @@ pub fn tick_video_cutscene_system(
 
     if vid.stream_ended {
         finish_video(&mut commands, &mut state, &mut playlist, &mut vid);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_embedded_subtitles_srt, find_ffmpeg};
+    use crate::play::hud::subtitles::parse_srt;
+    use std::path::PathBuf;
+
+    #[test]
+    fn extracts_embedded_mkv_subtitles_for_week7_cutscenes() {
+        let Some(ffmpeg_bin) = find_ffmpeg() else {
+            return;
+        };
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/gameplay/songs");
+        for (rel, expected_first) in [
+            ("ugh/cutscene.mkv", "Well, well, well, whadda we got here?"),
+            ("guns/cutscene.mkv", "Heheh, pretty tight bars"),
+            ("stress/story/cutscene.mkv", "God effing damn it."),
+            (
+                "stress/pico/cutscene.mkv",
+                "Back for some tasty revenge, huh?",
+            ),
+        ] {
+            let path = root.join(rel);
+            if !path.is_file() {
+                continue;
+            }
+            let raw = extract_embedded_subtitles_srt(&ffmpeg_bin, &path)
+                .unwrap_or_else(|| panic!("expected embedded subtitles in {rel}"));
+            let cues = parse_srt(&raw);
+            assert!(!cues.is_empty(), "expected parsed cues for {rel}");
+            assert_eq!(cues[0].text, expected_first);
+        }
     }
 }

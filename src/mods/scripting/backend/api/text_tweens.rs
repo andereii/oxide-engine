@@ -1,4 +1,6 @@
-use crate::play::hud::subtitles::parse_srt;
+use crate::play::hud::subtitles::{
+    SubtitleConfigPatch, SubtitleHighlightMode, SubtitleTemplate, parse_subtitle_color_str,
+};
 use crate::scripting::api::{
     LogLevel, NewTimerRequest, ScriptCommand, TweenProp, TweenTarget, parse_hex_rgba,
 };
@@ -102,18 +104,109 @@ fn api_text_font(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<Script
     Ok(ScriptValue::Null)
 }
 
-fn api_subtitle_srt(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+fn load_subtitle_file(
+    ctx: &mut ScriptContext,
+    args: &[ScriptValue],
+    fn_name: &str,
+    default_ext: Option<&str>,
+    default_sync_to_song: bool,
+) -> Result<ScriptValue, String> {
     let path = arg_str(args, 0)?;
+    let sync_to_song = if args.len() >= 2 {
+        match arg(args, 1)? {
+            ScriptValue::Bool(b) => *b,
+            ScriptValue::String(s) => s.eq_ignore_ascii_case("song"),
+            _ => default_sync_to_song,
+        }
+    } else {
+        default_sync_to_song
+    };
+    let path_hint = match default_ext {
+        Some(ext) if !path.contains('.') => Some(format!("{path}.{ext}")),
+        _ => Some(path.to_string()),
+    };
     match ctx.registry.read_to_string(path) {
-        Ok(raw) => ctx.commands.push(ScriptCommand::LoadSubtitles {
-            cues: parse_srt(&raw),
+        Ok(raw) => ctx.commands.push(ScriptCommand::LoadSubtitlesText {
+            raw,
+            path_hint,
+            sync_to_song,
         }),
         Err(err) => ctx.commands.push(ScriptCommand::Log {
             level: LogLevel::Warn,
             mod_id: ctx.current_mod_id.clone(),
-            message: format!("subtitle_srt({path}): {err}"),
+            message: format!("{fn_name}({path}): {err}"),
         }),
     }
+    Ok(ScriptValue::Null)
+}
+
+fn api_subtitle_srt(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    load_subtitle_file(ctx, args, "subtitle_srt", Some("srt"), false)
+}
+
+fn api_subtitle_lrc(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    load_subtitle_file(ctx, args, "subtitle_lrc", Some("lrc"), true)
+}
+
+fn api_subtitle_load(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let is_lrc = arg_str(args, 0)?
+        .trim()
+        .to_ascii_lowercase()
+        .ends_with(".lrc");
+    load_subtitle_file(ctx, args, "subtitle_load", None, is_lrc)
+}
+
+fn api_subtitle_config(
+    ctx: &mut ScriptContext,
+    args: &[ScriptValue],
+) -> Result<ScriptValue, String> {
+    let json = arg(args, 0)?.to_json();
+    let patch = SubtitleConfigPatch::from_json_value(&json);
+    ctx.commands.push(ScriptCommand::ConfigureSubtitles { patch });
+    Ok(ScriptValue::Null)
+}
+
+fn api_subtitle_style(
+    ctx: &mut ScriptContext,
+    args: &[ScriptValue],
+) -> Result<ScriptValue, String> {
+    let template = SubtitleTemplate::from_name(arg_str(args, 0)?);
+    let highlight_mode = if args.len() >= 2 {
+        SubtitleHighlightMode::from_name(arg_str(args, 1)?)
+    } else {
+        None
+    };
+    ctx.commands.push(ScriptCommand::ConfigureSubtitles {
+        patch: SubtitleConfigPatch {
+            template,
+            highlight_mode,
+            ..Default::default()
+        },
+    });
+    Ok(ScriptValue::Null)
+}
+
+fn api_subtitle_colors(
+    ctx: &mut ScriptContext,
+    args: &[ScriptValue],
+) -> Result<ScriptValue, String> {
+    let active_color = parse_subtitle_color_str(arg_str(args, 0)?);
+    let inactive_color = parse_subtitle_color_str(arg_str(args, 1)?);
+    ctx.commands.push(ScriptCommand::ConfigureSubtitles {
+        patch: SubtitleConfigPatch {
+            active_color,
+            inactive_color,
+            ..Default::default()
+        },
+    });
+    Ok(ScriptValue::Null)
+}
+
+fn api_subtitle_reset_config(
+    ctx: &mut ScriptContext,
+    _: &[ScriptValue],
+) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::ResetSubtitleConfig);
     Ok(ScriptValue::Null)
 }
 
@@ -315,7 +408,29 @@ pub(crate) fn api_entries() -> Vec<ScriptApiEntry> {
         ScriptApiEntry::new(&["get_text"], &[1], api_get_text),
         ScriptApiEntry::new(&["text_style"], &[3, 4], api_text_style),
         ScriptApiEntry::new(&["text_font"], &[2], api_text_font),
-        ScriptApiEntry::new(&["subtitle_srt", "subtitles_srt"], &[1], api_subtitle_srt),
+        ScriptApiEntry::new(&["subtitle_srt", "subtitles_srt"], &[1, 2], api_subtitle_srt),
+        ScriptApiEntry::new(&["subtitle_lrc", "subtitles_lrc"], &[1, 2], api_subtitle_lrc),
+        ScriptApiEntry::new(&["subtitle_load", "subtitles_load"], &[1, 2], api_subtitle_load),
+        ScriptApiEntry::new(
+            &["subtitle_config", "subtitles_config"],
+            &[1],
+            api_subtitle_config,
+        ),
+        ScriptApiEntry::new(
+            &["subtitle_style", "subtitles_style"],
+            &[1, 2],
+            api_subtitle_style,
+        ),
+        ScriptApiEntry::new(
+            &["subtitle_colors", "subtitles_colors"],
+            &[2],
+            api_subtitle_colors,
+        ),
+        ScriptApiEntry::new(
+            &["subtitle_reset_config", "subtitles_reset_config"],
+            &[0],
+            api_subtitle_reset_config,
+        ),
         ScriptApiEntry::new(&["subtitle_clear", "subtitles_clear"], &[0], api_subtitle_clear),
         ScriptApiEntry::new(&["tween"], &[4, 5, 6], api_tween),
         ScriptApiEntry::new(&["tween_prop"], &[5, 6], api_tween_prop),

@@ -443,6 +443,9 @@ fn format_subscreen_text(menu: &MainMenuState, app_scene: &AppScene) -> String {
                 ("Botplay", if o.botplay { "ON" } else { "OFF" }),
                 ("Practice Mode", if o.practice_mode { "ON" } else { "OFF" }),
                 ("Shaders", if !o.no_shaders { "ON" } else { "OFF" }),
+                ("Lyrics Style", o.subtitle_template.label()),
+                ("Lyrics Fill", o.subtitle_highlight.label()),
+                ("Lyrics Gap", o.subtitle_idle_label()),
             ];
             let mut out = String::from("OPTIONS\n\n");
             for (i, (label, val)) in rows.iter().enumerate() {
@@ -743,12 +746,13 @@ pub fn tick_main_menu_system(
             }
         }
         MainMenuSubScreen::Options => {
+            const OPTIONS_COUNT: usize = 8;
             if up_hit {
-                menu.options_idx = (menu.options_idx + 4) % 5;
+                menu.options_idx = (menu.options_idx + OPTIONS_COUNT - 1) % OPTIONS_COUNT;
                 menu.overlay_dirty = true;
                 play_menu_sfx(&mut commands, &mods, &asset_server, SCROLL_SFX_PATH, 0.7);
             } else if down_hit {
-                menu.options_idx = (menu.options_idx + 1) % 5;
+                menu.options_idx = (menu.options_idx + 1) % OPTIONS_COUNT;
                 menu.overlay_dirty = true;
                 play_menu_sfx(&mut commands, &mods, &asset_server, SCROLL_SFX_PATH, 0.7);
             } else if left_hit || right_hit || accept_hit {
@@ -758,6 +762,27 @@ pub fn tick_main_menu_system(
                     2 => app_scene.options.botplay = !app_scene.options.botplay,
                     3 => app_scene.options.practice_mode = !app_scene.options.practice_mode,
                     4 => app_scene.options.no_shaders = !app_scene.options.no_shaders,
+                    5 => {
+                        app_scene.options.subtitle_template = if left_hit {
+                            app_scene.options.subtitle_template.prev()
+                        } else {
+                            app_scene.options.subtitle_template.next()
+                        };
+                    }
+                    6 => {
+                        app_scene.options.subtitle_highlight = if left_hit {
+                            app_scene.options.subtitle_highlight.prev()
+                        } else {
+                            app_scene.options.subtitle_highlight.next()
+                        };
+                    }
+                    7 => {
+                        app_scene.options.subtitle_idle_preset = if left_hit {
+                            (app_scene.options.subtitle_idle_preset + 2) % 3
+                        } else {
+                            (app_scene.options.subtitle_idle_preset + 1) % 3
+                        };
+                    }
                     _ => {}
                 }
                 menu.overlay_dirty = true;

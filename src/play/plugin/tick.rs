@@ -11,7 +11,7 @@ use crate::ui::LoadingScreenState;
 use super::super::characters::{CharacterRole, ensure_character_gameover_anims_loaded};
 use super::super::playlist::PlayStatePlaylist;
 use super::super::scene::PlayState;
-use super::super::song::SongSelection;
+use super::super::song::{SongSelection, load_song_lyrics_for_chart_with_config};
 use super::super::types::PlayPhase;
 use super::hud_audio::spawn_one_shot;
 use super::load_pipeline::{PlayLoadPipeline, step_play_load_pipeline};
@@ -295,6 +295,15 @@ pub(super) fn tick_play_state(
     state.cutscene_dialogue_box = hud_texts.dialogue.current_box_id.clone();
 
     let hooks = std::mem::take(&mut state.pending_hooks);
+    if hooks.iter().any(|(kind, _)| *kind == HookKind::SongStart)
+        && let Some(loaded) =
+            load_song_lyrics_for_chart_with_config(&scripts.mods, &state.chart, &state.subtitle_config)
+    {
+        if let Some(patch) = &loaded.config_patch {
+            state.apply_subtitle_config_patch(patch);
+        }
+        state.load_song_subtitles(loaded.cues);
+    }
     let mut ecs_cmds: Vec<ScriptCommand> = scripts.pending_ecs.0.drain(..).collect();
     ecs_cmds.extend(state.pending_event_commands.drain(..));
     let run_update = !is_paused && scripts.script_host.has_frame_update_work();

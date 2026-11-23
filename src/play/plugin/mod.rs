@@ -329,6 +329,9 @@ fn manage_play_scene_transitions(
         state.player_strumline.is_downscroll = app_scene.options.downscroll;
         state.opponent_strumline.is_downscroll = app_scene.options.downscroll;
         state.player_strumline.ghost_tap_enabled = app_scene.options.ghost_tap;
+        let sub_cfg = app_scene.options.to_subtitle_config();
+        state.subtitle_default_config = sub_cfg.clone();
+        state.subtitle_config = sub_cfg;
 
         reload::execute_song_reload(
             &mut commands,
@@ -346,6 +349,9 @@ fn manage_play_scene_transitions(
             &mut load_pipeline,
         );
         state.player_strumline.ghost_tap_enabled = app_scene.options.ghost_tap;
+        let sub_cfg = app_scene.options.to_subtitle_config();
+        state.subtitle_default_config = sub_cfg.clone();
+        state.subtitle_config = sub_cfg;
         return;
     }
 

@@ -1,5 +1,5 @@
 use crate::animations::BaseAnimationData;
-use crate::play::hud::subtitles::SubtitleCue;
+use crate::play::hud::subtitles::{SubtitleConfigPatch, SubtitleCue};
 
 use super::tweens::TweenProp;
 
@@ -268,6 +268,15 @@ pub enum ScriptCommand {
     LoadSubtitles {
         cues: Vec<SubtitleCue>,
     },
+    LoadSubtitlesText {
+        raw: String,
+        path_hint: Option<String>,
+        sync_to_song: bool,
+    },
+    ConfigureSubtitles {
+        patch: SubtitleConfigPatch,
+    },
+    ResetSubtitleConfig,
     ClearSubtitles,
     KillNote {
         id: usize,

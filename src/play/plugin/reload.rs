@@ -180,6 +180,7 @@ pub(super) fn execute_song_reload(
     };
 
     let prev_deaths = state.death_counter;
+    let prev_subtitle_defaults = state.subtitle_default_config.clone();
     let mut next_state = PlayState::new(PlayStateParams {
         chart,
         note_style,
@@ -192,6 +193,8 @@ pub(super) fn execute_song_reload(
         ..default()
     });
     next_state.death_counter = prev_deaths;
+    next_state.subtitle_default_config = prev_subtitle_defaults.clone();
+    next_state.subtitle_config = prev_subtitle_defaults;
     if let Some(err) = load_error {
         next_state.critical_failure = true;
         next_state.status_message = err;

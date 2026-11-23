@@ -102,6 +102,22 @@ impl PlayState {
                 self.load_subtitles(cues.clone());
                 true
             }
+            ScriptCommand::LoadSubtitlesText {
+                raw,
+                path_hint,
+                sync_to_song,
+            } => {
+                self.load_subtitles_from_text(raw, path_hint.as_deref(), *sync_to_song);
+                true
+            }
+            ScriptCommand::ConfigureSubtitles { patch } => {
+                self.apply_subtitle_config_patch(patch);
+                true
+            }
+            ScriptCommand::ResetSubtitleConfig => {
+                self.reset_subtitle_config();
+                true
+            }
             ScriptCommand::ClearSubtitles => {
                 self.clear_subtitles();
                 true
