@@ -543,4 +543,17 @@ pub enum ScriptCommand {
     EndSong,
     RestartSong,
     PauseSong,
+    StartDialogue(String),
+    SkipDialogue,
+    SetDialogueMusic(bool),
+    PlayDialogueBoxAnim(String),
+    PlayVideo {
+        path: String,
+        is_ending: bool,
+    },
+    SkipVideo,
+    SetTextFont {
+        id: String,
+        font: String,
+    },
 }

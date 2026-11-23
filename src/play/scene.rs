@@ -42,6 +42,10 @@ pub struct PlayState {
     pub starting_song: bool,
     pub is_in_countdown: bool,
     pub is_in_cutscene: bool,
+    pub cutscene_dialogue_active: bool,
+    pub cutscene_video_active: bool,
+    pub cutscene_dialogue_speaker: String,
+    pub cutscene_dialogue_box: String,
     pub is_practice_mode: bool,
     pub is_bot_play_mode: bool,
     pub is_minimal_mode: bool,
@@ -159,6 +163,10 @@ impl PlayState {
             starting_song: true,
             is_in_countdown: true,
             is_in_cutscene: false,
+            cutscene_dialogue_active: false,
+            cutscene_video_active: false,
+            cutscene_dialogue_speaker: String::new(),
+            cutscene_dialogue_box: String::new(),
             is_practice_mode: params.practice_mode,
             is_bot_play_mode: params.bot_play_mode,
             is_minimal_mode: params.minimal_mode,
@@ -407,12 +415,13 @@ impl PlayState {
         self.process_input_queue();
         self.process_notes(elapsed_s);
 
-        if self.health <= HEALTH_MIN && !self.is_practice_mode && !self.is_player_dying {
+        if !self.is_in_cutscene && self.health <= HEALTH_MIN && !self.is_practice_mode && !self.is_player_dying {
             self.move_to_game_over();
             return;
         }
 
         if !self.is_in_countdown
+            && !self.is_in_cutscene
             && self.conductor.song_position_ms >= self.chart.length_ms
             && self.audio_finished
             && !self.song_end_canceled

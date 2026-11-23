@@ -50,6 +50,7 @@ fn rgb_gray_hex(byte_val) {
 
 fn onCreate() {
     register_2hot_kinds();
+    this.has_played_cutscene = false;
     this.gun_cocked = false;
     this.gun_timer = 0.0;
     this.can_seq = 0;
@@ -306,4 +307,14 @@ fn onUpdate() {
         }
     }
     this.fxs = next_fxs;
+}
+
+fn onSongEnd(ev) {
+    if !this.has_played_cutscene {
+        this.has_played_cutscene = true;
+        ev.cancel();
+        play_video("gameplay/songs/2hot/cutscene.mp4", "ending");
+    } else {
+        this.has_played_cutscene = false;
+    }
 }

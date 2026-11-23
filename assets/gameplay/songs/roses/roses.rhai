@@ -9,12 +9,26 @@ fn cleanup_roses_outro_prop() {
 
 fn onCreate() {
     this.outro_started = false;
+    this.has_played_cutscene = false;
     cleanup_roses_outro_prop();
 }
 
 fn onSongRetry() {
     this.outro_started = false;
+    this.has_played_cutscene = true;
     cleanup_roses_outro_prop();
+}
+
+fn onCountdownStart(ev) {
+    if variation() == "pico" { return; }
+    if !this.has_played_cutscene {
+        this.has_played_cutscene = true;
+        ev.cancel();
+        set_cutscene(true);
+        hud_visible(false);
+        sfx("gameplay/dialogue/boxes/roses/angry-appear.ogg", 1.0);
+        start_dialogue("roses");
+    }
 }
 
 fn onBeatHit() {

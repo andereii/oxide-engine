@@ -460,6 +460,9 @@ pub(super) fn handle_pause_input(
     mut state: ResMut<PlayState>,
     mut pause: ResMut<PauseSubSceneState>,
     mut pending_reload: ResMut<PendingSongReload>,
+    mut dialogue: ResMut<crate::play::cutscene::DialogueRuntime>,
+    mut video: ResMut<crate::play::cutscene::VideoCutsceneState>,
+    mut app_scene: ResMut<crate::ui::AppScene>,
     mut exit: MessageWriter<AppExit>,
     mut menu_entries: Query<&mut PauseMenuEntryVisual>,
     mut meta_items: Query<(&PauseMetadataItem, &mut Text2d, &mut Visibility), Without<PauseBackgroundVisual>>,
@@ -577,14 +580,26 @@ pub(super) fn handle_pause_input(
 
         if let Some(action) = selected_action {
             match action {
-                PauseMenuAction::Resume
-                | PauseMenuAction::SkipCutscene
-                | PauseMenuAction::SkipConversation => {
+                PauseMenuAction::Resume => {
                     state.resume();
                 }
-                PauseMenuAction::RestartSong
-                | PauseMenuAction::RestartCutscene
-                | PauseMenuAction::RestartConversation => {
+                PauseMenuAction::SkipCutscene => {
+                    video.queue_skip();
+                    state.resume();
+                }
+                PauseMenuAction::SkipConversation => {
+                    dialogue.queue_skip();
+                    state.resume();
+                }
+                PauseMenuAction::RestartCutscene => {
+                    video.queue_restart();
+                    state.resume();
+                }
+                PauseMenuAction::RestartConversation => {
+                    dialogue.queue_restart();
+                    state.resume();
+                }
+                PauseMenuAction::RestartSong => {
                     state.needs_reset = true;
                     state.resume();
                 }
@@ -602,7 +617,12 @@ pub(super) fn handle_pause_input(
                 }
                 PauseMenuAction::ExitToMenu | PauseMenuAction::ReturnToChartEditor => {
                     pause.allow_input = false;
-                    exit.write(AppExit::Success);
+                    if app_scene.started_from_cli {
+                        exit.write(AppExit::Success);
+                    } else {
+                        app_scene.exit_to_menu_requested = true;
+                        state.resume();
+                    }
                 }
             }
         }

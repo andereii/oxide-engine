@@ -137,6 +137,56 @@ pub fn register_gameplay_api(engine: &mut Engine) {
             c.mutable.dirty_cutscene = true;
         })
     });
+    for name in ["start_dialogue", "start_conversation"] {
+        engine.register_fn(name, |id: &str| {
+            with_ctx(|c| {
+                c.snapshot.in_dialogue = true;
+                c.commands.push(ScriptCommand::StartDialogue(id.to_string()));
+            })
+        });
+    }
+    for name in ["skip_dialogue", "end_dialogue"] {
+        engine.register_fn(name, || {
+            with_ctx(|c| c.commands.push(ScriptCommand::SkipDialogue))
+        });
+    }
+    engine.register_fn("in_dialogue", || with_ctx(|c| c.snapshot.in_dialogue));
+    engine.register_fn("dialogue_speaker", || {
+        with_ctx(|c| c.snapshot.dialogue_speaker.clone())
+    });
+    engine.register_fn("dialogue_box", || {
+        with_ctx(|c| c.snapshot.dialogue_box.clone())
+    });
+    engine.register_fn("dialogue_music", |playing: bool| {
+        with_ctx(|c| c.commands.push(ScriptCommand::SetDialogueMusic(playing)))
+    });
+    engine.register_fn("dialogue_box_anim", |anim: &str| {
+        with_ctx(|c| c.commands.push(ScriptCommand::PlayDialogueBoxAnim(anim.to_string())))
+    });
+    engine.register_fn("play_video", |path: &str| {
+        with_ctx(|c| {
+            c.snapshot.in_video = true;
+            c.commands.push(ScriptCommand::PlayVideo {
+                path: path.to_string(),
+                is_ending: false,
+            });
+        })
+    });
+    engine.register_fn("play_video", |path: &str, kind: &str| {
+        let is_ending = kind.trim().eq_ignore_ascii_case("ending")
+            || kind.trim().eq_ignore_ascii_case("end");
+        with_ctx(|c| {
+            c.snapshot.in_video = true;
+            c.commands.push(ScriptCommand::PlayVideo {
+                path: path.to_string(),
+                is_ending,
+            });
+        })
+    });
+    engine.register_fn("skip_video", || {
+        with_ctx(|c| c.commands.push(ScriptCommand::SkipVideo))
+    });
+    engine.register_fn("in_video", || with_ctx(|c| c.snapshot.in_video));
     engine.register_fn("can_pause", || with_ctx(|c| c.mutable.can_pause));
     engine.register_fn("set_can_pause", |enabled: bool| {
         with_ctx(|c| {

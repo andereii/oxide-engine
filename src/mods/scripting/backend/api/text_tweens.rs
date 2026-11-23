@@ -102,6 +102,14 @@ pub fn register_text_tweens_timers_and_store_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn("text_font", |id: &str, font: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetTextFont {
+                id: id.to_string(),
+                font: font.to_string(),
+            });
+        })
+    });
 
     // Subtitles (SRT tracks timed from the moment they are assigned, like V-Slice's
     // `Subtitles.assignSubtitles(sound)` behaviour adapted to the script sandbox).

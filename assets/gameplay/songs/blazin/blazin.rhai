@@ -42,10 +42,21 @@ fn apply_blazin_middlescroll() {
 fn onCreate() {
     register_blazin_kinds();
     apply_blazin_middlescroll();
+    this.has_played_cutscene = false;
 }
 
 fn onSongRetry() {
     apply_blazin_middlescroll();
+}
+
+fn onSongEnd(ev) {
+    if !this.has_played_cutscene {
+        this.has_played_cutscene = true;
+        ev.cancel();
+        play_video("gameplay/songs/blazin/cutscene.mp4", "ending");
+    } else {
+        this.has_played_cutscene = false;
+    }
 }
 
 fn onNoteHit(ev) {

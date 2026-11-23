@@ -104,7 +104,8 @@ pub(crate) fn apply_ecs_script_commands(
             }
             ScriptCommand::SpawnText { .. }
             | ScriptCommand::SetText { .. }
-            | ScriptCommand::SetTextStyle { .. } => {
+            | ScriptCommand::SetTextStyle { .. }
+            | ScriptCommand::SetTextFont { .. } => {
                 handle_text_cmd(
                     cmd,
                     commands,
@@ -113,6 +114,30 @@ pub(crate) fn apply_ecs_script_commands(
                     &mut hud_texts.texts,
                     &mut pending_texts,
                 );
+            }
+            ScriptCommand::StartDialogue(id) => {
+                hud_texts.dialogue.queue_start(id.clone());
+            }
+            ScriptCommand::SkipDialogue => {
+                hud_texts.dialogue.queue_skip();
+            }
+            ScriptCommand::SetDialogueMusic(playing) => {
+                hud_texts
+                    .dialogue
+                    .pending_cmds
+                    .push_back(super::super::cutscene::DialogueRuntimeCmd::SetMusicPlaying(*playing));
+            }
+            ScriptCommand::PlayDialogueBoxAnim(anim) => {
+                hud_texts
+                    .dialogue
+                    .pending_cmds
+                    .push_back(super::super::cutscene::DialogueRuntimeCmd::PlayBoxAnim(anim.clone()));
+            }
+            ScriptCommand::PlayVideo { path, is_ending } => {
+                hud_texts.video.queue_play(path.clone(), *is_ending);
+            }
+            ScriptCommand::SkipVideo => {
+                hud_texts.video.queue_skip();
             }
             ScriptCommand::SetShaderAdjustColor {
                 target,

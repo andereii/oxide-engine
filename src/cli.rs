@@ -48,6 +48,10 @@ impl Default for LaunchFlags {
 }
 
 impl LaunchFlags {
+    pub fn has_play_flags(&self) -> bool {
+        self.song_id.is_some() || !self.capture_timestamps_ms.is_empty()
+    }
+
     pub fn from_env_args() -> Self {
         Self::parse(std::env::args().skip(1))
     }

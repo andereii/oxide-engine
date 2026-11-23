@@ -211,6 +211,23 @@ pub(super) fn handle_text_cmd(
                 });
             }
         }
+        ScriptCommand::SetTextFont { id, font } => {
+            let font_source = resolve_text_font(font, mods, asset_server);
+            let mut matched = false;
+            for (_, txt, _, mut tf, _, _, _) in texts.iter_mut() {
+                if txt.id == *id {
+                    tf.font = font_source.clone();
+                    matched = true;
+                }
+            }
+            if !matched && let Some(&ent) = pending_texts.get(id) {
+                commands.queue(move |world: &mut World| {
+                    if let Some(mut tf) = world.get_mut::<TextFont>(ent) {
+                        tf.font = font_source;
+                    }
+                });
+            }
+        }
         _ => {}
     }
 }

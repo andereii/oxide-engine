@@ -118,16 +118,27 @@ fn onCreate() {
     this.runner_seq = 0;
     this.runners = [];
     this.last_now_ms = 0.0;
+    this.has_played_cutscene = false;
     this.is_erect = (variation() == "pico" || stage() == "tankmanBattlefieldErect");
     this.timings = build_runner_timings();
 }
 
 fn onSongRetry() {
+    this.has_played_cutscene = true;
     clear_active_runners(this.runners);
     this.runners = [];
     this.timings = build_runner_timings();
     this.next_idx = 0;
     this.last_now_ms = 0.0;
+}
+
+fn onCountdownStart(ev) {
+    if variation() == "pico" { return; }
+    if !this.has_played_cutscene {
+        this.has_played_cutscene = true;
+        ev.cancel();
+        play_video("gameplay/songs/stress/story/cutscene.mkv", "starting");
+    }
 }
 
 fn onUpdate() {
