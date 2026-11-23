@@ -257,8 +257,14 @@ impl PlayState {
                     get_float(&event.raw_value, "scale").filter(|s| s.is_finite())
                 {
                     self.pending_event_commands.push(ScriptCommand::SetIconScale {
-                        side,
+                        side: side.clone(),
                         scale: scale as f32,
+                    });
+                }
+                if let Some(flip_x) = get_bool(&event.raw_value, "flipX") {
+                    self.pending_event_commands.push(ScriptCommand::SetIconFlip {
+                        side,
+                        flip_x,
                     });
                 }
             }

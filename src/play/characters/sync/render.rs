@@ -4,7 +4,8 @@ use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use crate::animations::atlas_composite::{
-    CompositePiece, FlxAnimateTransformParams, compose_flx_piece_bevy_affine, modulate_color,
+    CompositePiece, FlxAnimateTransformParams, build_attached_piece,
+    compose_flx_piece_bevy_affine, modulate_color,
 };
 use crate::play::stage::schema::{composite_piece_z, stage_layer_z};
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
@@ -93,13 +94,28 @@ pub(super) fn sync_actor_visuals(
             source_idx,
             clip,
             stage_matrix,
+            ..
         }) => {
             hide_entities(&[actor.sheet_entity], parts);
-            let pieces = clip
+            let base_pieces = clip
                 .frames
                 .get(actor.controller.frame_cursor)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
+            let merged_pieces;
+            let pieces: &[CompositePiece] = if !actor.attachments.is_empty()
+                && let Some(cur_anim) = actor.controller.current_name()
+            {
+                merged_pieces = build_merged_composite_pieces(
+                    actor,
+                    cur_anim,
+                    actor.controller.frame_cursor,
+                    base_pieces,
+                );
+                &merged_pieces
+            } else {
+                base_pieces
+            };
             if let Some(ref rt) = actor.composite_rt {
                 let rt_origin = [
                     SCREEN_WIDTH * 0.5,
@@ -375,7 +391,16 @@ fn sync_composite_parts(
                 .unwrap_or_else(|| stage_layer_z(actor.slot.layer, 0))
         };
         let pos = Vec3::new(bx, by, composite_piece_z(base_z, i));
-        let (tex, layout) = src.atlas_pair(piece.spritemap_idx);
+        let (tex, layout) = piece
+            .attachment_idx
+            .and_then(|att_idx| actor.attachments.get(att_idx))
+            .and_then(|att| {
+                att.textures
+                    .get(piece.spritemap_idx)
+                    .or_else(|| att.textures.first())
+                    .map(|(t, l)| (t, l))
+            })
+            .unwrap_or_else(|| src.atlas_pair(piece.spritemap_idx));
         set_sprite_atlas(&mut sprite, tex, layout, piece.sprite_index);
         set_sprite_color(&mut sprite, modulate_color(tint, piece.color));
         set_sprite_flip(&mut sprite, false, false);
@@ -384,6 +409,71 @@ fn sync_composite_parts(
         aff.translation = pos;
         set_visibility(&mut vis, visible);
     }
+}
+
+fn build_merged_composite_pieces(
+    actor: &CharacterActor,
+    anim_name: &str,
+    frame_idx: usize,
+    base_pieces: &[CompositePiece],
+) -> Vec<CompositePiece> {
+    let mut insertions: Vec<(usize, CompositePiece)> = Vec::new();
+    for (att_idx, att) in actor.attachments.iter().enumerate() {
+        if !att.visible || att.alpha <= 0.0001 || att.frames.is_empty() {
+            continue;
+        }
+        let Some(anchors) = att
+            .per_clip_anchors
+            .get(anim_name)
+            .and_then(|frames| frames.get(frame_idx))
+        else {
+            continue;
+        };
+        if anchors.is_empty() {
+            continue;
+        }
+        let att_frame_idx = att.cur_frame.min(att.frames.len().saturating_sub(1));
+        let Some(src_frame) = att.frames.get(att_frame_idx) else {
+            continue;
+        };
+        for anchor in anchors {
+            for src_piece in src_frame {
+                insertions.push((
+                    anchor.after_piece_idx,
+                    build_attached_piece(
+                        src_piece,
+                        att_idx,
+                        att.bounds_min,
+                        att.bounds_size,
+                        anchor.matrix,
+                        anchor.color,
+                        att.offset,
+                        att.angle_deg,
+                        att.flip_x,
+                        att.alpha,
+                    ),
+                ));
+            }
+        }
+    }
+    if insertions.is_empty() {
+        return base_pieces.to_vec();
+    }
+    let mut merged = Vec::with_capacity(base_pieces.len() + insertions.len());
+    for (idx, base_piece) in base_pieces.iter().enumerate() {
+        for (ins_idx, piece) in &insertions {
+            if *ins_idx == idx {
+                merged.push(piece.clone());
+            }
+        }
+        merged.push(base_piece.clone());
+    }
+    for (ins_idx, piece) in insertions {
+        if ins_idx >= base_pieces.len() {
+            merged.push(piece);
+        }
+    }
+    merged
 }
 
 fn hide_entities(entities: &[Entity], parts: &mut CharPartsQuery) {

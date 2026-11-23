@@ -176,6 +176,39 @@ impl PlayState {
         remaining
     }
 
+    /// Runs `Create` on a single dynamically loaded script instance and returns its ECS commands.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_instance_create(
+        &mut self,
+        script_id: &str,
+        playlist: &mut PlayStatePlaylist,
+        host: &mut ScriptHost,
+        registry: &ModRegistry,
+        store: &mut ModStore,
+    ) -> Vec<ScriptCommand> {
+        let mut snapshot = self.snapshot_for_scripts(0.0);
+        snapshot.story_mode = playlist.is_story_mode;
+        snapshot.playlist_songs = playlist.playlist_song_ids.clone();
+        snapshot.campaign_score = playlist.campaign_score;
+        let mut ctx = host.make_context(snapshot, registry, store);
+        let mut ev = ScriptEvent::new(HookKind::Create);
+        host.dispatch_instance_hook(script_id, &HookKind::Create, &mut ev, &mut ctx);
+        let mut ctx = host.finalize_context(ctx, store);
+        self.apply_script_mutable(&ctx.mutable);
+        self.apply_pending_notekind_registrations(&ctx.commands);
+        let mut remaining = Vec::new();
+        for cmd in ctx.commands.drain(..) {
+            if matches!(cmd, ScriptCommand::RegisterNoteKind { .. })
+                || self.apply_bridge_script_command(&cmd)
+                || self.apply_state_script_command(&cmd, playlist)
+            {
+                continue;
+            }
+            remaining.push(cmd);
+        }
+        remaining
+    }
+
     /// Applies any queued [`ScriptCommand::RegisterNoteKind`] entries to [`PlayState::note_kinds`]
     /// and updates matching chart/strumline notes and `total_notes`.
     pub fn apply_pending_notekind_registrations(&mut self, cmds: &[ScriptCommand]) {

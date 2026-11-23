@@ -1,6 +1,7 @@
 pub mod animate_atlas;
 mod animate_atlas_raw;
 pub mod atlas_composite;
+mod atlas_mask;
 pub mod base;
 pub mod bopper;
 pub mod controller;

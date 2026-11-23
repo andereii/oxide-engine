@@ -6,7 +6,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::sprite_render::SpriteMaterial;
 
 use crate::mods::ModRegistry;
-use crate::play::camera::hud::HudCamera;
+use crate::play::camera::hud::{HudCamera, OverlayCamera};
 use crate::play::characters::behavior::{
     COMPOSITE_RT_SIZE, CompositeRenderTarget, CompositeRtCamera, compute_composite_rt_dimensions,
 };
@@ -209,6 +209,7 @@ pub fn attach_stage_and_character_shaders(
             With<Camera2d>,
             With<IsDefaultUiCamera>,
             Without<HudCamera>,
+            Without<OverlayCamera>,
             Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
@@ -327,6 +328,9 @@ mod tests {
             raw_size: [100.0, 100.0],
             velocity: [0.0, 0.0],
             acceleration: [0.0, 0.0],
+            repeat: [false, false],
+            custom_affine: None,
+            overlay: false,
         }
     }
 
@@ -441,6 +445,7 @@ mod tests {
     #[test]
     fn stage_composite_rt_size_uses_scaled_bounds_and_fallback() {
         let mut comp = StageCompositeProp {
+            atlas_dir: None,
             textures: Vec::new(),
             clips: HashMap::new(),
             bounds_min: [0.0, 0.0],

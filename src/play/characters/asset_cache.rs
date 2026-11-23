@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use bevy::prelude::*;
 
@@ -106,12 +107,50 @@ pub(super) fn get_or_load_sparrow(
     Some(pair)
 }
 
-pub(super) type CachedAnimateAtlas = (usize, AnimateAtlas, HashMap<String, usize>);
+pub(super) type CachedAnimateAtlas = (usize, Arc<AnimateAtlas>, Arc<HashMap<String, usize>>);
+
+pub(crate) fn load_animate_textures(
+    dir: &Path,
+    atlas: &AnimateAtlas,
+    mods: &ModRegistry,
+    asset_server: &AssetServer,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
+    mut preload: Option<&mut crate::play::preload::PlayPreloadTracker>,
+) -> (
+    Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
+    HashMap<String, usize>,
+) {
+    let (atlas_layouts, indices) = atlas.build_layouts();
+    let disk_count = atlas.spritemap_count.max(1);
+    let mut baked_iter = atlas.baked_bevy_images().into_iter();
+    let textures = atlas_layouts
+        .into_iter()
+        .enumerate()
+        .map(|(i, layout)| {
+            let tex = if i < disk_count {
+                let img_rel = mods.to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
+                let handle: Handle<Image> = asset_server.load(img_rel);
+                if let Some(tr) = preload.as_deref_mut() {
+                    tr.register_handle(handle.clone());
+                }
+                handle
+            } else if let Some(baked_img) = baked_iter.next() {
+                images.add(baked_img)
+            } else {
+                Handle::default()
+            };
+            (tex, layouts.add(layout))
+        })
+        .collect();
+    (textures, indices)
+}
 
 pub(super) fn get_or_load_animate(
     ctx: &CharAssetCtx<'_>,
     raw_path: &str,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
     sources: &mut Vec<SheetSource>,
     caches: &mut CharLoadCaches,
 ) -> Option<CachedAnimateAtlas> {
@@ -125,29 +164,26 @@ pub(super) fn get_or_load_animate(
             (dir.join("Animation.json").is_file() && dir.join("spritemap1.png").is_file())
                 .then_some(dir)
         })?;
-    let atlas = AnimateAtlas::from_dir(&dir).ok()?;
+    let atlas = Arc::new(AnimateAtlas::from_dir(&dir).ok()?);
     let asset_key = format!("animate:{}", dir.to_string_lossy());
     if let Some(existing_idx) = sources.iter().position(|s| s.asset_key == asset_key) {
         let (_, indices) = atlas.build_layouts();
-        let val = (existing_idx, atlas, indices);
+        let val = (existing_idx, atlas, Arc::new(indices));
         caches.atlas_cache.insert(raw_path.to_string(), val.clone());
         return Some(val);
     }
-    let (atlas_layouts, indices) = atlas.build_layouts();
-    let mut iter = atlas_layouts.into_iter().enumerate();
-    let (_, first_layout) = iter.next()?;
-    let texture = ctx
-        .asset_server
-        .load(ctx.mods.to_asset_server_path(&dir.join("spritemap1.png")));
-    let layout_handle = layouts.add(first_layout);
-    let extra_layers = iter
-        .map(|(i, layout)| {
-            let img_rel = ctx
-                .mods
-                .to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
-            (ctx.asset_server.load(img_rel), layouts.add(layout))
-        })
-        .collect();
+    let (textures, indices) = load_animate_textures(
+        &dir,
+        &atlas,
+        ctx.mods,
+        ctx.asset_server,
+        layouts,
+        images,
+        None,
+    );
+    let mut iter = textures.into_iter();
+    let (texture, layout_handle) = iter.next()?;
+    let extra_layers = iter.collect();
     let src_idx = sources.len();
     sources.push(SheetSource {
         asset_key,
@@ -156,7 +192,7 @@ pub(super) fn get_or_load_animate(
         extra_layers,
         frame_sizes: HashMap::new(),
     });
-    let val = (src_idx, atlas, indices);
+    let val = (src_idx, atlas, Arc::new(indices));
     caches.atlas_cache.insert(raw_path.to_string(), val.clone());
     Some(val)
 }
@@ -284,11 +320,12 @@ pub(super) fn load_composite_anim(
     rel_path: &str,
     anim: &BaseAnimationData,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
     caches: &mut CharLoadCaches,
     target: &mut AnimLoadTarget<'_>,
 ) {
     let Some((src_i, atlas, indices)) =
-        get_or_load_animate(ctx, rel_path, layouts, target.sources, caches)
+        get_or_load_animate(ctx, rel_path, layouts, images, target.sources, caches)
     else {
         return;
     };
@@ -307,6 +344,9 @@ pub(super) fn load_composite_anim(
             source_idx: src_i,
             clip,
             stage_matrix: atlas.stage_matrix,
+            atlas: Some(atlas),
+            indices: Some(indices),
+            anim_data: Some(anim.clone()),
         },
     );
 }

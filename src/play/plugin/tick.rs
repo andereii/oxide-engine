@@ -62,21 +62,28 @@ fn sync_script_entity_maps(
             .mod_z
             .unwrap_or_else(|| super::super::stage::schema::stage_layer_z(actor.slot.layer, 0));
         let cur_anim = actor.controller.current.as_deref().unwrap_or("");
+        let cur_frame = actor.controller.frame_cursor;
         let anim_finished = actor.controller.is_finished();
 
-        let (alias, role_idx) = match actor.role {
-            CharacterRole::Player => ("bf", 0),
-            CharacterRole::Opponent => ("dad", 1),
-            CharacterRole::Spectator => ("gf", 2),
+        let alias = match actor.role {
+            CharacterRole::Player => {
+                let first = !seen_aliases[0];
+                seen_aliases[0] = true;
+                if first { "bf" } else { "" }
+            }
+            CharacterRole::Opponent => {
+                let first = !seen_aliases[1];
+                seen_aliases[1] = true;
+                if first { "dad" } else { "" }
+            }
+            CharacterRole::Spectator => {
+                let first = !seen_aliases[2];
+                seen_aliases[2] = true;
+                if first { "gf" } else { "" }
+            }
+            CharacterRole::Other => "",
         };
-        let write_alias = !seen_aliases[role_idx];
-        seen_aliases[role_idx] = true;
-
-        let keys: [&str; 2] = if write_alias {
-            [&actor.id, alias]
-        } else {
-            [&actor.id, ""]
-        };
+        let keys: [&str; 2] = [&actor.id, alias];
         for key in keys {
             if key.is_empty() {
                 continue;
@@ -91,6 +98,7 @@ fn sync_script_entity_maps(
             set_map_copy(&mut state.script_char_sizes, key, actor.idle_size);
             set_map_copy(&mut state.script_char_focus, key, actor.camera_focus_point);
             set_map_str(&mut state.script_char_anims, key, cur_anim);
+            set_map_copy(&mut state.script_char_frames, key, cur_frame);
             set_map_copy(&mut state.script_char_anim_finished, key, anim_finished);
         }
     }
@@ -118,7 +126,7 @@ fn sync_script_entity_maps(
     state.script_texts.clear();
     state.script_text_positions.clear();
     state.script_text_alphas.clear();
-    for (_, txt, t2d, _, tc, _) in &hud_texts.texts {
+    for (_, txt, t2d, _, tc, _, _) in &hud_texts.texts {
         state.script_texts.insert(txt.id.clone(), t2d.0.clone());
         state
             .script_text_positions
@@ -273,6 +281,7 @@ pub(super) fn tick_play_state(
                 &scripts.mods,
                 &scripts.asset_server,
                 &mut scripts.layouts,
+                &mut scripts.images,
                 &mut commands,
             );
         }
@@ -300,6 +309,8 @@ pub(super) fn tick_play_state(
     if !ecs_cmds.is_empty() {
         apply_ecs_script_commands(
             &mut commands,
+            &mut state,
+            &mut playlist,
             &mut audio_res,
             &mut scripts,
             &mut hud_texts,

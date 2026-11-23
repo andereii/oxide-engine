@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
 use crate::mods::ModRegistry;
-use crate::play::camera::hud::HudCamera;
+use crate::play::camera::hud::{HudCamera, OverlayCamera};
 use crate::play::characters::behavior::CompositeRtCamera;
-use crate::play::characters::{CharacterActor, CharacterRole};
+use crate::play::characters::CharacterActor;
 use crate::play::scene::PlayState;
 use crate::play::stage::schema::StageCoordMode;
 use crate::play::stage::{DynamicScriptProp, StagePropVisual};
@@ -62,6 +62,7 @@ pub fn update_stage_shaders(
             With<Camera2d>,
             With<IsDefaultUiCamera>,
             Without<HudCamera>,
+            Without<OverlayCamera>,
             Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
@@ -131,12 +132,9 @@ pub fn update_stage_shaders(
 
     let mut actor_rot_flags = [false; 3];
     for actor in &actors {
-        let idx = match actor.role {
-            CharacterRole::Player => 0,
-            CharacterRole::Spectator => 1,
-            CharacterRole::Opponent => 2,
-        };
-        actor_rot_flags[idx] = actor.controller.current_frame_rotated();
+        if let Some(idx) = actor.role.primary_slot_index() {
+            actor_rot_flags[idx] = actor.controller.current_frame_rotated();
+        }
     }
 
     for (entity, item) in managed.iter() {
@@ -263,6 +261,7 @@ pub fn sync_stage_blend_post(
             With<Camera2d>,
             With<IsDefaultUiCamera>,
             Without<HudCamera>,
+            Without<OverlayCamera>,
             Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
@@ -431,6 +430,9 @@ mod tests {
                     raw_size: [100.0, 100.0],
                     velocity: [0.0, 0.0],
                     acceleration: [0.0, 0.0],
+                    repeat: [false, false],
+                    custom_affine: None,
+                    overlay: false,
                 },
                 Sprite {
                     color: Color::srgba(1.0, 1.0, 1.0, 0.25),

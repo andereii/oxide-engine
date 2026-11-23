@@ -25,6 +25,15 @@ pub struct CompositePiece {
     pub rotated: bool,
     pub matrix: [f32; 6],
     pub color: [f32; 4],
+    pub attachment_idx: Option<usize>,
+}
+
+/// Captured symbol-instance placement inside a composite frame, matched by symbol keyword.
+#[derive(Debug, Clone, Copy)]
+pub struct SymbolAnchor {
+    pub after_piece_idx: usize,
+    pub matrix: [f32; 6],
+    pub color: [f32; 4],
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +164,7 @@ pub fn compute_layers_bounds(
             [1.0; 4],
             0,
             &mut scratch,
+            None,
         );
         if expand_pieces_bounds(&scratch, &mut bounds) {
             any = true;
@@ -292,7 +302,7 @@ pub fn compose_flx_piece_bevy_affine(
     ([bevy_x, bevy_y], cols)
 }
 
-fn find_symbol_layers<'a>(atlas: &'a AnimateAtlas, name: &str) -> Option<&'a [AnimateTimelineLayer]> {
+pub(super) fn find_symbol_layers<'a>(atlas: &'a AnimateAtlas, name: &str) -> Option<&'a [AnimateTimelineLayer]> {
     if let Some(layers) = atlas.symbols.get(name) {
         return Some(layers);
     }
@@ -383,6 +393,7 @@ fn sample_layer_ticks(
             [1.0; 4],
             0,
             &mut frame_pieces,
+            None,
         );
         out.push(frame_pieces);
     }
@@ -414,13 +425,136 @@ fn push_sprite_piece(
         rotated: entry.rotated,
         matrix,
         color,
+        attachment_idx: None,
     });
+}
+
+/// Collects per-frame [`SymbolAnchor`] placements for symbols matching `keyword` (case-insensitive
+/// substring) in the given animation definition.
+pub fn collect_symbol_anchors(
+    atlas: &AnimateAtlas,
+    indices: &HashMap<String, usize>,
+    anim: &BaseAnimationData,
+    keyword: &str,
+) -> Vec<Vec<SymbolAnchor>> {
+    let kw = keyword.trim().to_ascii_lowercase();
+    if kw.is_empty() || anim.name.is_empty() {
+        return Vec::new();
+    }
+    let query = if anim.prefix.is_empty() {
+        &anim.name
+    } else {
+        &anim.prefix
+    };
+    let (layers, ticks): (&[AnimateTimelineLayer], Vec<usize>) =
+        if anim.anim_type.eq_ignore_ascii_case("symbol")
+            && let Some(layers) = find_symbol_layers(atlas, query)
+        {
+            (layers, (0..layers_duration(layers)).collect())
+        } else {
+            let label_ticks = atlas.find_frame_label_indices(query);
+            if !label_ticks.is_empty() {
+                (&atlas.main_layers, label_ticks)
+            } else if let Some(layers) = find_symbol_layers(atlas, query) {
+                (layers, (0..layers_duration(layers)).collect())
+            } else if !atlas.main_layers.is_empty() {
+                (&atlas.main_layers, (0..layers_duration(&atlas.main_layers)).collect())
+            } else {
+                return Vec::new();
+            }
+        };
+
+    let selected_ticks: Vec<usize> = if anim.frame_indices.is_empty() {
+        ticks
+    } else {
+        anim.frame_indices
+            .iter()
+            .filter_map(|&idx| ticks.get(idx).copied())
+            .collect()
+    };
+
+    let mut out = Vec::with_capacity(selected_ticks.len());
+    for t in selected_ticks {
+        let mut frame_pieces = Vec::new();
+        let mut anchors = Vec::new();
+        collect_tick(
+            atlas,
+            indices,
+            layers,
+            t,
+            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            [1.0; 4],
+            0,
+            &mut frame_pieces,
+            Some((&kw, &mut anchors)),
+        );
+        out.push(anchors);
+    }
+    out
+}
+
+/// Transforms a piece from an attached child `AnimateAtlas` into parent symbol space,
+/// matching `flixel-animate`'s `FlxSpriteElement` positioning, rotation, `flipX`, and `offset`.
+#[allow(clippy::too_many_arguments)]
+pub fn build_attached_piece(
+    src_piece: &CompositePiece,
+    attachment_idx: usize,
+    attach_bounds_min: [f32; 2],
+    attach_bounds_size: [f32; 2],
+    anchor_mx: [f32; 6],
+    anchor_color: [f32; 4],
+    offset: [f32; 2],
+    angle_deg: f32,
+    flip_x: bool,
+    alpha: f32,
+) -> CompositePiece {
+    let [lbx, lby] = attach_bounds_min;
+    let [lw, lh] = attach_bounds_size;
+    let mut m = mul_affine([1.0, 0.0, 0.0, 1.0, -lbx, -lby], src_piece.matrix);
+    if flip_x {
+        m = mul_affine([-1.0, 0.0, 0.0, 1.0, lw, 0.0], m);
+    }
+    m = mul_affine([1.0, 0.0, 0.0, 1.0, -lw * 0.5, -lh * 0.5], m);
+    let total_rad = angle_deg.to_radians() + anchor_mx[1].atan2(anchor_mx[0]);
+    if total_rad.abs() > 1e-6 {
+        let (sin_r, cos_r) = total_rad.sin_cos();
+        m = mul_affine([cos_r, sin_r, -sin_r, cos_r, 0.0, 0.0], m);
+    }
+    m = mul_affine(
+        [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            anchor_mx[4] + lw * 0.5 - offset[0],
+            anchor_mx[5] + lh * 0.5 - offset[1],
+        ],
+        m,
+    );
+    let color = mul_color(
+        anchor_color,
+        [
+            src_piece.color[0],
+            src_piece.color[1],
+            src_piece.color[2],
+            src_piece.color[3] * alpha.clamp(0.0, 1.0),
+        ],
+    );
+    CompositePiece {
+        sprite_index: src_piece.sprite_index,
+        spritemap_idx: src_piece.spritemap_idx,
+        atlas_size: src_piece.atlas_size,
+        rotated: src_piece.rotated,
+        matrix: m,
+        color,
+        attachment_idx: Some(attachment_idx),
+    }
 }
 
 /// Resolves the active child frame index for a symbol instance, returning `None`
 /// when `SingleFrame` (`SF`) points past the end of the symbol (`first_frame >= dur`)
 /// or when the target symbol has no frames (`dur == 0`), matching `flixel-animate`.
-fn resolve_child_tick(
+pub(super) fn resolve_child_tick(
     loop_mode: &str,
     first_frame: usize,
     last_frame: isize,
@@ -449,6 +583,99 @@ fn resolve_child_tick(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn collect_single_layer_frame_pieces(
+    atlas: &AnimateAtlas,
+    indices: &HashMap<String, usize>,
+    frame: &super::animate_atlas::AnimateTimelineFrame,
+    rel_tick: usize,
+    parent_mx: [f32; 6],
+    parent_color: [f32; 4],
+    depth: u8,
+    out: &mut Vec<CompositePiece>,
+) {
+    let frame_color = mul_color(parent_color, frame.color);
+    for elem in &frame.elements {
+        let combined = mul_affine(parent_mx, elem.matrix);
+        let elem_color = mul_color(frame_color, elem.color);
+        if let Some(name) = &elem.sprite_name {
+            push_sprite_piece(atlas, indices, name, combined, elem_color, out);
+        }
+        if let Some(sym) = &elem.symbol_name {
+            if let Some(sub_layers) = find_symbol_layers(atlas, sym) {
+                let dur = layers_duration(sub_layers);
+                if let Some(child_tick) = resolve_child_tick(
+                    &elem.loop_mode,
+                    elem.first_frame,
+                    elem.last_frame,
+                    rel_tick,
+                    dur,
+                ) {
+                    collect_tick(
+                        atlas,
+                        indices,
+                        sub_layers,
+                        child_tick,
+                        combined,
+                        elem_color,
+                        depth + 1,
+                        out,
+                        None,
+                    );
+                }
+            } else if let Some(bm) = &elem.bitmap_fallback {
+                push_sprite_piece(
+                    atlas,
+                    indices,
+                    &bm.sprite_name,
+                    mul_affine(combined, bm.matrix),
+                    elem_color,
+                    out,
+                );
+            }
+        } else if let Some(bm) = &elem.bitmap_fallback {
+            push_sprite_piece(
+                atlas,
+                indices,
+                &bm.sprite_name,
+                mul_affine(combined, bm.matrix),
+                elem_color,
+                out,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn collect_single_layer_tick_pieces(
+    atlas: &AnimateAtlas,
+    indices: &HashMap<String, usize>,
+    layer: &AnimateTimelineLayer,
+    tick: usize,
+    parent_mx: [f32; 6],
+    parent_color: [f32; 4],
+    depth: u8,
+    out: &mut Vec<CompositePiece>,
+) {
+    let Some(frame) = layer
+        .frames
+        .iter()
+        .find(|f| tick >= f.index && tick < f.index + f.duration)
+    else {
+        return;
+    };
+    collect_single_layer_frame_pieces(
+        atlas,
+        indices,
+        frame,
+        tick.saturating_sub(frame.index),
+        parent_mx,
+        parent_color,
+        depth,
+        out,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_tick(
     atlas: &AnimateAtlas,
     indices: &HashMap<String, usize>,
@@ -458,6 +685,7 @@ fn collect_tick(
     parent_color: [f32; 4],
     depth: u8,
     out: &mut Vec<CompositePiece>,
+    mut anchor_filter: Option<(&str, &mut Vec<SymbolAnchor>)>,
 ) {
     if depth > 12 {
         return;
@@ -498,6 +726,9 @@ fn collect_tick(
                             elem_color,
                             depth + 1,
                             out,
+                            anchor_filter
+                                .as_mut()
+                                .map(|(kw, vec)| (*kw, &mut **vec)),
                         );
                     }
                 } else if let Some(bm) = &elem.bitmap_fallback {
@@ -509,6 +740,15 @@ fn collect_tick(
                         elem_color,
                         out,
                     );
+                }
+                if let Some((kw, ref mut anchors)) = anchor_filter
+                    && sym.to_ascii_lowercase().contains(kw)
+                {
+                    anchors.push(SymbolAnchor {
+                        after_piece_idx: out.len(),
+                        matrix: combined,
+                        color: elem_color,
+                    });
                 }
             } else if let Some(bm) = &elem.bitmap_fallback {
                 push_sprite_piece(
@@ -525,12 +765,12 @@ fn collect_tick(
 }
 
 #[inline]
-fn mul_color(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+pub(super) fn mul_color(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     [a[0] * b[0], a[1] * b[1], a[2] * b[2], a[3] * b[3]]
 }
 
 #[inline]
-fn mul_affine(a: [f32; 6], b: [f32; 6]) -> [f32; 6] {
+pub(super) fn mul_affine(a: [f32; 6], b: [f32; 6]) -> [f32; 6] {
     [
         a[0] * b[0] + a[2] * b[1],
         a[1] * b[0] + a[3] * b[1],

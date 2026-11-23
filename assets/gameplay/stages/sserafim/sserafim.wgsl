@@ -223,7 +223,11 @@ fn hsl2rgb(hsl: vec3<f32>) -> vec3<f32> {
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let sample_uv = get_final_uv(mesh.uv);
     let lin_sample = textureSampleLevel(sprite_texture, sprite_sampler, sample_uv, 0.0);
-    let srgb_in = linear_to_srgb(max(lin_sample.rgb, vec3<f32>(0.0)));
+    var lin_rgb = max(lin_sample.rgb, vec3<f32>(0.0));
+    if (fx.flags.y & 2048u) != 0u && lin_sample.a > 0.0001 {
+        lin_rgb = clamp(lin_rgb / lin_sample.a, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    let srgb_in = linear_to_srgb(lin_rgb);
 
     var out_col = apply_hsbc(srgb_in, fx.custom_0);
 

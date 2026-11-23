@@ -1,14 +1,33 @@
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 use bevy::prelude::*;
 
-use crate::animations::atlas_composite::CompositeClip;
+use crate::animations::animate_atlas::AnimateAtlas;
+use crate::animations::atlas_composite::{CompositeClip, CompositePiece, SymbolAnchor};
 use crate::animations::{AnimationController, BaseAnimationData, Bopper};
 use crate::play::notes::CharNoteSignal;
 use crate::play::notes::data::{NoteDirection, NoteKindManager};
 use crate::play::stage::schema::StageCharacterSlot;
 
 use super::schema::{CharacterData, CharacterRole};
+
+/// Child `AnimateAtlas` attached to a keyword-matched symbol instance inside a character atlas.
+#[derive(Debug, Clone)]
+pub struct SymbolAtlasAttachment {
+    pub id: String,
+    pub textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
+    pub frames: Vec<Vec<CompositePiece>>,
+    pub bounds_min: [f32; 2],
+    pub bounds_size: [f32; 2],
+    pub cur_frame: usize,
+    pub offset: [f32; 2],
+    pub angle_deg: f32,
+    pub flip_x: bool,
+    pub alpha: f32,
+    pub visible: bool,
+    pub per_clip_anchors: HashMap<String, Vec<Vec<SymbolAnchor>>>,
+}
 
 #[derive(Debug, Clone)]
 pub struct SheetSource {
@@ -38,6 +57,9 @@ pub enum ClipVisual {
         source_idx: usize,
         clip: CompositeClip,
         stage_matrix: Option<[f32; 6]>,
+        atlas: Option<Arc<AnimateAtlas>>,
+        indices: Option<Arc<HashMap<String, usize>>>,
+        anim_data: Option<BaseAnimationData>,
     },
 }
 
@@ -179,6 +201,8 @@ impl CompositeRenderTarget {
 pub struct CharacterActor {
     pub id: String,
     pub role: CharacterRole,
+    pub sing_role: CharacterRole,
+    pub default_sing_suffix: String,
     pub slot: StageCharacterSlot,
     pub data: CharacterData,
     pub controller: AnimationController,
@@ -205,6 +229,7 @@ pub struct CharacterActor {
     pub trail: Option<CharacterTrailState>,
     pub trail_entities: Vec<Entity>,
     pub mirror_of: Option<CharacterUnderlayConfig>,
+    pub attachments: Vec<SymbolAtlasAttachment>,
 }
 
 impl CharacterActor {
@@ -214,6 +239,9 @@ impl CharacterActor {
         }
     }
     pub fn reset_character(&mut self) {
+        self.sing_role = self.role;
+        self.default_sing_suffix.clear();
+        self.bopper.idle_suffix.clear();
         self.bopper.dance_every = self.data.dance_every;
         self.bopper.can_play_other_anims = true;
         self.hold_timer = 0.0;
@@ -384,7 +412,7 @@ impl CharacterActor {
             if self.controller.current_name().is_some_and(|n| n.ends_with("miss")) {
                 sing_time_sec *= 2.0;
             }
-            let should_stop = self.role != CharacterRole::Player || !player_holding_note;
+            let should_stop = self.sing_role != CharacterRole::Player || !player_holding_note;
             if self.hold_timer > sing_time_sec && should_stop {
                 self.hold_timer = 0.0;
                 if let Some(cur) = self.controller.current_name() {
@@ -421,10 +449,16 @@ impl CharacterActor {
                 if self.cur_no_anim {
                     return;
                 }
-                if self.role == CharacterRole::Player {
-                    let suffix = self.cur_suffix.clone();
+                if self.sing_role == CharacterRole::Player {
+                    let suffix = if self.cur_suffix.is_empty() {
+                        self.default_sing_suffix.clone()
+                    } else {
+                        self.cur_suffix.clone()
+                    };
                     self.play_sing(*direction, false, &suffix);
-                } else if self.role == CharacterRole::Spectator && let Some(good) = good_judgement {
+                } else if self.sing_role == CharacterRole::Spectator
+                    && let Some(good) = good_judgement
+                {
                     if *good {
                         self.play_combo(*combo);
                     } else {
@@ -432,26 +466,35 @@ impl CharacterActor {
                     }
                 }
             }
-            CharNoteSignal::HoldTick if self.role == CharacterRole::Player => self.hold_timer = 0.0,
-            CharNoteSignal::Miss { direction, combo_before } => match self.role {
-                CharacterRole::Player => self.play_sing(*direction, true, ""),
+            CharNoteSignal::HoldTick if self.sing_role == CharacterRole::Player => {
+                self.hold_timer = 0.0;
+            }
+            CharNoteSignal::Miss { direction, combo_before } => match self.sing_role {
+                CharacterRole::Player => {
+                    let suffix = self.default_sing_suffix.clone();
+                    self.play_sing(*direction, true, &suffix);
+                }
                 CharacterRole::Spectator => self.play_drop(*combo_before),
-                CharacterRole::Opponent => {}
+                CharacterRole::Opponent | CharacterRole::Other => {}
             },
-            CharNoteSignal::HoldDrop { direction, is_combo_break, combo_before } => match self.role {
-                CharacterRole::Player => self.play_sing(*direction, true, ""),
+            CharNoteSignal::HoldDrop { direction, is_combo_break, combo_before } => match self.sing_role {
+                CharacterRole::Player => {
+                    let suffix = self.default_sing_suffix.clone();
+                    self.play_sing(*direction, true, &suffix);
+                }
                 CharacterRole::Spectator if *is_combo_break => self.play_drop(*combo_before),
                 _ => {}
             },
-            CharNoteSignal::GhostMiss { direction } if self.role == CharacterRole::Player => {
-                self.play_sing(*direction, true, "");
+            CharNoteSignal::GhostMiss { direction } if self.sing_role == CharacterRole::Player => {
+                let suffix = self.default_sing_suffix.clone();
+                self.play_sing(*direction, true, &suffix);
             }
             _ => {}
         }
     }
 
     pub fn handle_opponent_signal(&mut self, sig: &CharNoteSignal, kinds: &NoteKindManager) {
-        if self.role != CharacterRole::Opponent {
+        if self.sing_role != CharacterRole::Opponent {
             return;
         }
         match sig {
@@ -460,7 +503,11 @@ impl CharacterActor {
                 self.cur_no_anim = kind.is_some_and(|k| k.no_anim);
                 self.cur_suffix = kind.map(|k| k.suffix.clone()).unwrap_or_default();
                 if !self.cur_no_anim {
-                    let suffix = self.cur_suffix.clone();
+                    let suffix = if self.cur_suffix.is_empty() {
+                        self.default_sing_suffix.clone()
+                    } else {
+                        self.cur_suffix.clone()
+                    };
                     self.play_sing(*direction, false, &suffix);
                 }
             }
@@ -477,10 +524,16 @@ impl CharacterActor {
             NoteDirection::Right => "RIGHT",
         };
         let miss_part = if miss { "miss" } else { "" };
-        let raw_name = if suffix.is_empty() {
+        let chosen = if suffix.is_empty() {
+            self.default_sing_suffix.as_str()
+        } else {
+            suffix
+        };
+        let clean_suffix = chosen.strip_prefix('-').unwrap_or(chosen);
+        let raw_name = if clean_suffix.is_empty() {
             format!("sing{dir_upper}{miss_part}")
         } else {
-            format!("sing{dir_upper}{miss_part}-{suffix}")
+            format!("sing{dir_upper}{miss_part}-{clean_suffix}")
         };
         self.hold_timer = 0.0;
         if let Some(resolved) = self.controller.resolve_name(&raw_name) {

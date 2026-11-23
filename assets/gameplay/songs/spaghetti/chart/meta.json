@@ -2,6 +2,7 @@
   "songName": "SPAGHETTI (feat. j-hope of BTS) (Clean ver.)",
   "base": {
     "stage": "sserafim",
+    "scripts": true,
     "scrollSpeed": 1,
     "lanes": 4,
     "characters": {

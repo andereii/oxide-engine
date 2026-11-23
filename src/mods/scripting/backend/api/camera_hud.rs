@@ -225,6 +225,29 @@ pub fn register_camera_hud_api(engine: &mut Engine) {
             });
         })
     });
+    for name in ["overlay_flash", "cutscene_flash"] {
+        engine.register_fn(name, |hex: &str, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let dur = dyn_to_f64(&secs)?;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::OverlayFlash {
+                    color: parse_hex_rgba(hex),
+                    duration_s: dur.max(0.0),
+                });
+            })
+        });
+    }
+    for name in ["overlay_fade", "cutscene_fade"] {
+        engine.register_fn(name, |hex: &str, secs: Dynamic, fade_in: bool| -> Result<(), Box<EvalAltResult>> {
+            let dur = dyn_to_f64(&secs)?;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::OverlayFade {
+                    color: parse_hex_rgba(hex),
+                    duration_s: dur.max(0.0),
+                    fade_in,
+                });
+            })
+        });
+    }
 
     // Health bar, icons & judgement popups
     engine.register_fn("bar_colors", |opp_hex: &str, ply_hex: &str| {
@@ -243,6 +266,24 @@ pub fn register_camera_hud_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn("icon_flip", |side: &str, flip_x: bool| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetIconFlip {
+                side: side.to_string(),
+                flip_x,
+            });
+        })
+    });
+    for name in ["icon_visible", "icon_vis"] {
+        engine.register_fn(name, |side: &str, visible: bool| {
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetIconVisible {
+                    side: side.to_string(),
+                    visible,
+                });
+            })
+        });
+    }
     engine.register_fn("icon_scale", |side: &str, scale: Dynamic| -> Result<(), Box<EvalAltResult>> {
         let scale = dyn_to_f64(&scale)? as f32;
         with_ctx(|c| {

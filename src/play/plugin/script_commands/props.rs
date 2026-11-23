@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use crate::animations::animate_atlas::AnimateAtlas;
@@ -11,7 +12,8 @@ use crate::animations::{
     register_default_sparrow_idle,
 };
 use crate::mods::ModRegistry;
-use crate::play::camera::hud::hud_render_layer;
+use crate::play::camera::hud::{hud_render_layer, overlay_render_layer};
+use crate::play::characters::spawn::CompositeAffine2d;
 use crate::play::preload::PlayPreloadTracker;
 use crate::play::stage::schema::{StageCoordMode, composite_piece_z};
 use crate::play::stage::sync::StageAtlasFrameSizes;
@@ -76,6 +78,7 @@ pub(super) fn handle_prop_cmd(
     commands: &mut Commands,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
     mods: &ModRegistry,
     mut preload: Option<&mut PlayPreloadTracker>,
     props: &mut PropsQuery,
@@ -121,6 +124,9 @@ pub(super) fn handle_prop_cmd(
                 raw_size: *size,
                 velocity: [0.0, 0.0],
                 acceleration: [0.0, 0.0],
+                repeat: [false, false],
+                custom_affine: None,
+                overlay: false,
             };
             let mut ec = commands.spawn((
                 sprite,
@@ -160,6 +166,7 @@ pub(super) fn handle_prop_cmd(
                 commands,
                 asset_server,
                 layouts,
+                images,
                 mods,
                 preload,
                 id,
@@ -179,7 +186,7 @@ pub(super) fn handle_prop_cmd(
         ScriptCommand::DespawnProp(id) => {
             *prop_index = None;
             despawn_prop_by_id(commands, props, id, false, pending_spawned);
-            for (ent, txt, _, _, _, _) in texts.iter() {
+            for (ent, txt, _, _, _, _, _) in texts.iter() {
                 if txt.id == *id {
                     commands.entity(ent).despawn();
                 }
@@ -213,14 +220,18 @@ pub(super) fn handle_prop_cmd(
                     apply_prop_number(vis, sprite, p, v);
                 });
                 if !pending_spawned.contains_key(id) {
-                    for (_, mut txt, _, _, mut color, _) in texts.iter_mut() {
+                    for (_, mut txt, _, _, mut color, _, shadow_opt) in texts.iter_mut() {
                         if txt.id == *id {
                             match prop {
                                 TweenProp::X => txt.base_position[0] = *value,
                                 TweenProp::Y => txt.base_position[1] = *value,
                                 TweenProp::Z => txt.z_layer = *value,
                                 TweenProp::Alpha => {
-                                    color.0 = color.0.with_alpha(value.clamp(0.0, 1.0));
+                                    let a = value.clamp(0.0, 1.0);
+                                    color.0 = color.0.with_alpha(a);
+                                    if let Some(mut shadow) = shadow_opt {
+                                        shadow.color = shadow.color.with_alpha(a);
+                                    }
                                 }
                                 _ => {}
                             }
@@ -243,9 +254,12 @@ pub(super) fn handle_prop_cmd(
                     sprite.color = Color::srgba(c[0], c[1], c[2], c[3]);
                 });
             }
-            for (_, txt, _, _, mut tc, _) in texts.iter_mut() {
+            for (_, txt, _, _, mut tc, _, shadow_opt) in texts.iter_mut() {
                 if txt.id == *id {
                     tc.0 = Color::srgba(color[0], color[1], color[2], color[3]);
+                    if let Some(mut shadow) = shadow_opt {
+                        shadow.color = shadow.color.with_alpha(color[3]);
+                    }
                 }
             }
         }
@@ -263,7 +277,7 @@ pub(super) fn handle_prop_cmd(
                     vis.visible = v;
                 });
             }
-            for (_, mut txt, _, _, _, _) in texts.iter_mut() {
+            for (_, mut txt, _, _, _, _, _) in texts.iter_mut() {
                 if txt.id == *id {
                     txt.visible = *visible;
                 }
@@ -298,7 +312,7 @@ pub(super) fn handle_prop_cmd(
                     vis.scroll_factor = sc;
                 });
             }
-            for (_, mut txt, _, _, _, _) in texts.iter_mut() {
+            for (_, mut txt, _, _, _, _, _) in texts.iter_mut() {
                 if txt.id == *id {
                     txt.scroll_factor = [*sx, *sy];
                 }
@@ -318,7 +332,7 @@ pub(super) fn handle_prop_cmd(
                     vis.z_layer = zv;
                 });
             }
-            for (_, mut txt, _, _, _, _) in texts.iter_mut() {
+            for (_, mut txt, _, _, _, _, _) in texts.iter_mut() {
                 if txt.id == *id {
                     txt.z_layer = *z;
                 }
@@ -359,27 +373,236 @@ pub(super) fn handle_prop_cmd(
             }
         }
         ScriptCommand::AddPropAnim { id, anim } => {
-            for (ent, vis, _, ctrl_opt, _, _) in props.iter_mut() {
+            let mut matched = false;
+            for (ent, vis, _, ctrl_opt, dyn_opt, mut comp_opt) in props.iter_mut() {
                 if vis.name == *id
                     && let Some(mut ctrl) = ctrl_opt
                 {
-                    if !anim.frame_indices.is_empty() {
-                        ctrl.add_anim(
-                            &anim.name,
-                            anim.frame_indices.clone(),
-                            anim.frame_rate.max(1.0),
-                            anim.looped,
-                        );
-                        ctrl.set_offset(&anim.name, anim.offsets);
-                    } else if let Ok(sparrow) = sparrows.get(ent) {
-                        add_sparrow_animations(
-                            &sparrow.atlas,
-                            &sparrow.indices,
-                            &mut ctrl,
-                            std::slice::from_ref(anim),
-                        );
-                    }
+                    matched = true;
+                    let is_hud = dyn_opt.is_some_and(|d| d.hud) || vis.overlay;
+                    let layer = if vis.overlay {
+                        Some(overlay_render_layer())
+                    } else if is_hud {
+                        Some(hud_render_layer())
+                    } else {
+                        None
+                    };
+                    add_anim_to_prop_or_composite(
+                        commands,
+                        sparrows.get(ent).ok(),
+                        vis.z_layer,
+                        layer,
+                        &mut ctrl,
+                        comp_opt.as_deref_mut(),
+                        anim,
+                    );
                 }
+            }
+            if !matched && let Some(&ent) = pending_spawned.get(id) {
+                let anim_c = anim.clone();
+                commands.queue(move |world: &mut World| {
+                    let sparrow_data = world.get::<ScriptSparrowData>(ent).cloned();
+                    let atlas_dir = world
+                        .get::<StageCompositeProp>(ent)
+                        .and_then(|c| c.atlas_dir.clone());
+                    let is_hud = world
+                        .get::<DynamicScriptProp>(ent)
+                        .is_some_and(|d| d.hud);
+                    let is_overlay = world
+                        .get::<StagePropVisual>(ent)
+                        .is_some_and(|v| v.overlay);
+                    let z_layer = world
+                        .get::<StagePropVisual>(ent)
+                        .map_or(0.0, |v| v.z_layer);
+                    if !anim_c.frame_indices.is_empty() && atlas_dir.is_none() {
+                        if let Some(mut ctrl) = world.get_mut::<AnimationController>(ent) {
+                            ctrl.add_anim(
+                                &anim_c.name,
+                                anim_c.frame_indices.clone(),
+                                anim_c.frame_rate.max(1.0),
+                                anim_c.looped,
+                            );
+                            ctrl.set_offset(&anim_c.name, anim_c.offsets);
+                        }
+                    } else if let Some(sparrow) = sparrow_data {
+                        if let Some(mut ctrl) = world.get_mut::<AnimationController>(ent) {
+                            add_sparrow_animations(
+                                &sparrow.atlas,
+                                &sparrow.indices,
+                                &mut ctrl,
+                                std::slice::from_ref(&anim_c),
+                            );
+                        }
+                    } else if let Some(dir) = atlas_dir
+                        && let Ok(atlas) = AnimateAtlas::from_dir(&dir)
+                    {
+                        let (_, indices) = atlas.build_layouts();
+                        if let Some(clip) = build_composite_clip(&atlas, &indices, &anim_c) {
+                            let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
+                            let needed = clip.frames.iter().map(Vec::len).max().unwrap_or(0);
+                            if let Some(mut ctrl) = world.get_mut::<AnimationController>(ent) {
+                                ctrl.add_anim(&anim_c.name, frame_ids, clip.fps, clip.looped);
+                                ctrl.set_offset(&anim_c.name, clip.offset);
+                                ctrl.set_flip(&anim_c.name, clip.flip);
+                            }
+                            let (base_pair, existing_len) = world
+                                .get::<StageCompositeProp>(ent)
+                                .map(|c| (c.textures.first().cloned(), c.piece_entities.len()))
+                                .unwrap_or((None, 0));
+                            let mut extra_pieces = Vec::new();
+                            if needed > existing_len
+                                && let Some((tex, lay)) = base_pair
+                            {
+                                for i in existing_len..needed {
+                                    let mut pe = world.spawn((
+                                        Sprite::from_atlas_image(
+                                            tex.clone(),
+                                            TextureAtlas {
+                                                layout: lay.clone(),
+                                                index: 0,
+                                            },
+                                        ),
+                                        Transform::from_xyz(0.0, 0.0, composite_piece_z(z_layer, i)),
+                                        Visibility::Hidden,
+                                        StageCompositePiece,
+                                        CompositeAffine2d::default(),
+                                    ));
+                                    if is_overlay {
+                                        pe.insert(overlay_render_layer());
+                                    } else if is_hud {
+                                        pe.insert(hud_render_layer());
+                                    }
+                                    extra_pieces.push(pe.id());
+                                }
+                            }
+                            if let Some(mut comp) = world.get_mut::<StageCompositeProp>(ent) {
+                                comp.piece_entities.extend(extra_pieces);
+                                comp.clips.insert(anim_c.name.clone(), clip);
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        ScriptCommand::SetPropRepeat { id, repeat_x, repeat_y } => {
+            let mut matched = false;
+            for (_, mut vis, _, _, _, _) in props.iter_mut() {
+                if vis.name == *id {
+                    vis.repeat = [*repeat_x, *repeat_y];
+                    matched = true;
+                }
+            }
+            if !matched {
+                let rep = [*repeat_x, *repeat_y];
+                patch_pending_prop(commands, pending_spawned, id, move |vis, _| {
+                    vis.repeat = rep;
+                });
+            }
+        }
+        ScriptCommand::SetPropAffine { id, matrix } => {
+            let mut matched = false;
+            for (ent, mut vis, _, _, _, _) in props.iter_mut() {
+                if vis.name == *id {
+                    vis.custom_affine = *matrix;
+                    if matrix.is_some() {
+                        commands.entity(ent).insert(CompositeAffine2d::default());
+                    }
+                    matched = true;
+                }
+            }
+            if !matched && let Some(&ent) = pending_spawned.get(id) {
+                let m = *matrix;
+                commands.queue(move |world: &mut World| {
+                    if let Some(mut vis) = world.get_mut::<StagePropVisual>(ent) {
+                        vis.custom_affine = m;
+                    }
+                    if m.is_some() && world.get::<CompositeAffine2d>(ent).is_none() {
+                        world.entity_mut(ent).insert(CompositeAffine2d::default());
+                    }
+                });
+            }
+        }
+        ScriptCommand::SetPropTexture { id, path } => {
+            let resolved_file = mods
+                .resolve_file(path)
+                .or_else(|| mods.resolve_file(&format!("{path}.png")));
+            let new_size = resolved_file
+                .as_deref()
+                .and_then(super::super::super::stage::paths::read_image_dimensions);
+            let srv = resolved_file
+                .as_deref()
+                .map(|p| mods.to_asset_server_path(p))
+                .unwrap_or_else(|| path.to_string());
+            let tex: Handle<Image> = asset_server.load(srv);
+            if let Some(tr) = preload.as_deref_mut() {
+                tr.register_handle(tex.clone());
+            }
+            let mut matched = false;
+            for (_, mut vis, mut sprite, _, _, _) in props.iter_mut() {
+                if vis.name == *id {
+                    if let Some(sz) = new_size {
+                        vis.raw_size = sz;
+                    }
+                    sprite.image = tex.clone();
+                    matched = true;
+                }
+            }
+            if !matched {
+                let tex_c = tex.clone();
+                patch_pending_prop(commands, pending_spawned, id, move |vis, sprite| {
+                    if let Some(sz) = new_size {
+                        vis.raw_size = sz;
+                    }
+                    sprite.image = tex_c;
+                });
+            }
+        }
+        ScriptCommand::SetPropOverlay { id, overlay } => {
+            let ov = *overlay;
+            let mut matched = false;
+            for (ent, mut vis, _, _, dyn_opt, comp_opt) in props.iter_mut() {
+                if vis.name == *id {
+                    vis.overlay = ov;
+                    let layer = if ov {
+                        overlay_render_layer()
+                    } else if dyn_opt.is_some_and(|d| d.hud) {
+                        hud_render_layer()
+                    } else {
+                        RenderLayers::layer(0)
+                    };
+                    commands.entity(ent).insert(layer.clone());
+                    if let Some(comp) = comp_opt {
+                        for &piece in &comp.piece_entities {
+                            commands.entity(piece).insert(layer.clone());
+                        }
+                    }
+                    matched = true;
+                }
+            }
+            if !matched && let Some(&ent) = pending_spawned.get(id) {
+                commands.queue(move |world: &mut World| {
+                    let is_hud = world
+                        .get::<DynamicScriptProp>(ent)
+                        .is_some_and(|d| d.hud);
+                    if let Some(mut vis) = world.get_mut::<StagePropVisual>(ent) {
+                        vis.overlay = ov;
+                    }
+                    let layer = if ov {
+                        overlay_render_layer()
+                    } else if is_hud {
+                        hud_render_layer()
+                    } else {
+                        RenderLayers::layer(0)
+                    };
+                    let pieces = world
+                        .get::<StageCompositeProp>(ent)
+                        .map(|c| c.piece_entities.clone())
+                        .unwrap_or_default();
+                    world.entity_mut(ent).insert(layer.clone());
+                    for piece in pieces {
+                        world.entity_mut(piece).insert(layer.clone());
+                    }
+                });
             }
         }
         _ => {}
@@ -440,10 +663,75 @@ pub(crate) fn despawn_prop_by_id(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn add_anim_to_prop_or_composite(
+    commands: &mut Commands,
+    sparrow: Option<&ScriptSparrowData>,
+    z_layer: f32,
+    render_layer: Option<RenderLayers>,
+    ctrl: &mut AnimationController,
+    comp_opt: Option<&mut StageCompositeProp>,
+    anim: &BaseAnimationData,
+) {
+    if let Some(comp) = comp_opt {
+        let Some(ref dir) = comp.atlas_dir else {
+            return;
+        };
+        let Ok(atlas) = AnimateAtlas::from_dir(dir) else {
+            return;
+        };
+        let (_, indices) = atlas.build_layouts();
+        if let Some(clip) = build_composite_clip(&atlas, &indices, anim) {
+            let frame_ids: Vec<usize> = (0..clip.frames.len()).collect();
+            ctrl.add_anim(&anim.name, frame_ids, clip.fps, clip.looped);
+            ctrl.set_offset(&anim.name, clip.offset);
+            ctrl.set_flip(&anim.name, clip.flip);
+            let needed = clip.frames.iter().map(Vec::len).max().unwrap_or(0);
+            if needed > comp.piece_entities.len()
+                && let Some((base_tex, base_layout)) = comp.textures.first().cloned()
+            {
+                for i in comp.piece_entities.len()..needed {
+                    let mut pe = commands.spawn((
+                        Sprite::from_atlas_image(
+                            base_tex.clone(),
+                            TextureAtlas {
+                                layout: base_layout.clone(),
+                                index: 0,
+                            },
+                        ),
+                        Transform::from_xyz(0.0, 0.0, composite_piece_z(z_layer, i)),
+                        Visibility::Hidden,
+                        StageCompositePiece,
+                        CompositeAffine2d::default(),
+                    ));
+                    if let Some(ref rl) = render_layer {
+                        pe.insert(rl.clone());
+                    }
+                    comp.piece_entities.push(pe.id());
+                }
+            }
+            comp.clips.insert(anim.name.clone(), clip);
+        }
+        return;
+    }
+    if !anim.frame_indices.is_empty() {
+        ctrl.add_anim(
+            &anim.name,
+            anim.frame_indices.clone(),
+            anim.frame_rate.max(1.0),
+            anim.looped,
+        );
+        ctrl.set_offset(&anim.name, anim.offsets);
+    } else if let Some(sp) = sparrow {
+        add_sparrow_animations(&sp.atlas, &sp.indices, ctrl, std::slice::from_ref(anim));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_animated_script_prop(
     commands: &mut Commands,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
     mods: &ModRegistry,
     mut preload: Option<&mut PlayPreloadTracker>,
     id: &str,
@@ -472,6 +760,9 @@ fn spawn_animated_script_prop(
         raw_size,
         velocity: [0.0, 0.0],
         acceleration: [0.0, 0.0],
+        repeat: [false, false],
+        custom_affine: None,
+        overlay: false,
     };
 
     match kind {
@@ -619,19 +910,15 @@ fn spawn_animated_script_prop(
                 warn!("spawn_atlas({id}): failed to parse '{}'", dir.display());
                 return None;
             };
-            let (atlas_layouts, indices) = atlas.build_layouts();
-            let textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)> = atlas_layouts
-                .into_iter()
-                .enumerate()
-                .map(|(i, layout)| {
-                    let img_rel = mods.to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
-                    let tex: Handle<Image> = asset_server.load(img_rel);
-                    if let Some(tr) = preload.as_deref_mut() {
-                        tr.register_handle(tex.clone());
-                    }
-                    (tex, layouts.add(layout))
-                })
-                .collect();
+            let (textures, indices) = crate::play::characters::load_animate_textures(
+                &dir,
+                &atlas,
+                mods,
+                asset_server,
+                layouts,
+                images,
+                preload,
+            );
             let Some((base_tex, base_layout)) = textures.first() else {
                 return None;
             };
@@ -694,6 +981,7 @@ fn spawn_animated_script_prop(
             let mut placeholder = Sprite::default();
             placeholder.color = tint;
             let composite = StageCompositeProp {
+                atlas_dir: Some(dir),
                 textures,
                 clips,
                 bounds_min,

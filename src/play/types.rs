@@ -315,6 +315,14 @@ pub struct CameraState {
     pub hud_fade_duration_s: f64,
     pub hud_fade_in: bool,
     pub hud_fade_hold: bool,
+    pub overlay_flash_color: [f32; 4],
+    pub overlay_flash_timer_s: f64,
+    pub overlay_flash_duration_s: f64,
+    pub overlay_fade_color: [f32; 4],
+    pub overlay_fade_timer_s: f64,
+    pub overlay_fade_duration_s: f64,
+    pub overlay_fade_in: bool,
+    pub overlay_fade_hold: bool,
 }
 
 impl Default for CameraState {
@@ -360,6 +368,14 @@ impl Default for CameraState {
             hud_fade_duration_s: 0.0,
             hud_fade_in: false,
             hud_fade_hold: false,
+            overlay_flash_color: [1.0, 1.0, 1.0, 0.0],
+            overlay_flash_timer_s: 0.0,
+            overlay_flash_duration_s: 0.0,
+            overlay_fade_color: [0.0, 0.0, 0.0, 0.0],
+            overlay_fade_timer_s: 0.0,
+            overlay_fade_duration_s: 0.0,
+            overlay_fade_in: false,
+            overlay_fade_hold: false,
         }
     }
 }

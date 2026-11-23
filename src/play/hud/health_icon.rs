@@ -18,6 +18,24 @@ use crate::utils::ecs::{set_atlas_index, set_sprite_flip, set_transform_full};
 
 use crate::play::camera::hud::hud_render_layer;
 
+#[derive(Resource, Default)]
+pub struct PreloadedHealthIcons(pub Vec<Handle<Image>>);
+
+#[derive(Clone)]
+pub struct PendingIconSwap {
+    pub character_id: String,
+    pub texture: Handle<Image>,
+    pub layout: Handle<TextureAtlasLayout>,
+    pub anim: AnimationController,
+    pub is_legacy_style: bool,
+    pub is_pixel: bool,
+    pub base_frame_size: [f32; 2],
+    pub base_scale: [f32; 2],
+    pub icon_offset: [f32; 2],
+    pub flip_x: bool,
+    pub legacy_image: Option<Handle<Image>>,
+}
+
 #[derive(Component)]
 pub struct HealthIcon {
     pub player_id: u8,
@@ -40,6 +58,8 @@ pub struct HealthIcon {
     pub legacy_layout_ready: bool,
     pub sampler_applied: bool,
     pub base_alpha: f32,
+    pub visible: bool,
+    pub pending_swap: Option<PendingIconSwap>,
     bop_active: bool,
     bop_elapsed: f32,
     bop_duration: f32,
@@ -179,52 +199,165 @@ fn load_icon_visual_bundle(
     (texture, layout_handle, anim, is_legacy_style, base_frame_size, legacy_image)
 }
 
+pub fn resolve_icon_asset_rel(mods: &ModRegistry, char_id: &str) -> String {
+    let direct_exists = icon_png_exists(mods, char_id);
+    let char_meta = load_char_icon_meta(mods, char_id);
+    let hdata = char_meta.as_ref().and_then(|(_, h)| h.as_ref());
+    let requested_id = if direct_exists {
+        char_id
+    } else {
+        hdata.and_then(|d| d.id.as_deref()).unwrap_or(char_id)
+    };
+    let icon_id = if direct_exists || icon_png_exists(mods, requested_id) {
+        requested_id
+    } else {
+        DEFAULT_HEALTH_ICON
+    };
+    let png_rel = format!("gameplay/characters/{icon_id}/icon-{icon_id}.png");
+    mods.resolve_asset_server_path(&png_rel).unwrap_or(png_rel)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn apply_icon_char_id(
     icon: &mut HealthIcon,
     anim: &mut AnimationController,
     sprite: &mut Sprite,
     char_id: &str,
+    flip_x_override: Option<bool>,
     mods: &ModRegistry,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: Option<&mut Assets<Image>>,
 ) {
-    let icon_id = if icon_png_exists(mods, char_id) { char_id } else { DEFAULT_HEALTH_ICON };
-    if let Some(is_pixel) = resolve_char_icon_is_pixel(mods, char_id, icon_id) {
-        icon.is_pixel = is_pixel;
-    }
+    let direct_exists = icon_png_exists(mods, char_id);
+    let char_meta = load_char_icon_meta(mods, char_id);
+    let hdata = char_meta.as_ref().and_then(|(_, h)| h.as_ref());
+    let requested_id = if direct_exists {
+        char_id
+    } else {
+        hdata.and_then(|d| d.id.as_deref()).unwrap_or(char_id)
+    };
+    let icon_id = if direct_exists || icon_png_exists(mods, requested_id) {
+        requested_id
+    } else {
+        DEFAULT_HEALTH_ICON
+    };
+    let fallback_pixel = icon_id == DEFAULT_HEALTH_ICON && requested_id != DEFAULT_HEALTH_ICON;
+    let next_is_pixel = if fallback_pixel {
+        false
+    } else {
+        hdata
+            .and_then(|h| h.is_pixel)
+            .or_else(|| char_meta.as_ref().map(|(is_px, _)| *is_px))
+            .unwrap_or(false)
+    };
     let (texture, layout_handle, next_anim, is_legacy, base_frame_size, legacy_image) =
-        load_icon_visual_bundle(mods, icon_id, icon.is_pixel, asset_server, layouts);
-    *anim = next_anim;
-    icon.character_id = icon_id.to_string();
-    icon.is_legacy_style = is_legacy;
-    icon.base_frame_size = base_frame_size;
-    icon.legacy_image = legacy_image;
-    icon.legacy_layout_ready = false;
-    icon.sampler_applied = false;
+        load_icon_visual_bundle(mods, icon_id, next_is_pixel, asset_server, layouts);
+    let s = hdata.and_then(|h| h.scale).unwrap_or(1.0);
+    let next_flip_x = if let Some(fx) = flip_x_override {
+        fx
+    } else {
+        let mut fx = hdata.and_then(|h| h.flip_x).unwrap_or(false);
+        if icon.player_id == 0 {
+            fx = !fx;
+        }
+        fx
+    };
+    let swap = PendingIconSwap {
+        character_id: icon_id.to_string(),
+        texture,
+        layout: layout_handle,
+        anim: next_anim,
+        is_legacy_style: is_legacy,
+        is_pixel: next_is_pixel,
+        base_frame_size,
+        base_scale: [s, s],
+        icon_offset: [0.0, 0.0],
+        flip_x: next_flip_x,
+        legacy_image,
+    };
+
+    match images {
+        Some(imgs) if imgs.contains(&swap.texture) => {
+            commit_icon_swap(icon, anim, sprite, swap, Some(imgs), layouts);
+        }
+        Some(_) => {
+            // Keep the current icon visible until the new texture finishes loading to avoid a blank flicker.
+            icon.pending_swap = Some(swap);
+        }
+        None => {
+            commit_icon_swap(icon, anim, sprite, swap, None, layouts);
+        }
+    }
+}
+
+fn commit_icon_swap(
+    icon: &mut HealthIcon,
+    anim: &mut AnimationController,
+    sprite: &mut Sprite,
+    mut swap: PendingIconSwap,
+    mut images: Option<&mut Assets<Image>>,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) {
+    let mut legacy_layout_ready = false;
+    let mut sampler_applied = false;
+    if let Some(imgs) = images.as_deref_mut() {
+        if swap.is_pixel
+            && let Some(mut img) = imgs.get_mut(&swap.texture)
+        {
+            img.sampler = ImageSampler::nearest();
+            sampler_applied = true;
+        }
+        if swap.is_legacy_style
+            && let Some(img_handle) = &swap.legacy_image
+            && let Some(img) = imgs.get(img_handle)
+        {
+            let frame_sz = (if swap.is_pixel { PIXEL_ICON_SIZE } else { HEALTH_ICON_SIZE }) as u32;
+            let cols = (img.width() / frame_sz.max(1)).max(1);
+            let grid = TextureAtlasLayout::from_grid(
+                UVec2::splat(frame_sz.max(1)),
+                cols,
+                1,
+                None,
+                None,
+            );
+            swap.layout = layouts.add(grid);
+            if cols >= 3 {
+                swap.anim.add_anim("winning", vec![2], 0.0, false);
+            }
+            legacy_layout_ready = true;
+        }
+    }
+
+    *anim = swap.anim;
+    icon.character_id = swap.character_id;
+    icon.is_pixel = swap.is_pixel;
+    icon.is_legacy_style = swap.is_legacy_style;
+    icon.base_frame_size = swap.base_frame_size;
+    icon.legacy_image = swap.legacy_image;
+    icon.legacy_layout_ready = legacy_layout_ready;
+    icon.sampler_applied = sampler_applied;
+    icon.base_scale = swap.base_scale;
+    icon.icon_offset = swap.icon_offset;
+    icon.flip_x = swap.flip_x;
+    icon.pending_swap = None;
     icon.snap_to_target_size();
 
     let init_idx = anim.current_atlas_index().unwrap_or(0);
-    sprite.image = texture;
+    sprite.image = swap.texture;
+    sprite.flip_x = icon.flip_x;
     sprite.texture_atlas = Some(TextureAtlas {
-        layout: layout_handle,
+        layout: swap.layout,
         index: init_idx,
     });
 }
 
-fn resolve_char_icon_is_pixel(mods: &ModRegistry, char_id: &str, icon_id: &str) -> Option<bool> {
-    if icon_id == DEFAULT_HEALTH_ICON && char_id != DEFAULT_HEALTH_ICON {
-        return Some(false);
-    }
-    for candidate in [char_id, icon_id] {
-        let rel = format!("gameplay/characters/{candidate}/{candidate}.json");
-        if let Some(path) = mods.resolve_file(&rel)
-            && let Ok(raw) = fs::read_to_string(&path)
-            && let Ok(data) = serde_json::from_str::<CharacterData>(&raw)
-        {
-            return Some(data.health_icon.as_ref().and_then(|h| h.is_pixel).unwrap_or(data.is_pixel));
-        }
-    }
-    None
+fn load_char_icon_meta(mods: &ModRegistry, char_id: &str) -> Option<(bool, Option<HealthIconData>)> {
+    let rel = format!("gameplay/characters/{char_id}/{char_id}.json");
+    let path = mods.resolve_file(&rel)?;
+    let raw = fs::read_to_string(&path).ok()?;
+    let data = serde_json::from_str::<CharacterData>(&raw).ok()?;
+    Some((data.is_pixel, data.health_icon))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -280,6 +413,8 @@ fn spawn_single_icon(
         legacy_layout_ready: false,
         sampler_applied: false,
         base_alpha: 1.0,
+        visible: true,
+        pending_swap: None,
         bop_active: false,
         bop_elapsed: 0.0,
         bop_duration: 0.0,
@@ -307,6 +442,13 @@ pub fn update_icon_state_and_transform(
     split_x_flx: f32,
     bar_y_flx: f32,
 ) {
+    if let Some(ref pending) = icon.pending_swap
+        && images.contains(&pending.texture)
+        && let Some(swap) = icon.pending_swap.take()
+    {
+        commit_icon_swap(icon, anim, sprite, swap, Some(images), layouts);
+    }
+
     if icon.is_pixel
         && !icon.sampler_applied
         && let Some(mut img) = images.get_mut(&sprite.image)
@@ -400,6 +542,200 @@ fn play_with_fallback(anim: &mut AnimationController, name: &str, fallback: Opti
         anim.play(name, false, false, 0);
     } else if let Some(fb) = fallback && anim.has_animation(fb) {
         anim.play(fb, false, false, 0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    fn temp_mod_root(suffix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("oxide_icon_test_{suffix}_{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn apply_icon_char_id_prefers_direct_icon_and_clears_spawn_offsets() {
+        let root = temp_mod_root("direct");
+        let char_dir = root.join("gameplay/characters/custom-singer");
+        fs::create_dir_all(&char_dir).expect("create char dir");
+        // Write valid 1x1 PNG header/bytes (only path existence is probed by icon_png_exists)
+        fs::write(char_dir.join("icon-custom-singer.png"), b"").expect("write icon");
+        fs::write(
+            char_dir.join("custom-singer.json"),
+            r#"{"assetPath":"gameplay/characters/custom-singer/sheet","healthIcon":{"id":"bf","offsets":[0,5000]}}"#,
+        )
+        .expect("write json");
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<TextureAtlasLayout>();
+        let asset_server = app.world().resource::<AssetServer>().clone();
+        let mut layouts = app.world_mut().resource_mut::<Assets<TextureAtlasLayout>>();
+
+        let mut mods = ModRegistry::default();
+        mods.assets_dir = root.clone();
+
+        let mut icon = HealthIcon {
+            player_id: 1,
+            character_id: "dad".to_string(),
+            auto_update: true,
+            is_pixel: false,
+            is_legacy_style: true,
+            should_bop: true,
+            bop_every: 4,
+            bop_angle_deg: 0.0,
+            angle_deg: 0.0,
+            base_scale: [1.0, 1.0],
+            icon_offset: [0.0, 5000.0],
+            flip_x: false,
+            base_frame_size: [150.0, 150.0],
+            current_width: 150.0,
+            current_height: 150.0,
+            legacy_image: None,
+            legacy_layout_ready: false,
+            sampler_applied: false,
+            base_alpha: 1.0,
+            visible: true,
+            pending_swap: None,
+            bop_active: false,
+            bop_elapsed: 0.0,
+            bop_duration: 0.0,
+            bop_start_w: 0.0,
+            bop_target_w: 0.0,
+        };
+        let mut anim = AnimationController::default();
+        let mut sprite = Sprite::default();
+
+        apply_icon_char_id(
+            &mut icon,
+            &mut anim,
+            &mut sprite,
+            "custom-singer",
+            None,
+            &mods,
+            &asset_server,
+            &mut layouts,
+            None,
+        );
+
+        assert_eq!(icon.character_id, "custom-singer");
+        assert_eq!(icon.icon_offset, [0.0, 0.0]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pending_icon_swap_preserves_old_texture_until_new_image_loads() {
+        let root = temp_mod_root("pending_swap");
+        for id in ["old-singer", "new-singer"] {
+            let dir = root.join(format!("gameplay/characters/{id}"));
+            fs::create_dir_all(&dir).expect("create char dir");
+            fs::write(dir.join(format!("icon-{id}.png")), b"").expect("write icon");
+        }
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<TextureAtlasLayout>();
+        let asset_server = app.world().resource::<AssetServer>().clone();
+        let old_handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+
+        let mut mods = ModRegistry::default();
+        mods.assets_dir = root.clone();
+
+        let mut icon = HealthIcon {
+            player_id: 1,
+            character_id: "old-singer".to_string(),
+            auto_update: true,
+            is_pixel: false,
+            is_legacy_style: true,
+            should_bop: true,
+            bop_every: 4,
+            bop_angle_deg: 0.0,
+            angle_deg: 0.0,
+            base_scale: [1.0, 1.0],
+            icon_offset: [0.0, 0.0],
+            flip_x: false,
+            base_frame_size: [150.0, 150.0],
+            current_width: 150.0,
+            current_height: 150.0,
+            legacy_image: Some(old_handle.clone()),
+            legacy_layout_ready: true,
+            sampler_applied: false,
+            base_alpha: 1.0,
+            visible: true,
+            pending_swap: None,
+            bop_active: false,
+            bop_elapsed: 0.0,
+            bop_duration: 0.0,
+            bop_start_w: 0.0,
+            bop_target_w: 0.0,
+        };
+        let mut anim = AnimationController::default();
+        let mut sprite = Sprite::from_image(old_handle.clone());
+
+        app.world_mut().resource_scope(|world, mut images: Mut<Assets<Image>>| {
+            let mut layouts = world.resource_mut::<Assets<TextureAtlasLayout>>();
+            apply_icon_char_id(
+                &mut icon,
+                &mut anim,
+                &mut sprite,
+                "new-singer",
+                None,
+                &mods,
+                &asset_server,
+                &mut layouts,
+                Some(&mut images),
+            );
+        });
+
+        assert_eq!(icon.character_id, "old-singer");
+        assert_eq!(sprite.image, old_handle);
+        let target_handle = icon
+            .pending_swap
+            .as_ref()
+            .expect("pending swap queued")
+            .texture
+            .clone();
+
+        app.world_mut()
+            .resource_mut::<Assets<Image>>()
+            .insert(&target_handle, Image::default())
+            .expect("insert loaded image");
+
+        app.world_mut().resource_scope(|world, mut images: Mut<Assets<Image>>| {
+            let mut layouts = world.resource_mut::<Assets<TextureAtlasLayout>>();
+            if let Some(swap) = icon.pending_swap.take().filter(|p| images.contains(&p.texture)) {
+                commit_icon_swap(
+                    &mut icon,
+                    &mut anim,
+                    &mut sprite,
+                    swap,
+                    Some(&mut images),
+                    &mut layouts,
+                );
+            }
+        });
+
+        assert_eq!(icon.character_id, "new-singer");
+        assert!(icon.pending_swap.is_none());
+        assert_eq!(sprite.image, target_handle);
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
 

@@ -462,6 +462,84 @@ pub enum ScriptCommand {
     ClearShader {
         target: String,
     },
+    SpawnChar {
+        id: String,
+        char_id: String,
+        pos: [f32; 2],
+        z_layer: i32,
+        scroll: [f32; 2],
+        visible: bool,
+    },
+    SetCharSingType {
+        target: String,
+        role: String,
+    },
+    SetCharAnimSuffix {
+        target: String,
+        suffix: String,
+    },
+    AttachCharAtlas {
+        target: String,
+        attach_id: String,
+        symbol_keyword: String,
+        atlas_path: String,
+    },
+    SetCharAttachFrame {
+        target: String,
+        attach_id: String,
+        frame: usize,
+    },
+    SetCharAttachPose {
+        target: String,
+        attach_id: String,
+        offset: [f32; 2],
+        angle_deg: f32,
+    },
+    SetCharAttachStyle {
+        target: String,
+        attach_id: String,
+        flip_x: bool,
+        alpha: f32,
+    },
+    SetCharAttachVis {
+        target: String,
+        attach_id: String,
+        visible: bool,
+    },
+    SetPropRepeat {
+        id: String,
+        repeat_x: bool,
+        repeat_y: bool,
+    },
+    SetPropAffine {
+        id: String,
+        matrix: Option<[f32; 6]>,
+    },
+    SetPropTexture {
+        id: String,
+        path: String,
+    },
+    SetPropOverlay {
+        id: String,
+        overlay: bool,
+    },
+    SetIconFlip {
+        side: String,
+        flip_x: bool,
+    },
+    SetIconVisible {
+        side: String,
+        visible: bool,
+    },
+    OverlayFlash {
+        color: [f32; 4],
+        duration_s: f64,
+    },
+    OverlayFade {
+        color: [f32; 4],
+        duration_s: f64,
+        fade_in: bool,
+    },
     EndSong,
     RestartSong,
     PauseSong,

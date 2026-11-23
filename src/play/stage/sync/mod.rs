@@ -28,6 +28,7 @@ pub struct DynamicScriptProp {
 pub struct DynamicScriptText {
     pub id: String,
     pub hud: bool,
+    pub overlay: bool,
     pub base_position: [f32; 2],
     pub scroll_factor: [f32; 2],
     pub z_layer: f32,
@@ -42,6 +43,7 @@ pub struct StageCompositePiece;
 
 #[derive(Component)]
 pub struct StageCompositeProp {
+    pub atlas_dir: Option<std::path::PathBuf>,
     pub textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)>,
     pub clips: HashMap<String, CompositeClip>,
     pub bounds_min: [f32; 2],
@@ -76,6 +78,9 @@ pub struct StagePropVisual {
     pub raw_size: [f32; 2],
     pub velocity: [f32; 2],
     pub acceleration: [f32; 2],
+    pub repeat: [bool; 2],
+    pub custom_affine: Option<[f32; 6]>,
+    pub overlay: bool,
 }
 
 #[derive(Component, Debug, Clone)]

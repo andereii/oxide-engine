@@ -188,6 +188,7 @@ pub fn spawn_stage_props(commands: &mut Commands, stage: &StageResource) {
                     *bounds_size,
                 );
                 let composite = StageCompositeProp {
+                    atlas_dir: None,
                     textures: textures.clone(),
                     clips: clips.clone(),
                     bounds_min: *bounds_min,
@@ -260,6 +261,9 @@ fn make_visual_comp(
         raw_size,
         velocity: [0.0, 0.0],
         acceleration: [0.0, 0.0],
+        repeat: [false, false],
+        custom_affine: None,
+        overlay: false,
     }
 }
 

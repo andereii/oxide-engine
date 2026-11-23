@@ -100,20 +100,64 @@ impl ScriptHost {
     pub fn load_discovered(&mut self, scripts: &[DiscoveredScript]) {
         self.clear_scripts();
         for disc in scripts {
-            if !self.backends.values().any(|b| b.supports_extension(&disc.extension)) {
-                continue;
-            }
-            match ScriptSource::from_discovered(disc) {
-                Ok(source) => {
-                    if let Err(err) = self.load_source(&disc.extension, source) {
-                        self.note_script_failure(&err, false);
-                    }
-                }
-                Err(err) => {
+            self.load_discovered_single(disc);
+        }
+    }
+
+    /// Loads and compiles a single discovered script if its `id` is not already loaded.
+    /// Returns `Some(script_id)` when newly added so callers can invoke `Create` on it.
+    pub fn load_discovered_single(&mut self, disc: &DiscoveredScript) -> Option<String> {
+        if self.instances.iter().any(|inst| inst.id() == disc.id) {
+            return None;
+        }
+        if !self
+            .backends
+            .values()
+            .any(|b| b.supports_extension(&disc.extension))
+        {
+            return None;
+        }
+        match ScriptSource::from_discovered(disc) {
+            Ok(source) => {
+                if let Err(err) = self.load_source(&disc.extension, source) {
                     self.note_script_failure(&err, false);
+                    None
+                } else {
+                    Some(disc.id.clone())
                 }
+            }
+            Err(err) => {
+                self.note_script_failure(&err, false);
+                None
             }
         }
+    }
+
+    /// Invokes a hook on one specific script instance (by `script_id`), ignoring others.
+    pub fn dispatch_instance_hook(
+        &mut self,
+        script_id: &str,
+        hook: &HookKind,
+        event: &mut ScriptEvent,
+        ctx: &mut ScriptContext,
+    ) {
+        let mut failure = None;
+        if let Some(inst) = self.instances.iter_mut().find(|i| i.id() == script_id)
+            && (matches!(hook, HookKind::Create) || inst.has_hook(hook))
+            && let Err(err) = inst.call_hook(hook, event, ctx)
+        {
+            failure = Some((inst.mod_id().to_string(), err));
+        }
+        if let Some((mod_id, err)) = failure
+            && let Some(message) = self.note_script_failure(&err, true)
+        {
+            ctx.commands.push(ScriptCommand::Log {
+                level: LogLevel::Error,
+                mod_id,
+                message,
+            });
+        }
+        self.absorb_context_requests(ctx, 0);
     }
 
     pub fn clear_scripts(&mut self) {

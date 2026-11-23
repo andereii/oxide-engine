@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::SpriteMaterial;
 
 use crate::mods::ModRegistry;
-use crate::play::camera::hud::HudCamera;
+use crate::play::camera::hud::{HudCamera, OverlayCamera};
 use crate::play::characters::CharacterActor;
 use crate::play::characters::behavior::CompositeRtCamera;
 use crate::play::stage::{DynamicScriptProp, StageCompositeProp, StagePropVisual};
@@ -307,6 +307,7 @@ pub(super) fn apply_shader_script_command(
             With<Camera2d>,
             With<IsDefaultUiCamera>,
             Without<HudCamera>,
+            Without<OverlayCamera>,
             Without<PauseOverlayCamera>,
             Without<LoadingOverlayCamera>,
             Without<SoundTrayOverlayCamera>,
@@ -555,6 +556,7 @@ pub(super) fn apply_shader_script_command(
             let blend = parse_blend_mode(&mode);
             mutate_target_materials(
                 &target,
+                false,
                 commands,
                 images,
                 materials,
@@ -577,6 +579,7 @@ pub(super) fn apply_shader_script_command(
             {
                 mutate_target_materials(
                     &target,
+                    false,
                     commands,
                     images,
                     materials,
@@ -595,6 +598,7 @@ pub(super) fn apply_shader_script_command(
             if let Some(mode_bit) = builtin_mode_flag(trimmed) {
                 mutate_target_materials(
                     &target,
+                    false,
                     commands,
                     images,
                     materials,
@@ -636,6 +640,7 @@ pub(super) fn apply_shader_script_command(
             let shader_handle: Handle<Shader> = Handle::Uuid(uuid, std::marker::PhantomData);
             mutate_target_materials(
                 &target,
+                true,
                 commands,
                 images,
                 materials,
@@ -676,6 +681,7 @@ pub(super) fn apply_shader_script_command(
             let key_lower = key.trim().to_ascii_lowercase();
             mutate_target_materials(
                 &target,
+                false,
                 commands,
                 images,
                 materials,
@@ -754,6 +760,7 @@ pub(super) fn apply_shader_script_command(
 #[allow(clippy::too_many_arguments)]
 fn mutate_target_materials(
     target: &str,
+    promote_rt: bool,
     commands: &mut Commands,
     images: &mut Assets<Image>,
     materials: &mut Assets<FunkinSpriteMaterial>,
@@ -768,7 +775,7 @@ fn mutate_target_materials(
     let time_s = runtime.time_s;
     let entities = collect_target_entities(
         target,
-        false,
+        promote_rt,
         commands,
         images,
         runtime,
@@ -1024,8 +1031,12 @@ mod tests {
                     raw_size: [400.0, 500.0],
                     velocity: [0.0, 0.0],
                     acceleration: [0.0, 0.0],
+                    repeat: [false, false],
+                    custom_affine: None,
+                    overlay: false,
                 },
                 StageCompositeProp {
+                    atlas_dir: None,
                     textures: Vec::new(),
                     clips: HashMap::new(),
                     bounds_min: [0.0, 0.0],

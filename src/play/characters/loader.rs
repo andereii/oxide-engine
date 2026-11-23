@@ -20,7 +20,7 @@ use super::asset_cache::{
 };
 use super::behavior::{CharacterActor, ClipVisual, SheetSource};
 use super::schema::{CharacterData, CharacterRenderType, CharacterRole, is_gameover_only_anim};
-use super::spawn::spawn_composite_piece_entity;
+use super::spawn::ensure_actor_piece_capacity;
 
 #[derive(Debug, Clone)]
 pub struct LoadedCharacter {
@@ -49,6 +49,7 @@ pub fn load_characters_resource(
     stage: Option<&StageResource>,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
 ) -> CharactersResource {
     let slots = stage.map(|s| &s.characters);
     let mut characters = Vec::new();
@@ -61,7 +62,7 @@ pub fn load_characters_resource(
 
     for (ids, role, slot) in entries {
         for char_id in ids {
-            if let Ok(loaded) = load_single_character(mods, char_id, role, slot.clone(), asset_server, layouts) {
+            if let Ok(loaded) = load_single_character(mods, char_id, role, slot.clone(), asset_server, layouts, images) {
                 characters.push(loaded);
             }
         }
@@ -106,6 +107,7 @@ fn load_character_animations(
     default_asset: &str,
     anims: &[BaseAnimationData],
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
     caches: &mut CharLoadCaches,
     target: &mut AnimLoadTarget<'_>,
 ) {
@@ -141,7 +143,7 @@ fn load_character_animations(
             for anim in anims {
                 let sub_path = anim.asset_path.as_deref().unwrap_or(default_asset);
                 if anim.render_type.eq_ignore_ascii_case("animateatlas") {
-                    load_composite_anim(ctx, sub_path, anim, layouts, caches, target);
+                    load_composite_anim(ctx, sub_path, anim, layouts, images, caches, target);
                 } else {
                     let resolved =
                         get_or_load_sparrow(ctx, sub_path, layouts, target.sources, caches)
@@ -183,7 +185,7 @@ fn load_character_animations(
                             .insert(anim.name.clone(), ClipVisual::Sheet { source_idx: src_i });
                     }
                 } else {
-                    load_composite_anim(ctx, sub_path, anim, layouts, caches, target);
+                    load_composite_anim(ctx, sub_path, anim, layouts, images, caches, target);
                 }
             }
         }
@@ -197,6 +199,7 @@ pub fn load_single_character(
     slot: StageCharacterSlot,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
 ) -> Result<LoadedCharacter, String> {
     let json_path = mods
         .resolve_file(&format!("gameplay/characters/{char_id}/{char_id}.json"))
@@ -242,6 +245,7 @@ pub fn load_single_character(
             &default_asset,
             &initial_anims,
             layouts,
+            images,
             &mut caches,
             &mut target,
         );
@@ -267,6 +271,7 @@ pub fn load_single_character(
                     &ctx,
                     &default_asset,
                     layouts,
+                    images,
                     &mut sources,
                     &mut caches,
                 ) && let Some(clip) = sample_default_composite_clip(&atlas, &indices)
@@ -279,6 +284,9 @@ pub fn load_single_character(
                             source_idx: src_i,
                             clip,
                             stage_matrix: atlas.stage_matrix,
+                            atlas: Some(atlas),
+                            indices: Some(indices),
+                            anim_data: None,
                         },
                     );
                 }
@@ -297,7 +305,7 @@ pub fn load_single_character(
     let max_composite_pieces = max_composite_pieces_in(&clips);
     let facing_flip_x = match role {
         CharacterRole::Player => !data.flip_x,
-        CharacterRole::Opponent | CharacterRole::Spectator => data.flip_x,
+        CharacterRole::Opponent | CharacterRole::Spectator | CharacterRole::Other => data.flip_x,
     };
 
     Ok(LoadedCharacter {
@@ -323,6 +331,7 @@ pub fn ensure_character_gameover_anims_loaded(
     mods: &ModRegistry,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
     commands: &mut Commands,
 ) {
     if actor.deferred_gameover_anims.is_empty() {
@@ -353,6 +362,7 @@ pub fn ensure_character_gameover_anims_loaded(
             &default_asset,
             &deferred,
             layouts,
+            images,
             &mut caches,
             &mut target,
         );
@@ -361,25 +371,7 @@ pub fn ensure_character_gameover_anims_loaded(
         actor.sampler_applied = false;
     }
     let needed_pieces = max_composite_pieces_in(&actor.clips);
-    if needed_pieces > actor.piece_entities.len() {
-        actor
-            .piece_entities
-            .reserve(needed_pieces - actor.piece_entities.len());
-        for i in actor.piece_entities.len()..needed_pieces {
-            let ent = spawn_composite_piece_entity(
-                commands,
-                &actor.sources,
-                actor.slot.layer,
-                i,
-            );
-            if let Some(ref rt) = actor.composite_rt {
-                commands
-                    .entity(ent)
-                    .insert(bevy::camera::visibility::RenderLayers::layer(rt.render_layer));
-            }
-            actor.piece_entities.push(ent);
-        }
-    }
+    ensure_actor_piece_capacity(actor, needed_pieces, commands);
 }
 
 /// If a character JSON enables `"script": true` (or `"scripts": true`), discover sidecar

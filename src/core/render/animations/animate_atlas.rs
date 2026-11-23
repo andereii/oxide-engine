@@ -2,8 +2,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use bevy::asset::RenderAssetUsages;
+use bevy::image::Image;
 use bevy::math::URect;
 use bevy::prelude::{TextureAtlasLayout, UVec2};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::animate_atlas_raw::{
     AnimationJsonRoot, SpritemapJsonRoot, convert_layer, parse_stage_matrix,
@@ -47,10 +50,29 @@ pub struct AnimateTimelineFrame {
     pub elements: Vec<AnimateElement>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnimateLayerType {
+    #[default]
+    Normal,
+    Clipper,
+    Clipped,
+    Folder,
+    Guide,
+}
+
+#[derive(Debug, Clone)]
+pub struct BakedSheetImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AnimateTimelineLayer {
     pub name: String,
     pub visible: bool,
+    pub layer_type: AnimateLayerType,
+    pub clipped_by: Option<String>,
     pub frames: Vec<AnimateTimelineFrame>,
 }
 
@@ -66,6 +88,7 @@ pub struct AnimateAtlas {
     pub sprite_lookup: HashMap<String, usize>,
     pub main_layers: Vec<AnimateTimelineLayer>,
     pub symbols: HashMap<String, Vec<AnimateTimelineLayer>>,
+    pub baked_sheets: Vec<BakedSheetImage>,
 }
 
 impl AnimateAtlas {
@@ -134,7 +157,7 @@ impl AnimateAtlas {
             }
         }
 
-        Ok(Self {
+        let mut atlas = Self {
             name: anim_json.animation.name.unwrap_or_default(),
             framerate: anim_json.metadata.map(|m| m.framerate).unwrap_or(24.0),
             main_symbol: anim_json.animation.symbol_name.unwrap_or_default(),
@@ -144,11 +167,14 @@ impl AnimateAtlas {
             sprite_lookup,
             main_layers,
             symbols,
-        })
+            baked_sheets: Vec::new(),
+        };
+        super::atlas_mask::bake_clipped_layers(&mut atlas, dir);
+        Ok(atlas)
     }
 
     pub fn build_layouts(&self) -> (Vec<TextureAtlasLayout>, HashMap<String, usize>) {
-        let count = self.spritemap_count.max(1);
+        let count = self.spritemap_count.max(1) + self.baked_sheets.len();
         let mut bounds = vec![(1u32, 1u32); count];
         for s in &self.sprites {
             let b = &mut bounds[s.spritemap_idx.min(count - 1)];
@@ -166,6 +192,25 @@ impl AnimateAtlas {
             indices.insert(s.name.clone(), idx);
         }
         (layouts, indices)
+    }
+
+    pub fn baked_bevy_images(&self) -> Vec<Image> {
+        self.baked_sheets
+            .iter()
+            .map(|sheet| {
+                Image::new(
+                    Extent3d {
+                        width: sheet.width.max(1),
+                        height: sheet.height.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    TextureDimension::D2,
+                    sheet.rgba.clone(),
+                    TextureFormat::Rgba8UnormSrgb,
+                    RenderAssetUsages::default(),
+                )
+            })
+            .collect()
     }
 
     #[allow(dead_code)]

@@ -5,18 +5,34 @@ use crate::play::scene::PlayState;
 use crate::utils::constants::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub const HUD_RENDER_LAYER: usize = 1;
+pub const OVERLAY_RENDER_LAYER: usize = 2;
 
 #[inline]
 pub fn hud_render_layer() -> RenderLayers {
     RenderLayers::layer(HUD_RENDER_LAYER)
 }
 
+#[inline]
+pub fn overlay_render_layer() -> RenderLayers {
+    RenderLayers::layer(OVERLAY_RENDER_LAYER)
+}
+
 #[derive(Component)]
 pub struct HudCamera;
 
 #[derive(Component)]
+pub struct OverlayCamera;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlashOverlayLayer {
+    Game,
+    Hud,
+    Overlay,
+}
+
+#[derive(Component)]
 pub struct CameraFlashOverlay {
-    pub hud: bool,
+    pub layer: FlashOverlayLayer,
     pub is_fade: bool,
 }
 
@@ -32,25 +48,39 @@ pub fn spawn_hud_camera(commands: &mut Commands) {
         hud_render_layer(),
         HudCamera,
     ));
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 2,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        Msaa::Off,
+        overlay_render_layer(),
+        OverlayCamera,
+    ));
 
-    // Render all camera flash/fade overlays on `hud_render_layer()` (`order = 1`):
-    // - World (`hud: false`) sits at negative Z *below* HUD elements (`z >= 10`) yet *after*
-    //   `StageCamera` (`order = 0`) finishes post-processing (`StageBlendPostPlugin`, rain, tonemap),
-    //   so black stage fades cleanly cover stage overlay shaders.
-    // - HUD (`hud: true`) sits at Z = 900..901 *above* all HUD elements.
+    // Render all camera flash/fade overlays:
+    // - World (`Game`) sits on `hud_render_layer()` at negative Z below HUD elements yet after
+    //   `StageCamera` (`order = 0`) post-processing, so stage fades cover stage overlay shaders.
+    // - HUD (`Hud`) sits at Z = 900..901 above HUD elements.
+    // - Overlay/cutscene (`Overlay`) renders on `overlay_render_layer()` (`order = 2`), always
+    //   unzoomed and independent of `hud_visible(false)`.
     let overlay_size = Vec2::new(SCREEN_WIDTH * 6.0, SCREEN_HEIGHT * 6.0);
-    for (hud, is_fade, z) in [
-        (false, false, -500.0),
-        (false, true, -499.0),
-        (true, false, 900.0),
-        (true, true, 901.0),
+    for (layer, render_layer, is_fade, z) in [
+        (FlashOverlayLayer::Game, hud_render_layer(), false, -500.0),
+        (FlashOverlayLayer::Game, hud_render_layer(), true, -499.0),
+        (FlashOverlayLayer::Hud, hud_render_layer(), false, 900.0),
+        (FlashOverlayLayer::Hud, hud_render_layer(), true, 901.0),
+        (FlashOverlayLayer::Overlay, overlay_render_layer(), false, 900.0),
+        (FlashOverlayLayer::Overlay, overlay_render_layer(), true, 901.0),
     ] {
         commands.spawn((
             Sprite::from_color(Color::srgba(1.0, 1.0, 1.0, 0.0), overlay_size),
             Transform::from_xyz(0.0, 0.0, z),
             Visibility::Hidden,
-            hud_render_layer(),
-            CameraFlashOverlay { hud, is_fade },
+            render_layer,
+            CameraFlashOverlay { layer, is_fade },
         ));
     }
 }
@@ -87,7 +117,12 @@ pub fn sync_hud_camera(
     mut hud_cam: Query<(&mut Projection, &mut Transform), With<HudCamera>>,
     mut world_cam: Query<
         &mut Transform,
-        (With<Camera2d>, With<IsDefaultUiCamera>, Without<HudCamera>),
+        (
+            With<Camera2d>,
+            With<IsDefaultUiCamera>,
+            Without<HudCamera>,
+            Without<OverlayCamera>,
+        ),
     >,
     mut flashes: Query<(&CameraFlashOverlay, &mut Sprite, &mut Visibility)>,
 ) {
@@ -120,8 +155,8 @@ pub fn sync_hud_camera(
     }
 
     for (overlay, mut sprite, mut vis) in &mut flashes {
-        let color_opt = match (overlay.hud, overlay.is_fade) {
-            (true, false) => evaluate_overlay_color(
+        let color_opt = match (overlay.layer, overlay.is_fade) {
+            (FlashOverlayLayer::Hud, false) => evaluate_overlay_color(
                 false,
                 state.camera.hud_flash_timer_s,
                 state.camera.hud_flash_duration_s,
@@ -129,7 +164,7 @@ pub fn sync_hud_camera(
                 false,
                 false,
             ),
-            (false, false) => evaluate_overlay_color(
+            (FlashOverlayLayer::Game, false) => evaluate_overlay_color(
                 false,
                 state.camera.flash_timer_s,
                 state.camera.flash_duration_s,
@@ -137,7 +172,15 @@ pub fn sync_hud_camera(
                 false,
                 false,
             ),
-            (true, true) => evaluate_overlay_color(
+            (FlashOverlayLayer::Overlay, false) => evaluate_overlay_color(
+                false,
+                state.camera.overlay_flash_timer_s,
+                state.camera.overlay_flash_duration_s,
+                state.camera.overlay_flash_color,
+                false,
+                false,
+            ),
+            (FlashOverlayLayer::Hud, true) => evaluate_overlay_color(
                 true,
                 state.camera.hud_fade_timer_s,
                 state.camera.hud_fade_duration_s,
@@ -145,13 +188,21 @@ pub fn sync_hud_camera(
                 state.camera.hud_fade_in,
                 state.camera.hud_fade_hold,
             ),
-            (false, true) => evaluate_overlay_color(
+            (FlashOverlayLayer::Game, true) => evaluate_overlay_color(
                 true,
                 state.camera.fade_timer_s,
                 state.camera.fade_duration_s,
                 state.camera.fade_color,
                 state.camera.fade_in,
                 state.camera.fade_hold,
+            ),
+            (FlashOverlayLayer::Overlay, true) => evaluate_overlay_color(
+                true,
+                state.camera.overlay_fade_timer_s,
+                state.camera.overlay_fade_duration_s,
+                state.camera.overlay_fade_color,
+                state.camera.overlay_fade_in,
+                state.camera.overlay_fade_hold,
             ),
         };
         if let Some(color) = color_opt {

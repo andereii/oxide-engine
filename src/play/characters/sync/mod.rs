@@ -122,10 +122,11 @@ pub fn sync_characters(
             }
         }
 
-        let idx = role_index(actor.role);
-        state.camera.focus_points[idx] = Some(actor.camera_focus_point);
-        if mirror_states[idx].is_none() {
-            mirror_states[idx] = Some(capture_mirror_state(&actor));
+        if let Some(idx) = role_index(actor.role) {
+            state.camera.focus_points[idx] = Some(actor.camera_focus_point);
+            if mirror_states[idx].is_none() {
+                mirror_states[idx] = Some(capture_mirror_state(&actor));
+            }
         }
 
         sync_actor_visuals(

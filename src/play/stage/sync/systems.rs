@@ -4,6 +4,7 @@ use bevy::image::ImageSampler;
 use bevy::prelude::*;
 
 use crate::animations::{AnimationController, Bopper};
+use crate::play::characters::spawn::CompositeAffine2d;
 use crate::play::scene::PlayState;
 use crate::play::shaders::stage_blend_post::StagePostOverlayProp;
 use crate::play::types::PlayPhase;
@@ -37,9 +38,10 @@ pub fn sync_stage_props(
         Option<&mut Bopper>,
         Option<&DynamicScriptProp>,
         Option<&StageCompositeProp>,
-        Option<&StageAtlasFrameSizes>,
-        Option<&mut StagePropPixelSampler>,
-        Option<&StagePostOverlayProp>,
+        Option<&'static StageAtlasFrameSizes>,
+        Option<&'static mut StagePropPixelSampler>,
+        Option<&'static StagePostOverlayProp>,
+        Option<&'static mut CompositeAffine2d>,
     )>,
     mut pieces: StagePiecesQuery,
     mut quads: StageQuadsQuery,
@@ -77,20 +79,22 @@ pub fn sync_stage_props(
         frame_sizes_opt,
         sampler_opt,
         post_ov_opt,
+        mut affine_opt,
     ) in &mut animated_props
     {
         apply_pixel_sampler(sampler_opt, composite_opt, &sprite.image, &mut images);
         step_prop_physics(&mut vis, dt);
 
         let is_hud = dyn_opt.is_some_and(|d| d.hud);
-        let is_hidden = !vis.visible || (is_hud && state.hud_alpha <= 0.001);
-        let prop_zoom = if is_hud { 1.0 } else { zoom };
-        let eff_scroll_x = if is_hud {
+        let is_overlay = vis.overlay;
+        let is_hidden = !vis.visible || (is_hud && !is_overlay && state.hud_alpha <= 0.001);
+        let prop_zoom = if is_hud || is_overlay { 1.0 } else { zoom };
+        let eff_scroll_x = if is_hud || is_overlay {
             0.0
         } else {
             cam_scroll_x * vis.scroll_factor[0]
         };
-        let eff_scroll_y = if is_hud {
+        let eff_scroll_y = if is_hud || is_overlay {
             0.0
         } else {
             cam_scroll_y * vis.scroll_factor[1]
@@ -159,6 +163,11 @@ pub fn sync_stage_props(
         }
 
         if is_hidden {
+            if let Some(ref mut aff) = affine_opt
+                && aff.active
+            {
+                aff.active = false;
+            }
             set_visibility(&mut visibility, Visibility::Hidden);
             continue;
         }
@@ -200,7 +209,21 @@ pub fn sync_stage_props(
 
         let cur_raw_size = frame_sizes_opt
             .and_then(|fs| atlas_idx.and_then(|idx| fs.0.get(&idx).copied()))
-            .unwrap_or(vis.raw_size);
+            .unwrap_or_else(|| {
+                if (vis.raw_size[0] <= 0.0 || vis.raw_size[1] <= 0.0)
+                    && let Some(im) = images.get(&sprite.image)
+                {
+                    [im.width() as f32, im.height() as f32]
+                } else {
+                    vis.raw_size
+                }
+            });
+        if (vis.raw_size[0] <= 0.0 || vis.raw_size[1] <= 0.0)
+            && cur_raw_size[0] > 0.0
+            && cur_raw_size[1] > 0.0
+        {
+            vis.raw_size = cur_raw_size;
+        }
 
         let (mut world_cx, mut world_cy) = match vis.coord_mode {
             StageCoordMode::Center => (vis.base_position[0], vis.base_position[1]),
@@ -212,8 +235,46 @@ pub fn sync_stage_props(
         world_cx -= anim_off[0] * vis.base_scale[0];
         world_cy -= anim_off[1] * vis.base_scale[1];
 
-        let screen_cx = world_cx - eff_scroll_x;
-        let screen_cy = world_cy - eff_scroll_y;
+        let mut screen_cx = world_cx - eff_scroll_x;
+        let mut screen_cy = world_cy - eff_scroll_y;
+
+        if vis.repeat[0] || vis.repeat[1] {
+            let mut tiled_w = cur_raw_size[0].max(1.0);
+            let mut tiled_h = cur_raw_size[1].max(1.0);
+            if vis.repeat[0] {
+                let (wrapped_x, count_x) = wrap_tiled_axis(
+                    screen_cx,
+                    SCREEN_WIDTH / prop_zoom.max(0.05),
+                    cur_raw_size[0] * vis.base_scale[0].abs(),
+                );
+                screen_cx = wrapped_x;
+                tiled_w = cur_raw_size[0].max(1.0) * (count_x as f32);
+            }
+            if vis.repeat[1] {
+                let (wrapped_y, count_y) = wrap_tiled_axis(
+                    screen_cy,
+                    SCREEN_HEIGHT / prop_zoom.max(0.05),
+                    cur_raw_size[1] * vis.base_scale[1].abs(),
+                );
+                screen_cy = wrapped_y;
+                tiled_h = cur_raw_size[1].max(1.0) * (count_y as f32);
+            }
+            let target_mode = SpriteImageMode::Tiled {
+                tile_x: vis.repeat[0],
+                tile_y: vis.repeat[1],
+                stretch_value: 1.0,
+            };
+            if !matches!(
+                sprite.image_mode,
+                SpriteImageMode::Tiled { tile_x, tile_y, .. } if tile_x == vis.repeat[0] && tile_y == vis.repeat[1]
+            ) {
+                sprite.image_mode = target_mode;
+            }
+            let next_sz = Vec2::new(tiled_w, tiled_h);
+            if sprite.custom_size != Some(next_sz) {
+                sprite.custom_size = Some(next_sz);
+            }
+        }
 
         let base_rot = -vis.base_angle_deg.to_radians();
         let eff_flip_x = vis.base_flip[0] ^ anim_flip[0];
@@ -233,6 +294,23 @@ pub fn sync_stage_props(
             + foff_x * vis.base_scale[0] * prop_zoom;
         let by = (SCREEN_HEIGHT * 0.5 - screen_cy) * prop_zoom
             + foff_y * vis.base_scale[1] * prop_zoom;
+        if let Some([ma, mb, mc, md, mtx, mty]) = vis.custom_affine {
+            if let Some(ref mut aff) = affine_opt {
+                let eff_cx = screen_cx + mtx + foff_x * vis.base_scale[0];
+                let eff_cy = screen_cy + mty - foff_y * vis.base_scale[1];
+                let aff_bx = (eff_cx - SCREEN_WIDTH * 0.5) * prop_zoom;
+                let aff_by = (SCREEN_HEIGHT * 0.5 - eff_cy) * prop_zoom;
+                let sx = vis.base_scale[0] * prop_zoom;
+                let sy = vis.base_scale[1] * prop_zoom;
+                aff.active = true;
+                aff.cols = [ma * sx, -mb * sx, -mc * sy, md * sy];
+                aff.translation = Vec3::new(aff_bx, aff_by, vis.z_layer);
+            }
+        } else if let Some(ref mut aff) = affine_opt
+            && aff.active
+        {
+            aff.active = false;
+        }
         let rot_delta = if rotated {
             if eff_flip_x ^ eff_flip_y {
                 -FRAC_PI_2
@@ -301,6 +379,22 @@ fn step_prop_physics(vis: &mut StagePropVisual, dt: f32) {
     }
 }
 
+fn wrap_tiled_axis(screen_c: f32, view_extent: f32, tile_world: f32) -> (f32, usize) {
+    let period = tile_world.max(1.0);
+    let half_view = view_extent * 0.5;
+    let mut phase = (screen_c - half_view).rem_euclid(period);
+    if phase > period * 0.5 {
+        phase -= period;
+    }
+    let min_tiles = ((view_extent / period).ceil() as usize + 3).min(31);
+    let count = if min_tiles.is_multiple_of(2) {
+        min_tiles + 1
+    } else {
+        min_tiles
+    };
+    (half_view + phase, count)
+}
+
 pub fn sync_script_texts(
     state: Res<PlayState>,
     mut texts: Query<(&DynamicScriptText, &mut Transform, &mut Visibility)>,
@@ -310,18 +404,19 @@ pub fn sync_script_texts(
     let zoom = (state.camera.current_zoom * state.camera.bop_multiplier).max(0.05) as f32;
 
     for (txt, mut tf, mut vis) in &mut texts {
-        let hidden = !txt.visible || (txt.hud && state.hud_alpha <= 0.001);
+        let hidden = !txt.visible || (txt.hud && !txt.overlay && state.hud_alpha <= 0.001);
         if hidden {
             set_visibility(&mut vis, Visibility::Hidden);
             continue;
         }
-        let text_zoom = if txt.hud { 1.0 } else { zoom };
-        let sx = if txt.hud {
+        let fixed_cam = txt.hud || txt.overlay;
+        let text_zoom = if fixed_cam { 1.0 } else { zoom };
+        let sx = if fixed_cam {
             0.0
         } else {
             cam_scroll_x * txt.scroll_factor[0]
         };
-        let sy = if txt.hud {
+        let sy = if fixed_cam {
             0.0
         } else {
             cam_scroll_y * txt.scroll_factor[1]

@@ -97,6 +97,7 @@ pub struct PlayState {
     pub script_char_sizes: BTreeMap<String, [f32; 2]>,
     pub script_char_focus: BTreeMap<String, [f64; 2]>,
     pub script_char_anims: BTreeMap<String, String>,
+    pub script_char_frames: BTreeMap<String, usize>,
     pub script_char_anim_finished: BTreeMap<String, bool>,
     pub script_prop_positions: BTreeMap<String, [f32; 2]>,
     pub script_prop_scales: BTreeMap<String, [f32; 2]>,
@@ -213,6 +214,7 @@ impl PlayState {
             script_char_sizes: BTreeMap::new(),
             script_char_focus: BTreeMap::new(),
             script_char_anims: BTreeMap::new(),
+            script_char_frames: BTreeMap::new(),
             script_char_anim_finished: BTreeMap::new(),
             script_prop_positions: BTreeMap::new(),
             script_prop_scales: BTreeMap::new(),
@@ -482,10 +484,13 @@ impl PlayState {
         self.camera.zoom_rate_offset = DEFAULT_ZOOM_OFFSET;
         self.camera.flash_timer_s = 0.0;
         self.camera.hud_flash_timer_s = 0.0;
+        self.camera.overlay_flash_timer_s = 0.0;
         self.camera.fade_timer_s = 0.0;
         self.camera.fade_hold = false;
         self.camera.hud_fade_timer_s = 0.0;
         self.camera.hud_fade_hold = false;
+        self.camera.overlay_fade_timer_s = 0.0;
+        self.camera.overlay_fade_hold = false;
         self.player_strumline.clean();
         self.opponent_strumline.clean();
         self.player_strumline.use_custom_render_distance = false;

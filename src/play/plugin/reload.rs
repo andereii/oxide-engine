@@ -132,7 +132,7 @@ pub(super) fn execute_song_reload(
     for (ent, _) in &hud_texts.tagged_sounds {
         commands.entity(ent).despawn();
     }
-    for (ent, _, _, _, _, _) in &hud_texts.texts {
+    for (ent, _, _, _, _, _, _) in &hud_texts.texts {
         commands.entity(ent).despawn();
     }
     for (ent, _, _, _, _, comp_opt) in &scripts.props {

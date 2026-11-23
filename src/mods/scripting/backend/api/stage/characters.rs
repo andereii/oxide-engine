@@ -88,6 +88,9 @@ pub fn register_character_api(engine: &mut Engine) {
     engine.register_fn("char_anim", |target: &str| {
         with_ctx(|c| c.snapshot.char_anims.get(target).cloned().unwrap_or_default())
     });
+    engine.register_fn("char_frame", |target: &str| {
+        with_ctx(|c| i64::from(c.snapshot.char_frames.get(target).copied().unwrap_or(0) as u32))
+    });
     for name in ["char_anim_finished", "char_anim_done"] {
         engine.register_fn(name, |target: &str| {
             with_ctx(|c| {
@@ -369,4 +372,131 @@ pub fn register_character_api(engine: &mut Engine) {
             });
         })
     });
+    engine.register_fn(
+        "char_spawn",
+        |id: &str, char_id: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let px = dyn_to_f64(&x)? as f32;
+            let py = dyn_to_f64(&y)? as f32;
+            let zl = dyn_to_f64(&z)?.round() as i32;
+            with_ctx(|c| {
+                c.snapshot.char_positions.insert(id.to_string(), [px, py]);
+                c.snapshot.char_vis.insert(id.to_string(), true);
+                c.commands.push(ScriptCommand::SpawnChar {
+                    id: id.to_string(),
+                    char_id: char_id.to_string(),
+                    pos: [px, py],
+                    z_layer: zl,
+                    scroll: [1.0, 1.0],
+                    visible: true,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_spawn",
+        |id: &str, char_id: &str, x: Dynamic, y: Dynamic, z: Dynamic, sx: Dynamic, sy: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let px = dyn_to_f64(&x)? as f32;
+            let py = dyn_to_f64(&y)? as f32;
+            let zl = dyn_to_f64(&z)?.round() as i32;
+            let scx = dyn_to_f64(&sx)? as f32;
+            let scy = dyn_to_f64(&sy)? as f32;
+            with_ctx(|c| {
+                c.snapshot.char_positions.insert(id.to_string(), [px, py]);
+                c.snapshot.char_vis.insert(id.to_string(), true);
+                c.commands.push(ScriptCommand::SpawnChar {
+                    id: id.to_string(),
+                    char_id: char_id.to_string(),
+                    pos: [px, py],
+                    z_layer: zl,
+                    scroll: [scx, scy],
+                    visible: true,
+                });
+            })
+        },
+    );
+    for name in ["char_sing_type", "char_role"] {
+        engine.register_fn(name, |target: &str, role: &str| {
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharSingType {
+                    target: target.to_string(),
+                    role: role.to_string(),
+                });
+            })
+        });
+    }
+    engine.register_fn("char_suffix", |target: &str, suffix: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetCharAnimSuffix {
+                target: target.to_string(),
+                suffix: suffix.to_string(),
+            });
+        })
+    });
+    engine.register_fn(
+        "char_attach_atlas",
+        |target: &str, attach_id: &str, symbol_keyword: &str, atlas_path: &str| {
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::AttachCharAtlas {
+                    target: target.to_string(),
+                    attach_id: attach_id.to_string(),
+                    symbol_keyword: symbol_keyword.to_string(),
+                    atlas_path: atlas_path.to_string(),
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_attach_frame",
+        |target: &str, attach_id: &str, frame: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let f = dyn_to_usize(&frame)?;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharAttachFrame {
+                    target: target.to_string(),
+                    attach_id: attach_id.to_string(),
+                    frame: f,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_attach_pose",
+        |target: &str, attach_id: &str, ox: Dynamic, oy: Dynamic, angle: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let offset = [dyn_to_f64(&ox)? as f32, dyn_to_f64(&oy)? as f32];
+            let angle_deg = dyn_to_f64(&angle)? as f32;
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharAttachPose {
+                    target: target.to_string(),
+                    attach_id: attach_id.to_string(),
+                    offset,
+                    angle_deg,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_attach_style",
+        |target: &str, attach_id: &str, flip_x: bool, alpha: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharAttachStyle {
+                    target: target.to_string(),
+                    attach_id: attach_id.to_string(),
+                    flip_x,
+                    alpha,
+                });
+            })
+        },
+    );
+    engine.register_fn(
+        "char_attach_vis",
+        |target: &str, attach_id: &str, visible: bool| {
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetCharAttachVis {
+                    target: target.to_string(),
+                    attach_id: attach_id.to_string(),
+                    visible,
+                });
+            })
+        },
+    );
 }

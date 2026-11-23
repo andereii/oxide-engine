@@ -115,6 +115,7 @@ pub(crate) fn step_play_load_pipeline(
             }
         }
         PlayLoadStep::HudAndNoteskin => {
+            hud_texts.preloaded_icons.0.clear();
             load_hud_and_noteskin_step(commands, state, audio_res, scripts);
             pipeline.step = PlayLoadStep::WaitHudAndNoteskin;
         }
@@ -143,7 +144,7 @@ pub(crate) fn step_play_load_pipeline(
             begin_characters_step(state, pipeline);
         }
         PlayLoadStep::CharacterNext => {
-            load_next_character_step(commands, state, scripts, pipeline);
+            load_next_character_step(commands, state, scripts, hud_texts, pipeline);
         }
         PlayLoadStep::WaitCharacter => {
             let frac = character_progress_fraction(pipeline);
@@ -163,6 +164,7 @@ pub(crate) fn step_play_load_pipeline(
             finish_or_poll_all(
                 commands,
                 state,
+                playlist,
                 audio_res,
                 scripts,
                 hud_texts,
@@ -333,6 +335,7 @@ fn load_next_stage_prop_step(
             prop_data,
             &scripts.asset_server,
             &mut scripts.layouts,
+            &mut scripts.images,
         )
     {
         if let Some(tr) = scripts.preload.as_deref_mut() {
@@ -384,10 +387,55 @@ fn begin_characters_step(state: &PlayState, pipeline: &mut PlayLoadPipeline) {
     pipeline.step = PlayLoadStep::CharacterNext;
 }
 
+fn preload_scene_health_icons(
+    mods: &crate::mods::ModRegistry,
+    chars: &CharactersResource,
+    song_events: &[crate::play::types::SongEventData],
+    asset_server: &AssetServer,
+    preload: Option<&mut PlayPreloadTracker>,
+    store: &mut super::super::hud::health_icon::PreloadedHealthIcons,
+) {
+    let mut seen = std::collections::HashSet::new();
+    let mut push_char_id = |char_id: &str| {
+        let rel = super::super::hud::health_icon::resolve_icon_asset_rel(mods, char_id);
+        if seen.insert(rel.clone()) {
+            let handle: Handle<Image> = asset_server.load(rel);
+            store.0.push(handle);
+        }
+    };
+
+    for ch in &chars.characters {
+        if matches!(ch.role, CharacterRole::Player | CharacterRole::Opponent) {
+            let id = ch.data.health_icon.as_ref().and_then(|h| h.id.as_deref()).unwrap_or(&ch.id);
+            push_char_id(id);
+        }
+    }
+    for ev in song_events {
+        if ev.kind.eq_ignore_ascii_case("SetHealthIcon")
+            && let Some(char_id) = ev
+                .raw_value
+                .get("id")
+                .or_else(|| ev.raw_value.get("charId"))
+                .or_else(|| ev.raw_value.get("icon"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        {
+            push_char_id(char_id);
+        }
+    }
+    if let Some(tr) = preload {
+        for handle in &store.0 {
+            tr.register_handle(handle.clone());
+        }
+    }
+}
+
 fn load_next_character_step(
     commands: &mut Commands,
     state: &mut PlayState,
     scripts: &mut ScriptTickParams,
+    hud_texts: &mut ScriptHudAndTextParams,
     pipeline: &mut PlayLoadPipeline,
 ) {
     let Some((char_id, role, slot)) = pipeline.pending_chars.pop_front() else {
@@ -423,6 +471,14 @@ fn load_next_character_step(
             &scripts.asset_server,
             &mut scripts.layouts,
         );
+        preload_scene_health_icons(
+            &scripts.mods,
+            &chars,
+            &state.song_events,
+            &scripts.asset_server,
+            scripts.preload.as_deref_mut(),
+            &mut hud_texts.preloaded_icons,
+        );
         commands.insert_resource(chars);
         if let Some(stage) = pipeline.loaded_stage.take() {
             commands.insert_resource(stage);
@@ -438,6 +494,7 @@ fn load_next_character_step(
         slot,
         &scripts.asset_server,
         &mut scripts.layouts,
+        &mut scripts.images,
     ) {
         if loaded.data.script {
             pipeline
@@ -489,31 +546,43 @@ fn load_scripts_step(
         &pipeline.char_script_sources,
     );
     scripts.pending_ecs.0.extend(cmds);
-    flush_pending_script_cmds(commands, audio_res, scripts, hud_texts);
+    flush_pending_script_cmds(commands, state, playlist, audio_res, scripts, hud_texts);
 }
 
 fn flush_pending_script_cmds(
     commands: &mut Commands,
+    state: &mut PlayState,
+    playlist: &mut PlayStatePlaylist,
     audio_res: &mut AudioTickParams,
     scripts: &mut ScriptTickParams,
     hud_texts: &mut ScriptHudAndTextParams,
 ) {
     if !scripts.pending_ecs.0.is_empty() {
         let init_cmds: Vec<_> = scripts.pending_ecs.0.drain(..).collect();
-        apply_ecs_script_commands(commands, audio_res, scripts, hud_texts, &init_cmds);
+        apply_ecs_script_commands(
+            commands,
+            state,
+            playlist,
+            audio_res,
+            scripts,
+            hud_texts,
+            &init_cmds,
+        );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish_or_poll_all(
     commands: &mut Commands,
     state: &mut PlayState,
+    playlist: &mut PlayStatePlaylist,
     audio_res: &mut AudioTickParams,
     scripts: &mut ScriptTickParams,
     hud_texts: &mut ScriptHudAndTextParams,
     loading_screen: &mut LoadingScreenState,
     pipeline: &mut PlayLoadPipeline,
 ) {
-    flush_pending_script_cmds(commands, audio_res, scripts, hud_texts);
+    flush_pending_script_cmds(commands, state, playlist, audio_res, scripts, hud_texts);
     prewarm_sfx_handles(
         &audio_res.sfx.miss_sounds,
         &audio_res.audio_sources,

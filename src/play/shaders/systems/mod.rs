@@ -156,7 +156,7 @@ impl StageShaderRuntime {
 pub(super) fn to_char_shader_role(role: CharacterRole) -> CharShaderRole {
     match role {
         CharacterRole::Player => CharShaderRole::Player,
-        CharacterRole::Opponent => CharShaderRole::Opponent,
+        CharacterRole::Opponent | CharacterRole::Other => CharShaderRole::Opponent,
         CharacterRole::Spectator => CharShaderRole::Spectator,
     }
 }

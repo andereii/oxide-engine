@@ -22,12 +22,8 @@ pub(super) struct ParentMirrorState {
 }
 
 #[inline]
-pub(super) fn role_index(role: CharacterRole) -> usize {
-    match role {
-        CharacterRole::Player => 0,
-        CharacterRole::Opponent => 1,
-        CharacterRole::Spectator => 2,
-    }
+pub(super) fn role_index(role: CharacterRole) -> Option<usize> {
+    role.primary_slot_index()
 }
 
 #[inline]
@@ -67,7 +63,7 @@ pub(super) fn sync_underlay_actors(
         let Some(cfg) = actor.mirror_of else {
             continue;
         };
-        let Some(ref parent) = mirror_states[role_index(cfg.parent_role)] else {
+        let Some(ref parent) = role_index(cfg.parent_role).and_then(|idx| mirror_states[idx].as_ref()) else {
             actor.mod_visible = false;
             sync_actor_visuals(
                 &mut actor,

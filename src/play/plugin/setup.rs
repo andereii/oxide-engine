@@ -92,45 +92,47 @@ pub(crate) fn seed_stage_and_chars_into_state(
         state.script_char_sizes.insert(c.id.clone(), c.idle_size);
         state.script_char_focus.insert(c.id.clone(), focus);
 
-        let (alias, role_idx) = match c.role {
-            CharacterRole::Player => ("bf", 0),
-            CharacterRole::Opponent => ("dad", 1),
-            CharacterRole::Spectator => ("gf", 2),
-        };
-        state.camera.focus_points[role_idx] = Some(focus);
-        state
-            .script_char_positions
-            .entry(alias.to_string())
-            .or_insert(c.slot.position);
-        state
-            .script_char_top_left
-            .entry(alias.to_string())
-            .or_insert([tl_x, tl_y]);
-        state.script_char_z.entry(alias.to_string()).or_insert(char_z);
-        state
-            .script_char_scales
-            .entry(alias.to_string())
-            .or_insert(c.slot.scale);
-        state
-            .script_char_alphas
-            .entry(alias.to_string())
-            .or_insert(c.slot.opacity);
-        state
-            .script_char_flips
-            .entry(alias.to_string())
-            .or_insert(c.slot.flip);
-        state
-            .script_char_vis
-            .entry(alias.to_string())
-            .or_insert(c.slot.visible);
-        state
-            .script_char_sizes
-            .entry(alias.to_string())
-            .or_insert(c.idle_size);
-        state
-            .script_char_focus
-            .entry(alias.to_string())
-            .or_insert(focus);
+        if let Some((alias, role_idx)) = match c.role {
+            CharacterRole::Player => Some(("bf", 0)),
+            CharacterRole::Opponent => Some(("dad", 1)),
+            CharacterRole::Spectator => Some(("gf", 2)),
+            CharacterRole::Other => None,
+        } {
+            state.camera.focus_points[role_idx] = Some(focus);
+            state
+                .script_char_positions
+                .entry(alias.to_string())
+                .or_insert(c.slot.position);
+            state
+                .script_char_top_left
+                .entry(alias.to_string())
+                .or_insert([tl_x, tl_y]);
+            state.script_char_z.entry(alias.to_string()).or_insert(char_z);
+            state
+                .script_char_scales
+                .entry(alias.to_string())
+                .or_insert(c.slot.scale);
+            state
+                .script_char_alphas
+                .entry(alias.to_string())
+                .or_insert(c.slot.opacity);
+            state
+                .script_char_flips
+                .entry(alias.to_string())
+                .or_insert(c.slot.flip);
+            state
+                .script_char_vis
+                .entry(alias.to_string())
+                .or_insert(c.slot.visible);
+            state
+                .script_char_sizes
+                .entry(alias.to_string())
+                .or_insert(c.idle_size);
+            state
+                .script_char_focus
+                .entry(alias.to_string())
+                .or_insert(focus);
+        }
     }
 }
 

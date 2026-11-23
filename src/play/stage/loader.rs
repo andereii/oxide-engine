@@ -114,8 +114,9 @@ pub fn resolve_stage_prop(
     data: StagePropData,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
 ) -> Option<ResolvedStageProp> {
-    resolve_prop_visual(mods, stage_id, &data, asset_server, layouts)
+    resolve_prop_visual(mods, stage_id, &data, asset_server, layouts, images)
         .map(|visual| ResolvedStageProp { data, visual })
 }
 
@@ -125,10 +126,11 @@ pub fn load_stage_resource(
     stage_id: &str,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
 ) -> Result<StageResource, String> {
     let (mut stage, ordered_props) = begin_stage_load(mods, stage_id)?;
     for data in ordered_props {
-        if let Some(prop) = resolve_stage_prop(mods, stage_id, data, asset_server, layouts) {
+        if let Some(prop) = resolve_stage_prop(mods, stage_id, data, asset_server, layouts, images) {
             stage.props.push(prop);
         }
     }
@@ -184,6 +186,7 @@ fn resolve_prop_visual(
     prop: &StagePropData,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
 ) -> Option<StagePropKind> {
     let file = prop.file.trim();
     if file.is_empty() {
@@ -197,7 +200,7 @@ fn resolve_prop_visual(
 
     match prop.anim_kind {
         Some(StageAnimKind::Atlas) => {
-            load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts)
+            load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts, images)
         }
         Some(StageAnimKind::Sparrow) => {
             if let Some(img_path) = resolve_stage_image_in(mods, stage_id, file) {
@@ -261,8 +264,15 @@ fn resolve_prop_visual(
                     });
                 }
                 if !xml_path.is_file()
-                    && let Some(comp) =
-                        load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts)
+                    && let Some(comp) = load_composite_stage_prop(
+                        mods,
+                        stage_id,
+                        prop,
+                        file,
+                        asset_server,
+                        layouts,
+                        images,
+                    )
                 {
                     return Some(comp);
                 }
@@ -272,7 +282,7 @@ fn resolve_prop_visual(
                     size,
                 });
             }
-            load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts)
+            load_composite_stage_prop(mods, stage_id, prop, file, asset_server, layouts, images)
         }
         Some(StageAnimKind::Packer) | None => {
             let img_path = resolve_stage_image_in(mods, stage_id, file)?;
@@ -292,18 +302,19 @@ fn load_composite_stage_prop(
     file: &str,
     asset_server: &AssetServer,
     layouts: &mut Assets<TextureAtlasLayout>,
+    images: &mut Assets<Image>,
 ) -> Option<StagePropKind> {
     let dir = resolve_atlas_dir_in(mods, stage_id, file)?;
     let atlas = AnimateAtlas::from_dir(&dir).ok()?;
-    let (atlas_layouts, indices) = atlas.build_layouts();
-    let textures: Vec<(Handle<Image>, Handle<TextureAtlasLayout>)> = atlas_layouts
-        .into_iter()
-        .enumerate()
-        .map(|(i, layout)| {
-            let img_rel = mods.to_asset_server_path(&dir.join(format!("spritemap{}.png", i + 1)));
-            (asset_server.load(img_rel), layouts.add(layout))
-        })
-        .collect();
+    let (textures, indices) = crate::play::characters::load_animate_textures(
+        &dir,
+        &atlas,
+        mods,
+        asset_server,
+        layouts,
+        images,
+        None,
+    );
     if textures.is_empty() {
         return None;
     }

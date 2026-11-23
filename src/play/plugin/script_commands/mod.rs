@@ -3,11 +3,13 @@ mod hud_audio;
 mod props;
 mod text;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 
 use crate::animations::AnimationController;
+use crate::play::playlist::PlayStatePlaylist;
+use crate::play::scene::PlayState;
 use crate::play::stage::{DynamicScriptProp, DynamicScriptText, StageCompositeProp, StagePropVisual};
 use crate::scripting::{LogLevel, ScriptCommand};
 
@@ -21,6 +23,8 @@ use text::handle_text_cmd;
 
 pub(crate) fn apply_ecs_script_commands(
     commands: &mut Commands,
+    state: &mut PlayState,
+    playlist: &mut PlayStatePlaylist,
     audio_res: &mut AudioTickParams,
     scripts: &mut ScriptTickParams,
     hud_texts: &mut ScriptHudAndTextParams,
@@ -31,8 +35,13 @@ pub(crate) fn apply_ecs_script_commands(
     let mut prop_index: Option<HashMap<String, Vec<Entity>>> =
         (cmds.len() >= 2).then(|| build_prop_index_ci(&scripts.props));
     let mut pending_spawned: HashMap<String, Entity> = HashMap::new();
+    let mut pending_chars: HashMap<String, Entity> = HashMap::new();
+    let mut pending_texts: HashMap<String, Entity> = HashMap::new();
+    let mut queue: VecDeque<ScriptCommand> = cmds.iter().cloned().collect();
+    let mut follow_up: Vec<ScriptCommand> = Vec::new();
 
-    for cmd in cmds {
+    while let Some(cmd_owned) = queue.pop_front() {
+        let cmd = &cmd_owned;
         match cmd {
             ScriptCommand::Log { level, mod_id, message } => match level {
                 LogLevel::Info => info!("[mod:{mod_id}] {message}"),
@@ -50,12 +59,16 @@ pub(crate) fn apply_ecs_script_commands(
             | ScriptCommand::SetPropZ { .. }
             | ScriptCommand::SetPropSize { .. }
             | ScriptCommand::SetPropVelocity { .. }
+            | ScriptCommand::SetPropRepeat { .. }
+            | ScriptCommand::SetPropAffine { .. }
+            | ScriptCommand::SetPropTexture { .. }
             | ScriptCommand::AddPropAnim { .. } => {
                 handle_prop_cmd(
                     cmd,
                     commands,
                     &scripts.asset_server,
                     &mut scripts.layouts,
+                    &mut scripts.images,
                     &scripts.mods,
                     scripts.preload.as_deref_mut(),
                     &mut scripts.props,
@@ -65,10 +78,41 @@ pub(crate) fn apply_ecs_script_commands(
                     &mut pending_spawned,
                 );
             }
+            ScriptCommand::SetPropOverlay { .. } => {
+                handle_prop_cmd(
+                    cmd,
+                    commands,
+                    &scripts.asset_server,
+                    &mut scripts.layouts,
+                    &mut scripts.images,
+                    &scripts.mods,
+                    scripts.preload.as_deref_mut(),
+                    &mut scripts.props,
+                    &scripts.sparrows,
+                    &mut hud_texts.texts,
+                    &mut prop_index,
+                    &mut pending_spawned,
+                );
+                handle_text_cmd(
+                    cmd,
+                    commands,
+                    &scripts.asset_server,
+                    &scripts.mods,
+                    &mut hud_texts.texts,
+                    &mut pending_texts,
+                );
+            }
             ScriptCommand::SpawnText { .. }
             | ScriptCommand::SetText { .. }
             | ScriptCommand::SetTextStyle { .. } => {
-                handle_text_cmd(cmd, commands, &mut hud_texts.texts);
+                handle_text_cmd(
+                    cmd,
+                    commands,
+                    &scripts.asset_server,
+                    &scripts.mods,
+                    &mut hud_texts.texts,
+                    &mut pending_texts,
+                );
             }
             ScriptCommand::SetShaderAdjustColor {
                 target,
@@ -203,6 +247,8 @@ pub(crate) fn apply_ecs_script_commands(
             }
             ScriptCommand::SetBarColors { .. }
             | ScriptCommand::SetIcon { .. }
+            | ScriptCommand::SetIconFlip { .. }
+            | ScriptCommand::SetIconVisible { .. }
             | ScriptCommand::SetIconScale { .. }
             | ScriptCommand::SetIconBop { .. }
             | ScriptCommand::PlaySfx { .. }
@@ -217,7 +263,21 @@ pub(crate) fn apply_ecs_script_commands(
                 handle_hud_audio_cmd(cmd, commands, audio_res, scripts, hud_texts);
             }
             _ => {
-                handle_char_cmd(cmd, commands, scripts, &pending_spawned);
+                handle_char_cmd(
+                    cmd,
+                    commands,
+                    state,
+                    playlist,
+                    scripts,
+                    &pending_spawned,
+                    &mut pending_chars,
+                    &mut follow_up,
+                );
+                if !follow_up.is_empty() {
+                    for f in follow_up.drain(..).rev() {
+                        queue.push_front(f);
+                    }
+                }
             }
         }
     }
@@ -232,7 +292,7 @@ pub(crate) type PropsQuery<'w, 's> = Query<
         &'static mut Sprite,
         Option<&'static mut AnimationController>,
         Option<&'static DynamicScriptProp>,
-        Option<&'static StageCompositeProp>,
+        Option<&'static mut StageCompositeProp>,
     ),
 >;
 
@@ -246,5 +306,6 @@ pub(crate) type TextsQuery<'w, 's> = Query<
         &'static mut TextFont,
         &'static mut TextColor,
         &'static mut bevy::sprite::Anchor,
+        Option<&'static mut bevy::sprite::Text2dShadow>,
     ),
 >;

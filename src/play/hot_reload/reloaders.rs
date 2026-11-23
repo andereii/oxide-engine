@@ -39,6 +39,7 @@ use crate::utils::constants::{
 #[derive(SystemParam)]
 pub(crate) struct HotReloadRes<'w> {
     pub(super) asset_server: Res<'w, AssetServer>,
+    pub(super) mut_images: ResMut<'w, Assets<Image>>,
     pub(super) mut_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     pub(super) mods: ResMut<'w, ModRegistry>,
     pub(super) mod_store: ResMut<'w, ModStore>,
@@ -153,6 +154,7 @@ pub(super) fn reload_stage_domain(
         &stage_id,
         &res.asset_server,
         &mut res.mut_layouts,
+        &mut res.mut_images,
     ) {
         Ok(st) => st,
         Err(err) => {
@@ -205,6 +207,7 @@ pub(super) fn reload_stage_domain(
             CharacterRole::Spectator => new_stage.characters.spectator.clone(),
             CharacterRole::Opponent => new_stage.characters.opponent.clone(),
             CharacterRole::Player => new_stage.characters.player.clone(),
+            CharacterRole::Other => StageCharacterSlot::default(),
         };
         actor.recompute_camera_focus();
     }
@@ -249,6 +252,7 @@ pub(super) fn reload_all_characters_domain(
         res.stage_res.as_deref(),
         &res.asset_server,
         &mut res.mut_layouts,
+        &mut res.mut_images,
     );
     spawn_characters(commands, &new_chars);
     if let Some(ref mut chars_res) = res.chars_res {
@@ -332,6 +336,7 @@ pub(super) fn reload_single_character_domain(
             slot,
             &res.asset_server,
             &mut res.mut_layouts,
+            &mut res.mut_images,
         ) {
             Ok(loaded) => loaded_batch.push(loaded),
             Err(err) => {
@@ -348,7 +353,7 @@ pub(super) fn reload_single_character_domain(
 
     let mut touches_icon = false;
     for loaded in loaded_batch {
-        if loaded.role != CharacterRole::Spectator {
+        if matches!(loaded.role, CharacterRole::Player | CharacterRole::Opponent) {
             touches_icon = true;
         }
         spawn_single_character(commands, &loaded);

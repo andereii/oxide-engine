@@ -190,8 +190,13 @@ pub fn sync_health_bar(
     let split_x_flx = bar_x_flx + inner_w * (1.0 - pct);
     let step_len_ms = state.conductor.step_length_ms();
     for (mut icon, mut anim, mut sprite, mut tf, mut vis) in &mut icons {
-        if *vis != hud_vis {
-            *vis = hud_vis;
+        let icon_vis = if hud_alpha > 0.001 && icon.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != icon_vis {
+            *vis = icon_vis;
         }
         sprite.color = sprite.color.with_alpha(icon.base_alpha * hud_alpha);
         if step_hit {

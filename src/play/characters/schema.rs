@@ -12,6 +12,19 @@ pub enum CharacterRole {
     Player,
     Opponent,
     Spectator,
+    Other,
+}
+
+impl CharacterRole {
+    /// Returns the primary focus/mirror slot index (`0..=2`), or `None` for extra (`Other`) actors.
+    pub const fn primary_slot_index(self) -> Option<usize> {
+        match self {
+            Self::Player => Some(0),
+            Self::Opponent => Some(1),
+            Self::Spectator => Some(2),
+            Self::Other => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]

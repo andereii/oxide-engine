@@ -4,6 +4,7 @@
   "script": true,
   "assetPath": "gameplay/characters/sserafim-yunjin/sserafim-yunjin",
   "renderType": "animateatlas",
+  "danceEvery": 0,
   "healthIcon": {
     "id": "bf"
   },

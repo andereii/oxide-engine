@@ -206,6 +206,14 @@ impl PlayState {
         if self.camera.hud_fade_timer_s > 0.0 {
             self.camera.hud_fade_timer_s = (self.camera.hud_fade_timer_s - elapsed_s).max(0.0);
         }
+        if self.camera.overlay_flash_timer_s > 0.0 {
+            self.camera.overlay_flash_timer_s =
+                (self.camera.overlay_flash_timer_s - elapsed_s).max(0.0);
+        }
+        if self.camera.overlay_fade_timer_s > 0.0 {
+            self.camera.overlay_fade_timer_s =
+                (self.camera.overlay_fade_timer_s - elapsed_s).max(0.0);
+        }
         if let Some(mut tween) = self.hud_alpha_tween {
             tween.elapsed_s += elapsed_s;
             self.hud_alpha = tween.value().clamp(0.0, 1.0) as f32;

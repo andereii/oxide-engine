@@ -1187,3 +1187,20 @@ fail-closed (no auto-repair).
   - `Shader::from_wgsl` (`src/play/shaders/systems/commands.rs`) compiles custom `.wgsl` files as raw WGSL without WESL `import` or `@if(...)` preprocessing, targeting `ExtendedMaterial2d<SpriteMeshMaterial, FunkinSpriteMaterial>` at `@group(2)` (`SpriteMaterial` at binding 0..2, `FunkinSpriteUniform` at binding 20 using `custom_0..custom_2` populated via `shader_vec`/`shader_val`).
   - `StageShaderRuntime` now retains only generic `rain_spec` / `rain_time_*` / `tankman_alt_mask` / `next_rt_layer` state; `stage_character_shader`, `stage_character_initial_tint`, `stage_prop_shader`, `SHADER_MODE_SSERAFIM`, `SserafimParams`, and `SserafimRuntimeState` are removed.
 - **Deferred retroactivity:** External-mod retrocompatibility checks (specifically `go-go-go` `SetHealthIcon` `char: 1` Psych vs V-Slice semantics, `--no-scripts` implications of disk-only stage shader definitions, and `sserafim-gf.rhai` `CustomEvent` unwrapping / live GPU visual check of `sserafim.wgsl`) are logged in `docs/PROGRESS.md` for follow-up.
+
+## 2026-11-21 — Generic character/attachment/icon primitives for `sserafim` script migration
+
+- **Decision:** Keep all `sserafim`/`spaghetti` logic in asset `.json`/`.rhai`/`.wgsl` files and implement only generic reusable primitives in `src/`:
+  - Dynamic stage character spawning (`char_spawn`), dynamic singing-role routing (`char_sing_type`), persistent animation suffix (`char_suffix`), and child `AnimateAtlas` attachments synced to parent symbol anchors (`char_attach_atlas`, `char_attach_style`, `char_attach_frame`, `char_attach_pose`).
+  - `apply_icon_char_id` (`src/play/hud/health_icon.rs`) checks direct `icon-<id>.png` availability before falling back to `character.json`'s `healthIcon.id`, and resets `icon_offset` to `[0.0, 0.0]` on icon-swap events while preserving `spawn_single_icon` spawn-time offsets.
+- **Stage positioning & Z convention note:** `char_spawn` maps integer stage layers via `stage_layer_z(layer, 0)` (`-500.0 + layer * 0.1`), whereas script prop spawners (`spawn_sprite_tl`, `spawn_atlas`) accept raw Bevy Z directly, so scripted props inserted between JSON stage layers use `-500.0 + layer * 0.1` (or `get_prop_z`). Extra `char_spawn` characters placed at top-left/origin coordinates like V-Slice `Bopper` (`setPosition(x - origin.x, y - origin.y)`) compensate for Oxide's `offsets * (1 + scale)` by subtracting `data.offsets` when calling `char_spawn`.
+
+## 2026-11-21 — Load-time Animate mask baking, non-blocking icon swaps, and preload barrier filtering
+
+- **Adobe Animate `Clp`/`Clpb` layer clipping (`src/core/render/animations/atlas_mask.rs`):**
+  - **Decision:** Bake `AnimateLayerType::Clipped` frames against their backward `Clipper` layer during atlas loading (`bake_clipped_layers`) into deduplicated `BakedSheetImage` assets registered via shared `load_animate_textures`, rather than adding per-piece GPU stencil passes.
+  - **Rationale:** Matches V-Slice `Layer.hx` backward clipper resolution and `FilterRenderer.hx` behavior (leaving clipped layers unmasked on frames where the clipper has no geometry), preserves existing composite rendering, and supports rotated atlas frames and color transforms uniformly.
+- **Flicker-free health icon swaps (`src/play/hud/health_icon.rs`, `src/play/plugin/load_pipeline.rs`):**
+  - **Decision:** Buffer unready swap textures in `PendingIconSwap` (retaining the active icon sprite/layout until `Assets<Image>` finishes decoding) and preload chart `SetHealthIcon` icons in `PreloadedHealthIcons` during `PlayLoadPipeline`.
+- **In-memory handles excluded from `PlayPreloadTracker` (`src/play/preload.rs`):**
+  - **Decision:** Ignore `Handle::Uuid`/in-memory handles (`untyped.path().is_none()`) in `PlayPreloadTracker::register_handle`, because resident memory images added via `Assets<Image>::add` (such as baked mask textures) have no `AssetServer` load state and would otherwise stall loading barriers.

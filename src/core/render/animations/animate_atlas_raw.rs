@@ -1,10 +1,25 @@
 use serde::Deserialize;
 
 use super::animate_atlas::{
-    AnimateBitmapFallback, AnimateElement, AnimateTimelineFrame, AnimateTimelineLayer,
+    AnimateBitmapFallback, AnimateElement, AnimateLayerType, AnimateTimelineFrame,
+    AnimateTimelineLayer,
 };
 
 pub(super) fn convert_layer(raw: LayerRaw) -> AnimateTimelineLayer {
+    let layer_type = if raw.clipped_by.is_some() {
+        AnimateLayerType::Clipped
+    } else {
+        match raw.layer_type.as_deref() {
+            Some("Clp" | "Clipper") => AnimateLayerType::Clipper,
+            Some("Fld" | "Folder") => AnimateLayerType::Folder,
+            Some("Guide") => AnimateLayerType::Guide,
+            _ => AnimateLayerType::Normal,
+        }
+    };
+    let visible = !matches!(
+        layer_type,
+        AnimateLayerType::Clipper | AnimateLayerType::Folder | AnimateLayerType::Guide
+    );
     let frames = raw
         .frames
         .into_iter()
@@ -51,10 +66,9 @@ pub(super) fn convert_layer(raw: LayerRaw) -> AnimateTimelineLayer {
         .collect();
     AnimateTimelineLayer {
         name: raw.layer_name.unwrap_or_default(),
-        visible: !matches!(
-            raw.layer_type.as_deref(),
-            Some("Clp" | "Clipper" | "Fld" | "Folder" | "Guide")
-        ),
+        visible,
+        layer_type,
+        clipped_by: raw.clipped_by,
         frames,
     }
 }
@@ -251,6 +265,8 @@ pub(super) struct LayerRaw {
     pub layer_name: Option<String>,
     #[serde(rename = "LT", alias = "Layer_type")]
     pub layer_type: Option<String>,
+    #[serde(rename = "Clpb", alias = "Clipped_by")]
+    pub clipped_by: Option<String>,
     #[serde(rename = "FR", alias = "Frames", default)]
     pub frames: Vec<FrameRaw>,
 }

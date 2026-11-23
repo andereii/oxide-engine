@@ -51,6 +51,10 @@ impl PlayPreloadTracker {
 
     pub fn register_handle(&mut self, handle: impl Into<UntypedHandle>) {
         let untyped = handle.into();
+        if untyped.path().is_none() {
+            // In-memory/UUID handles (e.g. `Assets::add` baked textures) are already loaded and not tracked by `AssetServer`.
+            return;
+        }
         let id = untyped.id();
         if self.seen_ids.insert(id) {
             self.handles.push(untyped);
@@ -166,5 +170,28 @@ impl PlayPreloadTracker {
     #[allow(dead_code)]
     pub fn progress(&self) -> PreloadProgress {
         self.progress
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_memory_handles_do_not_stall_preload_barrier() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>();
+        let server = app.world().resource::<AssetServer>().clone();
+        let mem_handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+
+        let mut tracker = PlayPreloadTracker::default();
+        tracker.register_handle(mem_handle);
+        let prog = tracker.poll(&server, true);
+        assert_eq!(prog.total_assets, 0);
+        assert!(prog.is_complete());
     }
 }

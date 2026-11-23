@@ -31,6 +31,7 @@ pub fn register_core_and_song_api(engine: &mut Engine) {
 
     engine.register_fn("song", || with_ctx(|c| c.snapshot.song_id.clone()));
     engine.register_fn("song_len", || with_ctx(|c| c.snapshot.song_length_ms));
+    engine.register_fn("start_ms", || with_ctx(|c| c.snapshot.start_timestamp_ms));
     engine.register_fn("diff", || with_ctx(|c| c.snapshot.difficulty.clone()));
     engine.register_fn("variation", || with_ctx(|c| c.snapshot.variation.clone()));
     engine.register_fn("stage", || with_ctx(|c| c.snapshot.stage_id.clone()));

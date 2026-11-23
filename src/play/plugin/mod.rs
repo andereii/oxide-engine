@@ -100,6 +100,7 @@ pub(crate) struct PendingSongSeek(pub(crate) Option<f64>);
 #[derive(SystemParam)]
 pub(super) struct ScriptTickParams<'w, 's> {
     pub(super) asset_server: Res<'w, AssetServer>,
+    pub(super) images: ResMut<'w, Assets<Image>>,
     pub(super) layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     pub(super) mods: Res<'w, ModRegistry>,
     pub(super) mod_store: ResMut<'w, ModStore>,
@@ -134,6 +135,7 @@ pub(super) struct ScriptHudAndTextParams<'w, 's> {
     >,
     pub(super) pending_reload: ResMut<'w, PendingSongReload>,
     pub(super) pending_seek: ResMut<'w, PendingSongSeek>,
+    pub(super) preloaded_icons: ResMut<'w, super::hud::health_icon::PreloadedHealthIcons>,
 }
 
 impl Plugin for PlayPlugin {
@@ -203,6 +205,7 @@ impl Plugin for PlayPlugin {
             .insert_resource(CharacterSyncState::default())
             .insert_resource(HotReloadState::default())
             .insert_resource(PlayPreloadTracker::default())
+            .init_resource::<super::hud::health_icon::PreloadedHealthIcons>()
             .init_resource::<load_pipeline::PlayLoadPipeline>()
             .init_resource::<ScriptErrorOverlay>()
             .insert_resource(AudioSyncState {

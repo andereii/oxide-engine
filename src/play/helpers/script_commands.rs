@@ -201,6 +201,23 @@ impl PlayState {
                 }
                 true
             }
+            ScriptCommand::OverlayFlash { color, duration_s } => {
+                let dur = (*duration_s).max(0.0);
+                self.camera.overlay_flash_color = *color;
+                self.camera.overlay_flash_duration_s = dur;
+                self.camera.overlay_flash_timer_s = dur;
+                true
+            }
+            ScriptCommand::OverlayFade { color, duration_s, fade_in } => {
+                let dur = (*duration_s).max(0.0);
+                let hold = !*fade_in;
+                self.camera.overlay_fade_color = *color;
+                self.camera.overlay_fade_duration_s = dur;
+                self.camera.overlay_fade_timer_s = dur;
+                self.camera.overlay_fade_in = *fade_in;
+                self.camera.overlay_fade_hold = hold;
+                true
+            }
             ScriptCommand::SetLaneOffset { lane, x, y } => {
                 if let Some(rec) = self.receptor_mut(*lane) {
                     rec.mod_offset = [*x, *y];

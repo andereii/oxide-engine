@@ -99,10 +99,27 @@ pub(super) fn handle_hud_audio_cmd(
                         &mut anim,
                         &mut sprite,
                         char_id,
+                        None,
                         &scripts.mods,
                         &scripts.asset_server,
                         &mut scripts.layouts,
+                        Some(&mut scripts.images),
                     );
+                }
+            }
+        }
+        ScriptCommand::SetIconFlip { side, flip_x } => {
+            for (mut icon, _, mut sprite) in &mut hud_texts.icons {
+                if side_matches_icon(icon.player_id, side) {
+                    icon.flip_x = *flip_x;
+                    sprite.flip_x = *flip_x;
+                }
+            }
+        }
+        ScriptCommand::SetIconVisible { side, visible } => {
+            for (mut icon, _, _) in &mut hud_texts.icons {
+                if side_matches_icon(icon.player_id, side) {
+                    icon.visible = *visible;
                 }
             }
         }

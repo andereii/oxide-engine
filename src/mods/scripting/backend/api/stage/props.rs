@@ -353,6 +353,67 @@ pub fn register_props_api(engine: &mut Engine) {
     engine.register_fn("prop_anim_done", |id: &str| {
         with_ctx(|c| c.snapshot.prop_anim_done.get(id).copied().unwrap_or(false))
     });
+    engine.register_fn("prop_repeat", |id: &str, rx: bool, ry: bool| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetPropRepeat {
+                id: id.to_string(),
+                repeat_x: rx,
+                repeat_y: ry,
+            });
+        })
+    });
+    engine.register_fn(
+        "prop_matrix",
+        |id: &str,
+         a: Dynamic,
+         b: Dynamic,
+         c_arg: Dynamic,
+         d: Dynamic,
+         tx: Dynamic,
+         ty: Dynamic|
+         -> Result<(), Box<EvalAltResult>> {
+            let matrix = [
+                dyn_to_f64(&a)? as f32,
+                dyn_to_f64(&b)? as f32,
+                dyn_to_f64(&c_arg)? as f32,
+                dyn_to_f64(&d)? as f32,
+                dyn_to_f64(&tx)? as f32,
+                dyn_to_f64(&ty)? as f32,
+            ];
+            with_ctx(|ctx| {
+                ctx.commands.push(ScriptCommand::SetPropAffine {
+                    id: id.to_string(),
+                    matrix: Some(matrix),
+                });
+            })
+        },
+    );
+    engine.register_fn("prop_matrix_clear", |id: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetPropAffine {
+                id: id.to_string(),
+                matrix: None,
+            });
+        })
+    });
+    engine.register_fn("prop_tex", |id: &str, path: &str| {
+        with_ctx(|c| {
+            c.commands.push(ScriptCommand::SetPropTexture {
+                id: id.to_string(),
+                path: path.to_string(),
+            });
+        })
+    });
+    for name in ["prop_overlay", "text_overlay"] {
+        engine.register_fn(name, |id: &str, overlay: bool| {
+            with_ctx(|c| {
+                c.commands.push(ScriptCommand::SetPropOverlay {
+                    id: id.to_string(),
+                    overlay,
+                });
+            })
+        });
+    }
 }
 
 fn parse_single_script_anim(map: &Map) -> Result<BaseAnimationData, Box<EvalAltResult>> {
