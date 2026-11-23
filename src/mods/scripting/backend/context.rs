@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use rhai::{Dynamic, Engine, EvalAltResult, Position};
 
 use crate::scripting::api::ScriptContext;
-use crate::scripting::events::ScriptEvent;
+use crate::scripting::events::{SCRIPT_EVENT_FIELD_NAMES, ScriptEvent};
 use crate::scripting::value::ScriptValue;
 
 thread_local! {
@@ -64,46 +64,53 @@ pub(super) fn with_ctx<R>(f: impl FnOnce(&mut ScriptContext) -> R) -> Result<R, 
     })
 }
 
-pub(super) fn dyn_to_f64(val: &Dynamic) -> Result<f64, Box<EvalAltResult>> {
-    if let Ok(v) = val.as_float() {
-        return Ok(v);
+pub(super) fn script_value_from_rhai(dynamic: &Dynamic) -> ScriptValue {
+    if dynamic.is_unit() {
+        return ScriptValue::Null;
     }
-    if let Ok(v) = val.as_int() {
-        return Ok(v as f64);
+    if let Ok(v) = dynamic.as_bool() {
+        return ScriptValue::Bool(v);
     }
-    Err(runtime_err(format!("expected numeric value, got {}", val.type_name())))
+    if let Ok(v) = dynamic.as_int() {
+        return ScriptValue::Int(v);
+    }
+    if let Ok(v) = dynamic.as_float() {
+        return ScriptValue::Float(v);
+    }
+    if let Ok(s) = dynamic.clone().into_string() {
+        return ScriptValue::String(s);
+    }
+    if let Some(arr) = dynamic.read_lock::<rhai::Array>() {
+        return ScriptValue::List(arr.iter().map(script_value_from_rhai).collect());
+    }
+    if let Some(map) = dynamic.read_lock::<rhai::Map>() {
+        return ScriptValue::Map(
+            map.iter()
+                .map(|(k, v)| (k.to_string(), script_value_from_rhai(v)))
+                .collect(),
+        );
+    }
+    ScriptValue::String(dynamic.to_string())
 }
 
-pub(super) fn dyn_to_i64(val: &Dynamic) -> Result<i64, Box<EvalAltResult>> {
-    if let Ok(v) = val.as_int() {
-        return Ok(v);
-    }
-    if let Ok(v) = val.as_float() {
-        return Ok(v as i64);
-    }
-    Err(runtime_err(format!("expected integer value, got {}", val.type_name())))
-}
-
-pub(super) fn dyn_to_usize(val: &Dynamic) -> Result<usize, Box<EvalAltResult>> {
-    let i = dyn_to_i64(val)?;
-    usize::try_from(i).map_err(|_| runtime_err(format!("expected non-negative index, got {i}")))
-}
-
-fn event_key_alias(key: &str) -> Option<&'static str> {
-    match key {
-        "note_kind" => Some("kind"),
-        "kind" => Some("note_kind"),
-        "hold_len" | "len" => Some("length"),
-        "length" => Some("len"),
-        "lane" => Some("dir"),
-        "dir" => Some("lane"),
-        "rem_ms" => Some("remaining_ms"),
-        "remaining_ms" => Some("rem_ms"),
-        "splash" => Some("does_notesplash"),
-        "does_notesplash" => Some("splash"),
-        "play_sfx" => Some("play_sound"),
-        "play_sound" => Some("play_sfx"),
-        _ => None,
+pub(super) fn script_value_into_rhai(val: ScriptValue) -> Dynamic {
+    match val {
+        ScriptValue::Null => Dynamic::UNIT,
+        ScriptValue::Bool(v) => Dynamic::from(v),
+        ScriptValue::Int(v) => Dynamic::from(v),
+        ScriptValue::Float(v) => Dynamic::from(v),
+        ScriptValue::String(s) => Dynamic::from(s),
+        ScriptValue::List(items) => {
+            let arr: rhai::Array = items.into_iter().map(script_value_into_rhai).collect();
+            Dynamic::from_array(arr)
+        }
+        ScriptValue::Map(map) => {
+            let mut rhai_map = rhai::Map::new();
+            for (k, v) in map {
+                rhai_map.insert(k.into(), script_value_into_rhai(v));
+            }
+            Dynamic::from_map(rhai_map)
+        }
     }
 }
 
@@ -152,31 +159,21 @@ impl RhaiEvent {
     }
 
     pub fn has(&mut self, key: &str) -> bool {
-        self.with_inner(|e| {
-            e.data.contains_key(key)
-                || event_key_alias(key).is_some_and(|a| e.data.contains_key(a))
-        })
+        self.with_inner(|e| e.has_aliased(key))
     }
 
     pub fn get(&mut self, key: &str) -> Dynamic {
         self.with_inner(|e| {
-            e.data
-                .get(key)
-                .or_else(|| event_key_alias(key).and_then(|k| e.data.get(k)))
+            e.get_aliased(key)
                 .cloned()
-                .map(ScriptValue::into_rhai)
+                .map(script_value_into_rhai)
                 .unwrap_or(Dynamic::UNIT)
         })
     }
 
     pub fn set(&mut self, key: &str, value: Dynamic) {
-        let converted = ScriptValue::from_rhai(&value);
-        self.with_inner(|e| {
-            if let Some(alias) = event_key_alias(key) {
-                e.set(alias.to_string(), converted.clone());
-            }
-            e.set(key.to_string(), converted);
-        });
+        let converted = script_value_from_rhai(&value);
+        self.with_inner(|e| e.set_aliased(key, converted));
     }
 }
 
@@ -195,15 +192,8 @@ pub(super) fn register_event_type(engine: &mut Engine) {
     engine.register_indexer_get(|ev: &mut RhaiEvent, key: &str| -> Dynamic { ev.get(key) });
     engine.register_indexer_set(|ev: &mut RhaiEvent, key: &str, val: Dynamic| ev.set(key, val));
 
-    for prop in [
-        "id", "dir", "note_kind", "length", "len", "hold_len", "combo", "is_hold", "remaining_ms",
-        "rem_ms", "health_change", "score_change", "score", "hp", "step", "beat", "measure", "dt",
-        "name", "value", "data", "source", "judgement", "lane", "char_id", "time", "count",
-        "is_player", "diff_ms", "splash", "does_notesplash", "play_sfx", "play_sound", "play_anim",
-        "scoreable", "break_combo", "side", "key", "ctrl", "gitaroo", "notes", "events", "instant",
-    ] {
+    for &prop in SCRIPT_EVENT_FIELD_NAMES {
         engine.register_get(prop, move |ev: &mut RhaiEvent| -> Dynamic { ev.get(prop) });
         engine.register_set(prop, move |ev: &mut RhaiEvent, val: Dynamic| ev.set(prop, val));
     }
 }
-

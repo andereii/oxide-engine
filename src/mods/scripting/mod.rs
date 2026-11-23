@@ -12,9 +12,9 @@ pub use backend::api;
 // Public scripting API surface exposed for current Rhai and future Lua/Wasm backends.
 #[allow(unused_imports)]
 pub use api::{
-    LogLevel, PropertyTween, SCRIPT_API_CATALOG, ScriptApiDoc, ScriptCommand, ScriptContext,
-    ScriptMutableState, ScriptNoteSnapshot, ScriptPropAnimKind, ScriptStateSnapshot, TweenProp,
-    TweenTarget,
+    LogLevel, PropertyTween, SCRIPT_API_CATALOG, ScriptApiDoc, ScriptApiEntry, ScriptApiFn,
+    ScriptCommand, ScriptContext, ScriptMutableState, ScriptNoteSnapshot, ScriptPropAnimKind,
+    ScriptStateSnapshot, TweenProp, TweenTarget, collect_api_entries,
 };
 #[allow(unused_imports)]
 pub use backend::{RhaiBackend, ScriptBackend, ScriptError, ScriptInstance, ScriptSource};

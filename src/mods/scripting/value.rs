@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use rhai::Dynamic;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::constants::{SCRIPT_EXT_LUA, SCRIPT_EXT_RHAI, SCRIPT_EXT_WASM};
@@ -79,6 +78,53 @@ impl ScriptValue {
         }
     }
 
+    pub fn as_list(&self) -> Option<&[ScriptValue]> {
+        match self {
+            Self::List(items) => Some(items.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub fn as_map(&self) -> Option<&BTreeMap<String, ScriptValue>> {
+        match self {
+            Self::Map(map) => Some(map),
+            _ => None,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::Null => "null",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::String(_) => "string",
+            Self::List(_) => "array",
+            Self::Map(_) => "map",
+        }
+    }
+
+    pub fn to_display_string(&self) -> String {
+        match self {
+            Self::Null => String::new(),
+            Self::Bool(v) => v.to_string(),
+            Self::Int(v) => v.to_string(),
+            Self::Float(v) => v.to_string(),
+            Self::String(s) => s.clone(),
+            Self::List(items) => {
+                let parts: Vec<String> = items.iter().map(Self::to_display_string).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            Self::Map(map) => {
+                let parts: Vec<String> = map
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {}", v.to_display_string()))
+                    .collect();
+                format!("#{{{}}}", parts.join(", "))
+            }
+        }
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             Self::Null => serde_json::Value::Null,
@@ -117,56 +163,6 @@ impl ScriptValue {
                     .map(|(k, v)| (k.clone(), Self::from_json(v)))
                     .collect(),
             ),
-        }
-    }
-
-    pub fn from_rhai(dynamic: &Dynamic) -> Self {
-        if dynamic.is_unit() {
-            return Self::Null;
-        }
-        if let Ok(v) = dynamic.as_bool() {
-            return Self::Bool(v);
-        }
-        if let Ok(v) = dynamic.as_int() {
-            return Self::Int(v);
-        }
-        if let Ok(v) = dynamic.as_float() {
-            return Self::Float(v);
-        }
-        if let Ok(s) = dynamic.clone().into_string() {
-            return Self::String(s);
-        }
-        if let Some(arr) = dynamic.read_lock::<rhai::Array>() {
-            return Self::List(arr.iter().map(Self::from_rhai).collect());
-        }
-        if let Some(map) = dynamic.read_lock::<rhai::Map>() {
-            return Self::Map(
-                map.iter()
-                    .map(|(k, v)| (k.to_string(), Self::from_rhai(v)))
-                    .collect(),
-            );
-        }
-        Self::String(dynamic.to_string())
-    }
-
-    pub fn into_rhai(self) -> Dynamic {
-        match self {
-            Self::Null => Dynamic::UNIT,
-            Self::Bool(v) => Dynamic::from(v),
-            Self::Int(v) => Dynamic::from(v),
-            Self::Float(v) => Dynamic::from(v),
-            Self::String(s) => Dynamic::from(s),
-            Self::List(items) => {
-                let arr: rhai::Array = items.into_iter().map(Self::into_rhai).collect();
-                Dynamic::from_array(arr)
-            }
-            Self::Map(map) => {
-                let mut rhai_map = rhai::Map::new();
-                for (k, v) in map {
-                    rhai_map.insert(k.into(), v.into_rhai());
-                }
-                Dynamic::from_map(rhai_map)
-            }
         }
     }
 }

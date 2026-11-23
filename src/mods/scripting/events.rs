@@ -122,6 +122,34 @@ impl HookKind {
     }
 }
 
+/// Standard event property names exposed across scripting backends.
+pub const SCRIPT_EVENT_FIELD_NAMES: &[&str] = &[
+    "id", "dir", "note_kind", "length", "len", "hold_len", "combo", "is_hold", "remaining_ms",
+    "rem_ms", "health_change", "score_change", "score", "hp", "step", "beat", "measure", "dt",
+    "name", "value", "data", "source", "judgement", "lane", "char_id", "time", "count",
+    "is_player", "diff_ms", "splash", "does_notesplash", "play_sfx", "play_sound", "play_anim",
+    "scoreable", "break_combo", "side", "key", "ctrl", "gitaroo", "notes", "events", "instant",
+];
+
+/// Returns the canonical bidirectional alias for an event field name, if one exists.
+pub fn event_key_alias(key: &str) -> Option<&'static str> {
+    match key {
+        "note_kind" => Some("kind"),
+        "kind" => Some("note_kind"),
+        "hold_len" | "len" => Some("length"),
+        "length" => Some("len"),
+        "lane" => Some("dir"),
+        "dir" => Some("lane"),
+        "rem_ms" => Some("remaining_ms"),
+        "remaining_ms" => Some("rem_ms"),
+        "splash" => Some("does_notesplash"),
+        "does_notesplash" => Some("splash"),
+        "play_sfx" => Some("play_sound"),
+        "play_sound" => Some("play_sfx"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScriptEvent {
     pub kind: HookKind,
@@ -159,6 +187,25 @@ impl ScriptEvent {
 
     pub fn set(&mut self, key: impl Into<String>, value: impl Into<ScriptValue>) {
         self.data.insert(key.into(), value.into());
+    }
+
+    pub fn has_aliased(&self, key: &str) -> bool {
+        self.data.contains_key(key)
+            || event_key_alias(key).is_some_and(|alias| self.data.contains_key(alias))
+    }
+
+    pub fn get_aliased(&self, key: &str) -> Option<&ScriptValue> {
+        self.data
+            .get(key)
+            .or_else(|| event_key_alias(key).and_then(|alias| self.data.get(alias)))
+    }
+
+    pub fn set_aliased(&mut self, key: impl Into<String>, value: ScriptValue) {
+        let key = key.into();
+        if let Some(alias) = event_key_alias(&key) {
+            self.data.insert(alias.to_string(), value.clone());
+        }
+        self.data.insert(key, value);
     }
 
     pub fn get_i64(&self, key: &str) -> Option<i64> {

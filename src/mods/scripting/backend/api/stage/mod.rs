@@ -1,5 +1,10 @@
-﻿mod characters;
-mod props;
+﻿pub mod characters;
+pub mod props;
 
-pub use characters::register_character_api;
-pub use props::register_props_api;
+use super::bindings::ScriptApiEntry;
+
+pub(crate) fn api_entries() -> Vec<ScriptApiEntry> {
+    let mut entries = characters::api_entries();
+    entries.extend(props::api_entries());
+    entries
+}

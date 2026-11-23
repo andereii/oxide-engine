@@ -1,6 +1,7 @@
 pub mod api;
 pub mod context;
 pub mod rhai;
+mod rhai_api;
 mod rhai_resolver;
 pub mod traits;
 

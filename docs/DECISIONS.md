@@ -1204,3 +1204,9 @@ fail-closed (no auto-repair).
   - **Decision:** Buffer unready swap textures in `PendingIconSwap` (retaining the active icon sprite/layout until `Assets<Image>` finishes decoding) and preload chart `SetHealthIcon` icons in `PreloadedHealthIcons` during `PlayLoadPipeline`.
 - **In-memory handles excluded from `PlayPreloadTracker` (`src/play/preload.rs`):**
   - **Decision:** Ignore `Handle::Uuid`/in-memory handles (`untyped.path().is_none()`) in `PlayPreloadTracker::register_handle`, because resident memory images added via `Assets<Image>::add` (such as baked mask textures) have no `AssetServer` load state and would otherwise stall loading barriers.
+
+## 2026-11-22 — Language-agnostic scripting API table decoupled from Rhai bindings
+
+- **Decision:** Replaced per-backend `engine.register_fn(...)` closures across `src/mods/scripting/backend/api/` and `ScriptValue` Rhai conversions in `src/mods/scripting/value.rs` with a single language-agnostic binding registry (`ScriptApiEntry { names, arities, handler }` over `(&mut ScriptContext, &[ScriptValue]) -> Result<ScriptValue, String>` in `src/mods/scripting/backend/api/bindings.rs`) plus shared `ScriptEvent` alias helpers (`SCRIPT_EVENT_FIELD_NAMES`, `event_key_alias`, `{has,get,set}_aliased` in `src/mods/scripting/events.rs`).
+- **Rhai isolation boundary:** `RhaiBackend` retains only VM configuration, AST compilation/dispatch, `RhaiEvent`, `Dynamic <-> ScriptValue` conversions (`backend/context.rs`), and one declarative `0..=12` arity binder (`backend/rhai_api.rs`), keeping `src/mods/scripting/value.rs` and all `src/mods/scripting/backend/api/` modules completely free of `rhai` imports.
+- **Equivalence check:** All 355 API function/alias names and 409 `(name, arity)` overloads preserve parity against pre-refactor `HEAD`, enforced by uniqueness/arity and runtime overload/alias/error tests in `bindings.rs` and `host.rs`.

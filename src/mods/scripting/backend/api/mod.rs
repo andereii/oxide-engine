@@ -1,3 +1,4 @@
+pub mod bindings;
 pub mod camera_hud;
 pub mod commands;
 pub mod context;
@@ -11,6 +12,7 @@ pub mod state;
 pub mod text_tweens;
 pub mod tweens;
 
+pub use bindings::{ScriptApiEntry, ScriptApiFn, collect_api_entries};
 pub use commands::{LogLevel, ScriptCommand, ScriptPropAnimKind};
 pub use context::{
     MAX_CUSTOM_HOOK_DEPTH, NewTimerRequest, ScriptContext, parse_hex_rgba, script_clamp,

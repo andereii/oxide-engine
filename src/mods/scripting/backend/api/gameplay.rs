@@ -1,563 +1,607 @@
-use rhai::{Dynamic, Engine, EvalAltResult};
-
 use crate::scripting::api::ScriptCommand;
-use crate::scripting::backend::context::{dyn_to_f64, dyn_to_usize, with_ctx};
 use crate::scripting::value::ScriptValue;
 
-fn register_tagged_sound_fns(engine: &mut Engine, name: &str) {
-    engine.register_fn(name, |tag: &str, path: &str| {
-        with_ctx(|c| {
-            c.snapshot.sound_volumes.insert(tag.to_string(), 1.0);
-            c.commands.push(ScriptCommand::PlaySound {
-                tag: tag.to_string(),
-                path: path.to_string(),
-                volume: 1.0,
-                looped: false,
-                pitch: 1.0,
-            });
-        })
-    });
-    engine.register_fn(name, |tag: &str, path: &str, vol: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let volume = dyn_to_f64(&vol)? as f32;
-        with_ctx(|c| {
-            c.snapshot.sound_volumes.insert(tag.to_string(), volume);
-            c.commands.push(ScriptCommand::PlaySound {
-                tag: tag.to_string(),
-                path: path.to_string(),
-                volume,
-                looped: false,
-                pitch: 1.0,
-            });
-        })
-    });
-    engine.register_fn(name, |tag: &str, path: &str, vol: Dynamic, looped: bool| -> Result<(), Box<EvalAltResult>> {
-        let volume = dyn_to_f64(&vol)? as f32;
-        with_ctx(|c| {
-            c.snapshot.sound_volumes.insert(tag.to_string(), volume);
-            c.commands.push(ScriptCommand::PlaySound {
-                tag: tag.to_string(),
-                path: path.to_string(),
-                volume,
-                looped,
-                pitch: 1.0,
-            });
-        })
-    });
-    engine.register_fn(
-        name,
-        |tag: &str, path: &str, vol: Dynamic, looped: bool, pitch: Dynamic| -> Result<(), Box<EvalAltResult>> {
-            let volume = dyn_to_f64(&vol)? as f32;
-            let pitch = (dyn_to_f64(&pitch)? as f32).max(0.05);
-            with_ctx(|c| {
-                c.snapshot.sound_volumes.insert(tag.to_string(), volume);
-                c.commands.push(ScriptCommand::PlaySound {
-                    tag: tag.to_string(),
-                    path: path.to_string(),
-                    volume,
-                    looped,
-                    pitch,
-                });
-            })
-        },
-    );
+use super::bindings::{
+    ScriptApiEntry, arg, arg_bool, arg_f32, arg_f64, arg_i64, arg_list, arg_str, arg_usize,
+};
+use super::context::ScriptContext;
+
+fn api_hp(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.mutable.health))
+}
+fn api_set_hp(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.health = arg_f64(args, 0)?;
+    ctx.mutable.dirty_health = true;
+    Ok(ScriptValue::Null)
+}
+fn api_add_hp(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.health += arg_f64(args, 0)?;
+    ctx.mutable.dirty_health = true;
+    Ok(ScriptValue::Null)
 }
 
-pub fn register_gameplay_api(engine: &mut Engine) {
-    engine.register_fn("hp", || with_ctx(|c| c.mutable.health));
-    engine.register_fn("set_hp", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let num = dyn_to_f64(&v)?;
-        with_ctx(|c| {
-            c.mutable.health = num;
-            c.mutable.dirty_health = true;
-        })
-    });
-    engine.register_fn("add_hp", |d: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let delta = dyn_to_f64(&d)?;
-        with_ctx(|c| {
-            c.mutable.health += delta;
-            c.mutable.dirty_health = true;
-        })
-    });
+fn api_score(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.mutable.score))
+}
+fn api_set_score(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.score = arg_f64(args, 0)?;
+    ctx.mutable.dirty_score = true;
+    Ok(ScriptValue::Null)
+}
+fn api_add_score(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.score += arg_f64(args, 0)?;
+    ctx.mutable.dirty_score = true;
+    Ok(ScriptValue::Null)
+}
 
-    engine.register_fn("score", || with_ctx(|c| c.mutable.score));
-    engine.register_fn("set_score", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let num = dyn_to_f64(&v)?;
-        with_ctx(|c| {
-            c.mutable.score = num;
-            c.mutable.dirty_score = true;
-        })
-    });
-    engine.register_fn("add_score", |d: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let delta = dyn_to_f64(&d)?;
-        with_ctx(|c| {
-            c.mutable.score += delta;
-            c.mutable.dirty_score = true;
-        })
-    });
+fn api_combo(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.combo)))
+}
+fn api_max_combo(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.max_combo)))
+}
+fn api_misses(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.misses)))
+}
+fn api_sicks(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.sick)))
+}
+fn api_goods(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.good)))
+}
+fn api_bads(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.bad)))
+}
+fn api_shits(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.shit)))
+}
+fn api_hit_count(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.hit_notes)))
+}
+fn api_note_count(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(ctx.snapshot.note_count as i64))
+}
+fn api_acc(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.snapshot.accuracy()))
+}
+fn api_rank(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::String(ctx.snapshot.rank_name().to_string()))
+}
+fn api_deaths(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.deaths)))
+}
 
-    engine.register_fn("combo", || with_ctx(|c| i64::from(c.snapshot.combo)));
-    engine.register_fn("max_combo", || with_ctx(|c| i64::from(c.snapshot.max_combo)));
-    engine.register_fn("misses", || with_ctx(|c| i64::from(c.snapshot.misses)));
-    engine.register_fn("sicks", || with_ctx(|c| i64::from(c.snapshot.sick)));
-    engine.register_fn("goods", || with_ctx(|c| i64::from(c.snapshot.good)));
-    engine.register_fn("bads", || with_ctx(|c| i64::from(c.snapshot.bad)));
-    engine.register_fn("shits", || with_ctx(|c| i64::from(c.snapshot.shit)));
-    engine.register_fn("hit_count", || with_ctx(|c| i64::from(c.snapshot.hit_notes)));
-    engine.register_fn("note_count", || with_ctx(|c| c.snapshot.note_count as i64));
-    engine.register_fn("acc", || with_ctx(|c| c.snapshot.accuracy()));
-    engine.register_fn("rank", || with_ctx(|c| c.snapshot.rank_name().to_string()));
-    engine.register_fn("deaths", || with_ctx(|c| i64::from(c.snapshot.deaths)));
+fn api_botplay(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.mutable.botplay))
+}
+fn api_set_botplay(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.botplay = arg_bool(args, 0)?;
+    ctx.mutable.dirty_botplay = true;
+    Ok(ScriptValue::Null)
+}
+fn api_practice(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.mutable.practice_mode))
+}
+fn api_set_practice(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.practice_mode = arg_bool(args, 0)?;
+    ctx.mutable.dirty_practice = true;
+    Ok(ScriptValue::Null)
+}
+fn api_ghost_tap(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.mutable.ghost_tap))
+}
+fn api_set_ghost_tap(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.ghost_tap = arg_bool(args, 0)?;
+    ctx.mutable.dirty_ghost_tap = true;
+    Ok(ScriptValue::Null)
+}
+fn api_paused(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.snapshot.paused))
+}
+fn api_in_cutscene(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.mutable.in_cutscene))
+}
+fn api_set_cutscene(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.in_cutscene = arg_bool(args, 0)?;
+    ctx.mutable.dirty_cutscene = true;
+    Ok(ScriptValue::Null)
+}
 
-    engine.register_fn("botplay", || with_ctx(|c| c.mutable.botplay));
-    engine.register_fn("set_botplay", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.botplay = enabled;
-            c.mutable.dirty_botplay = true;
-        })
+fn api_start_dialogue(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.snapshot.in_dialogue = true;
+    ctx.commands
+        .push(ScriptCommand::StartDialogue(arg_str(args, 0)?.to_string()));
+    Ok(ScriptValue::Null)
+}
+fn api_skip_dialogue(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SkipDialogue);
+    Ok(ScriptValue::Null)
+}
+fn api_in_dialogue(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.snapshot.in_dialogue))
+}
+fn api_dialogue_speaker(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::String(ctx.snapshot.dialogue_speaker.clone()))
+}
+fn api_dialogue_box(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::String(ctx.snapshot.dialogue_box.clone()))
+}
+fn api_dialogue_music(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands
+        .push(ScriptCommand::SetDialogueMusic(arg_bool(args, 0)?));
+    Ok(ScriptValue::Null)
+}
+fn api_dialogue_box_anim(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands
+        .push(ScriptCommand::PlayDialogueBoxAnim(arg_str(args, 0)?.to_string()));
+    Ok(ScriptValue::Null)
+}
+
+fn api_play_video(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let path = arg_str(args, 0)?.to_string();
+    let is_ending = if args.len() >= 2 {
+        let kind = arg_str(args, 1)?.trim();
+        kind.eq_ignore_ascii_case("ending") || kind.eq_ignore_ascii_case("end")
+    } else {
+        false
+    };
+    ctx.snapshot.in_video = true;
+    ctx.commands
+        .push(ScriptCommand::PlayVideo { path, is_ending });
+    Ok(ScriptValue::Null)
+}
+fn api_skip_video(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SkipVideo);
+    Ok(ScriptValue::Null)
+}
+fn api_in_video(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.snapshot.in_video))
+}
+
+fn api_can_pause(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.mutable.can_pause))
+}
+fn api_set_can_pause(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.can_pause = arg_bool(args, 0)?;
+    ctx.mutable.dirty_can_pause = true;
+    Ok(ScriptValue::Null)
+}
+fn api_lock_keys(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.keys_disabled = arg_bool(args, 0)?;
+    ctx.mutable.dirty_keys_disabled = true;
+    Ok(ScriptValue::Null)
+}
+
+fn api_scroll(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.mutable.scroll_speed))
+}
+fn api_set_scroll(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.scroll_speed = arg_f64(args, 0)?;
+    ctx.mutable.dirty_scroll_speed = true;
+    Ok(ScriptValue::Null)
+}
+fn api_tween_scroll(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::TweenScrollSpeed {
+        target: arg_f64(args, 0)?,
+        duration_s: arg_f64(args, 1)?.max(0.0),
+        ease: arg_str(args, 2)?.to_string(),
     });
-    engine.register_fn("practice", || with_ctx(|c| c.mutable.practice_mode));
-    engine.register_fn("set_practice", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.practice_mode = enabled;
-            c.mutable.dirty_practice = true;
-        })
-    });
-    engine.register_fn("ghost_tap", || with_ctx(|c| c.mutable.ghost_tap));
-    engine.register_fn("set_ghost_tap", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.ghost_tap = enabled;
-            c.mutable.dirty_ghost_tap = true;
-        })
-    });
-    engine.register_fn("paused", || with_ctx(|c| c.snapshot.paused));
-    engine.register_fn("in_cutscene", || with_ctx(|c| c.mutable.in_cutscene));
-    engine.register_fn("set_cutscene", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.in_cutscene = enabled;
-            c.mutable.dirty_cutscene = true;
-        })
-    });
-    for name in ["start_dialogue", "start_conversation"] {
-        engine.register_fn(name, |id: &str| {
-            with_ctx(|c| {
-                c.snapshot.in_dialogue = true;
-                c.commands.push(ScriptCommand::StartDialogue(id.to_string()));
-            })
-        });
+    Ok(ScriptValue::Null)
+}
+
+fn api_rate(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.mutable.playback_rate))
+}
+fn api_set_rate(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.playback_rate = arg_f64(args, 0)?.max(0.05);
+    ctx.mutable.dirty_playback_rate = true;
+    Ok(ScriptValue::Null)
+}
+
+fn api_downscroll(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.mutable.downscroll))
+}
+fn api_set_downscroll(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.downscroll = arg_bool(args, 0)?;
+    ctx.mutable.dirty_downscroll = true;
+    Ok(ScriptValue::Null)
+}
+fn api_middlescroll(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    if args.is_empty() {
+        Ok(ScriptValue::Bool(ctx.mutable.middlescroll))
+    } else {
+        ctx.mutable.middlescroll = arg_bool(args, 0)?;
+        ctx.mutable.dirty_middlescroll = true;
+        Ok(ScriptValue::Null)
     }
-    for name in ["skip_dialogue", "end_dialogue"] {
-        engine.register_fn(name, || {
-            with_ctx(|c| c.commands.push(ScriptCommand::SkipDialogue))
+}
+fn api_swap_strums(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.mutable.strums_swapped = arg_bool(args, 0)?;
+    ctx.mutable.dirty_strums_swapped = true;
+    Ok(ScriptValue::Null)
+}
+
+fn api_status(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands
+        .push(ScriptCommand::SetStatus(arg_str(args, 0)?.to_string()));
+    Ok(ScriptValue::Null)
+}
+fn api_set_score_text(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let text = arg_str(args, 0)?;
+    let val = (!text.is_empty()).then(|| text.to_string());
+    ctx.commands.push(ScriptCommand::SetScoreText(val));
+    Ok(ScriptValue::Null)
+}
+fn api_clear_score_text(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SetScoreText(None));
+    Ok(ScriptValue::Null)
+}
+fn api_hud_visible(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let visible = arg_bool(args, 0)?;
+    if args.len() >= 2 {
+        ctx.commands.push(ScriptCommand::FadeHud {
+            alpha: if visible { 1.0 } else { 0.0 },
+            duration_s: arg_f64(args, 1)?.max(0.0),
+            ease: "quadOut".to_string(),
         });
+    } else {
+        ctx.commands.push(ScriptCommand::SetHudVisible(visible));
     }
-    engine.register_fn("in_dialogue", || with_ctx(|c| c.snapshot.in_dialogue));
-    engine.register_fn("dialogue_speaker", || {
-        with_ctx(|c| c.snapshot.dialogue_speaker.clone())
+    Ok(ScriptValue::Null)
+}
+fn api_hud_fade(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let alpha = arg_f32(args, 0)?.clamp(0.0, 1.0);
+    let duration_s = arg_f64(args, 1)?.max(0.0);
+    let ease = if args.len() >= 3 { arg_str(args, 2)? } else { "linear" };
+    ctx.commands.push(ScriptCommand::FadeHud {
+        alpha,
+        duration_s,
+        ease: ease.to_string(),
     });
-    engine.register_fn("dialogue_box", || {
-        with_ctx(|c| c.snapshot.dialogue_box.clone())
-    });
-    engine.register_fn("dialogue_music", |playing: bool| {
-        with_ctx(|c| c.commands.push(ScriptCommand::SetDialogueMusic(playing)))
-    });
-    engine.register_fn("dialogue_box_anim", |anim: &str| {
-        with_ctx(|c| c.commands.push(ScriptCommand::PlayDialogueBoxAnim(anim.to_string())))
-    });
-    engine.register_fn("play_video", |path: &str| {
-        with_ctx(|c| {
-            c.snapshot.in_video = true;
-            c.commands.push(ScriptCommand::PlayVideo {
-                path: path.to_string(),
-                is_ending: false,
-            });
-        })
-    });
-    engine.register_fn("play_video", |path: &str, kind: &str| {
-        let is_ending = kind.trim().eq_ignore_ascii_case("ending")
-            || kind.trim().eq_ignore_ascii_case("end");
-        with_ctx(|c| {
-            c.snapshot.in_video = true;
-            c.commands.push(ScriptCommand::PlayVideo {
-                path: path.to_string(),
-                is_ending,
-            });
-        })
-    });
-    engine.register_fn("skip_video", || {
-        with_ctx(|c| c.commands.push(ScriptCommand::SkipVideo))
-    });
-    engine.register_fn("in_video", || with_ctx(|c| c.snapshot.in_video));
-    engine.register_fn("can_pause", || with_ctx(|c| c.mutable.can_pause));
-    engine.register_fn("set_can_pause", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.can_pause = enabled;
-            c.mutable.dirty_can_pause = true;
-        })
-    });
-    engine.register_fn("lock_keys", |disabled: bool| {
-        with_ctx(|c| {
-            c.mutable.keys_disabled = disabled;
-            c.mutable.dirty_keys_disabled = true;
-        })
-    });
+    Ok(ScriptValue::Null)
+}
 
-    engine.register_fn("scroll", || with_ctx(|c| c.mutable.scroll_speed));
-    engine.register_fn("set_scroll", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let speed = dyn_to_f64(&v)?;
-        with_ctx(|c| {
-            c.mutable.scroll_speed = speed;
-            c.mutable.dirty_scroll_speed = true;
-        })
-    });
-    engine.register_fn("tween_scroll", |v: Dynamic, secs: Dynamic, ease: &str| -> Result<(), Box<EvalAltResult>> {
-        let target = dyn_to_f64(&v)?;
-        let dur = dyn_to_f64(&secs)?;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::TweenScrollSpeed {
-                target,
-                duration_s: dur.max(0.0),
-                ease: ease.to_string(),
-            });
-        })
-    });
+fn api_get_inst_vol(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.snapshot.inst_vol))
+}
+fn api_sound_volume(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.snapshot.master_volume))
+}
+fn api_get_vocals_vol(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(
+        (ctx.snapshot.p_vocal_vol + ctx.snapshot.o_vocal_vol) * 0.5,
+    ))
+}
+fn api_get_p_vocal_vol(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.snapshot.p_vocal_vol))
+}
+fn api_get_o_vocal_vol(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Float(ctx.snapshot.o_vocal_vol))
+}
 
-    engine.register_fn("rate", || with_ctx(|c| c.mutable.playback_rate));
-    engine.register_fn("set_rate", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let rate = dyn_to_f64(&v)?.max(0.05);
-        with_ctx(|c| {
-            c.mutable.playback_rate = rate;
-            c.mutable.dirty_playback_rate = true;
-        })
+fn api_inst_vol(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SetAudioVolumes {
+        inst: Some(arg_f32(args, 0)?),
+        vocals: None,
+        player_vocal: None,
+        opponent_vocal: None,
     });
+    Ok(ScriptValue::Null)
+}
+fn api_vocals_vol(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SetAudioVolumes {
+        inst: None,
+        vocals: Some(arg_f32(args, 0)?),
+        player_vocal: None,
+        opponent_vocal: None,
+    });
+    Ok(ScriptValue::Null)
+}
+fn api_p_vocal_vol(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SetAudioVolumes {
+        inst: None,
+        vocals: None,
+        player_vocal: Some(arg_f32(args, 0)?),
+        opponent_vocal: None,
+    });
+    Ok(ScriptValue::Null)
+}
+fn api_o_vocal_vol(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::SetAudioVolumes {
+        inst: None,
+        vocals: None,
+        player_vocal: None,
+        opponent_vocal: Some(arg_f32(args, 0)?),
+    });
+    Ok(ScriptValue::Null)
+}
 
-    engine.register_fn("downscroll", || with_ctx(|c| c.mutable.downscroll));
-    engine.register_fn("set_downscroll", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.downscroll = enabled;
-            c.mutable.dirty_downscroll = true;
-        })
+fn api_add_note(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::AddNote {
+        time_ms: arg_f64(args, 0)?,
+        dir: arg_usize(args, 1)?,
+        length_ms: arg_f64(args, 2)?.max(0.0),
+        kind: arg_str(args, 3)?.to_string(),
     });
-    engine.register_fn("middlescroll", || with_ctx(|c| c.mutable.middlescroll));
-    engine.register_fn("middlescroll", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.middlescroll = enabled;
-            c.mutable.dirty_middlescroll = true;
-        })
+    Ok(ScriptValue::Null)
+}
+fn api_trigger_event(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let name = arg_str(args, 0)?.to_string();
+    let json = arg(args, 1)?.to_json();
+    ctx.commands
+        .push(ScriptCommand::TriggerSongEvent { name, value: json });
+    Ok(ScriptValue::Null)
+}
+fn api_sfx(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let volume = if args.len() >= 2 { arg_f32(args, 1)? } else { 1.0 };
+    ctx.commands.push(ScriptCommand::PlaySfx {
+        path: arg_str(args, 0)?.to_string(),
+        volume,
     });
-    engine.register_fn("set_middlescroll", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.middlescroll = enabled;
-            c.mutable.dirty_middlescroll = true;
-        })
+    Ok(ScriptValue::Null)
+}
+fn api_preload_snd(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::PreloadSound {
+        path: arg_str(args, 0)?.to_string(),
     });
-    engine.register_fn("swap_strums", |enabled: bool| {
-        with_ctx(|c| {
-            c.mutable.strums_swapped = enabled;
-            c.mutable.dirty_strums_swapped = true;
-        })
-    });
+    Ok(ScriptValue::Null)
+}
 
-    engine.register_fn("status", |text: &str| {
-        with_ctx(|c| c.commands.push(ScriptCommand::SetStatus(text.to_string())))
+fn api_play_snd(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let tag = arg_str(args, 0)?.to_string();
+    let path = arg_str(args, 1)?.to_string();
+    let volume = if args.len() >= 3 { arg_f32(args, 2)? } else { 1.0 };
+    let looped = if args.len() >= 4 { arg_bool(args, 3)? } else { false };
+    let pitch = if args.len() >= 5 {
+        arg_f32(args, 4)?.max(0.05)
+    } else {
+        1.0
+    };
+    ctx.snapshot.sound_volumes.insert(tag.clone(), volume);
+    ctx.commands.push(ScriptCommand::PlaySound {
+        tag,
+        path,
+        volume,
+        looped,
+        pitch,
     });
-    engine.register_fn("set_score_text", |text: &str| {
-        with_ctx(|c| {
-            let val = if text.is_empty() { None } else { Some(text.to_string()) };
-            c.commands.push(ScriptCommand::SetScoreText(val));
-        })
+    Ok(ScriptValue::Null)
+}
+fn api_stop_snd(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let tag = arg_str(args, 0)?;
+    ctx.snapshot.active_sounds.retain(|s| s != tag);
+    ctx.snapshot.sound_volumes.remove(tag);
+    ctx.commands.push(ScriptCommand::StopSound(tag.to_string()));
+    Ok(ScriptValue::Null)
+}
+fn api_pause_snd(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::PauseSound {
+        tag: arg_str(args, 0)?.to_string(),
+        paused: true,
     });
-    engine.register_fn("clear_score_text", || {
-        with_ctx(|c| c.commands.push(ScriptCommand::SetScoreText(None)))
+    Ok(ScriptValue::Null)
+}
+fn api_resume_snd(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::PauseSound {
+        tag: arg_str(args, 0)?.to_string(),
+        paused: false,
     });
-    engine.register_fn("hud_visible", |visible: bool| {
-        with_ctx(|c| c.commands.push(ScriptCommand::SetHudVisible(visible)))
+    Ok(ScriptValue::Null)
+}
+fn api_snd_vol(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let tag = arg_str(args, 0)?;
+    let vol = arg_f32(args, 1)?;
+    ctx.snapshot.sound_volumes.insert(tag.to_string(), vol);
+    ctx.commands.push(ScriptCommand::SetSoundParam {
+        tag: tag.to_string(),
+        volume: Some(vol),
+        pitch: None,
     });
-    engine.register_fn(
-        "hud_visible",
-        |visible: bool, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-            let duration_s = dyn_to_f64(&secs)?.max(0.0);
-            with_ctx(|c| {
-                c.commands.push(ScriptCommand::FadeHud {
-                    alpha: if visible { 1.0 } else { 0.0 },
-                    duration_s,
-                    ease: "quadOut".to_string(),
-                });
-            })
-        },
-    );
-    engine.register_fn(
-        "hud_fade",
-        |alpha: Dynamic, secs: Dynamic| -> Result<(), Box<EvalAltResult>> {
-            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
-            let duration_s = dyn_to_f64(&secs)?.max(0.0);
-            with_ctx(|c| {
-                c.commands.push(ScriptCommand::FadeHud {
-                    alpha,
-                    duration_s,
-                    ease: "linear".to_string(),
-                });
-            })
-        },
-    );
-    engine.register_fn(
-        "hud_fade",
-        |alpha: Dynamic, secs: Dynamic, ease: &str| -> Result<(), Box<EvalAltResult>> {
-            let alpha = (dyn_to_f64(&alpha)? as f32).clamp(0.0, 1.0);
-            let duration_s = dyn_to_f64(&secs)?.max(0.0);
-            with_ctx(|c| {
-                c.commands.push(ScriptCommand::FadeHud {
-                    alpha,
-                    duration_s,
-                    ease: ease.to_string(),
-                });
-            })
-        },
-    );
+    Ok(ScriptValue::Null)
+}
+fn api_snd_pitch(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let pitch = arg_f32(args, 1)?.max(0.05);
+    ctx.commands.push(ScriptCommand::SetSoundParam {
+        tag: arg_str(args, 0)?.to_string(),
+        volume: None,
+        pitch: Some(pitch),
+    });
+    Ok(ScriptValue::Null)
+}
+fn api_snd_playing(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let tag = arg_str(args, 0)?;
+    Ok(ScriptValue::Bool(
+        ctx.snapshot.active_sounds.iter().any(|s| s == tag),
+    ))
+}
 
-    engine.register_fn("get_inst_vol", || with_ctx(|c| c.snapshot.inst_vol));
-    engine.register_fn("sound_volume", || with_ctx(|c| c.snapshot.master_volume));
-    engine.register_fn("get_vocals_vol", || {
-        with_ctx(|c| (c.snapshot.p_vocal_vol + c.snapshot.o_vocal_vol) * 0.5)
+fn api_end_song(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::EndSong);
+    Ok(ScriptValue::Null)
+}
+fn api_restart_song(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::RestartSong);
+    Ok(ScriptValue::Null)
+}
+fn api_pause_song(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::PauseSong);
+    Ok(ScriptValue::Null)
+}
+fn api_resume_song(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::ResumeSong);
+    Ok(ScriptValue::Null)
+}
+fn api_seek(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands
+        .push(ScriptCommand::SeekSong(arg_f64(args, 0)?.max(0.0)));
+    Ok(ScriptValue::Null)
+}
+fn api_countdown(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    ctx.commands.push(ScriptCommand::ControlCountdown {
+        action: arg_str(args, 0)?.to_string(),
     });
-    engine.register_fn("get_p_vocal_vol", || with_ctx(|c| c.snapshot.p_vocal_vol));
-    engine.register_fn("get_o_vocal_vol", || with_ctx(|c| c.snapshot.o_vocal_vol));
-    engine.register_fn("inst_vol", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let vol = dyn_to_f64(&v)? as f32;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::SetAudioVolumes {
-                inst: Some(vol),
-                vocals: None,
-                player_vocal: None,
-                opponent_vocal: None,
-            });
-        })
-    });
-    engine.register_fn("vocals_vol", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let vol = dyn_to_f64(&v)? as f32;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::SetAudioVolumes {
-                inst: None,
-                vocals: Some(vol),
-                player_vocal: None,
-                opponent_vocal: None,
-            });
-        })
-    });
-    engine.register_fn("p_vocal_vol", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let vol = dyn_to_f64(&v)? as f32;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::SetAudioVolumes {
-                inst: None,
-                vocals: None,
-                player_vocal: Some(vol),
-                opponent_vocal: None,
-            });
-        })
-    });
-    engine.register_fn("o_vocal_vol", |v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let vol = dyn_to_f64(&v)? as f32;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::SetAudioVolumes {
-                inst: None,
-                vocals: None,
-                player_vocal: None,
-                opponent_vocal: Some(vol),
-            });
-        })
-    });
+    Ok(ScriptValue::Null)
+}
 
-    engine.register_fn("add_note", |time_ms: Dynamic, dir: Dynamic, len_ms: Dynamic, kind: &str| -> Result<(), Box<EvalAltResult>> {
-        let time_ms = dyn_to_f64(&time_ms)?;
-        let dir = dyn_to_usize(&dir)?;
-        let length_ms = dyn_to_f64(&len_ms)?.max(0.0);
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::AddNote {
-                time_ms,
-                dir,
-                length_ms,
-                kind: kind.to_string(),
-            });
-        })
+fn api_story_mode(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Bool(ctx.snapshot.story_mode))
+}
+fn api_set_story_mode(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let enabled = arg_bool(args, 0)?;
+    ctx.snapshot.story_mode = enabled;
+    ctx.commands.push(ScriptCommand::SetPlaylist {
+        story_mode: Some(enabled),
+        songs: None,
+        score: None,
     });
-    engine.register_fn("trigger_event", |name: &str, val: Dynamic| {
-        let json = ScriptValue::from_rhai(&val).to_json();
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::TriggerSongEvent {
-                name: name.to_string(),
-                value: json,
-            });
-        })
+    Ok(ScriptValue::Null)
+}
+fn api_playlist(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::List(
+        ctx.snapshot
+            .playlist_songs
+            .iter()
+            .cloned()
+            .map(ScriptValue::String)
+            .collect(),
+    ))
+}
+fn api_set_playlist(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let list: Vec<String> = arg_list(args, 0)?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    ctx.snapshot.playlist_songs = list.clone();
+    ctx.commands.push(ScriptCommand::SetPlaylist {
+        story_mode: None,
+        songs: Some(list),
+        score: None,
     });
-    engine.register_fn("sfx", |path: &str, vol: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let volume = dyn_to_f64(&vol)? as f32;
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::PlaySfx {
-                path: path.to_string(),
-                volume,
-            });
-        })
+    Ok(ScriptValue::Null)
+}
+fn api_campaign_score(ctx: &mut ScriptContext, _: &[ScriptValue]) -> Result<ScriptValue, String> {
+    Ok(ScriptValue::Int(i64::from(ctx.snapshot.campaign_score)))
+}
+fn api_set_campaign_score(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let score = arg_i64(args, 0)? as i32;
+    ctx.snapshot.campaign_score = score;
+    ctx.commands.push(ScriptCommand::SetPlaylist {
+        story_mode: None,
+        songs: None,
+        score: Some(score),
     });
-    engine.register_fn("sfx", |path: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::PlaySfx {
-                path: path.to_string(),
-                volume: 1.0,
-            });
-        })
-    });
-    for name in ["preload_snd", "preload_sfx"] {
-        engine.register_fn(name, |path: &str| {
-            with_ctx(|c| {
-                c.commands.push(ScriptCommand::PreloadSound {
-                    path: path.to_string(),
-                });
-            })
-        });
-    }
+    Ok(ScriptValue::Null)
+}
 
-    // Tagged audio channels
-    register_tagged_sound_fns(engine, "play_snd");
-    register_tagged_sound_fns(engine, "sound");
-    for name in ["stop_snd", "stop_sound"] {
-        engine.register_fn(name, |tag: &str| {
-            with_ctx(|c| {
-                c.snapshot.active_sounds.retain(|s| s != tag);
-                c.snapshot.sound_volumes.remove(tag);
-                c.commands.push(ScriptCommand::StopSound(tag.to_string()));
-            })
-        });
-    }
-    engine.register_fn("pause_snd", |tag: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::PauseSound {
-                tag: tag.to_string(),
-                paused: true,
-            });
-        })
+fn api_load_song(ctx: &mut ScriptContext, args: &[ScriptValue]) -> Result<ScriptValue, String> {
+    let song_id = arg_str(args, 0)?.to_string();
+    let difficulty = if args.len() >= 2 {
+        Some(arg_str(args, 1)?.to_string())
+    } else {
+        None
+    };
+    let variation = if args.len() >= 3 {
+        Some(arg_str(args, 2)?.to_string())
+    } else {
+        None
+    };
+    ctx.commands.push(ScriptCommand::LoadSong {
+        song_id,
+        difficulty,
+        variation,
     });
-    engine.register_fn("resume_snd", |tag: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::PauseSound {
-                tag: tag.to_string(),
-                paused: false,
-            });
-        })
-    });
-    engine.register_fn("snd_vol", |tag: &str, v: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let vol = dyn_to_f64(&v)? as f32;
-        with_ctx(|c| {
-            c.snapshot.sound_volumes.insert(tag.to_string(), vol);
-            c.commands.push(ScriptCommand::SetSoundParam {
-                tag: tag.to_string(),
-                volume: Some(vol),
-                pitch: None,
-            });
-        })
-    });
-    engine.register_fn("snd_pitch", |tag: &str, p: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let pitch = (dyn_to_f64(&p)? as f32).max(0.05);
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::SetSoundParam {
-                tag: tag.to_string(),
-                volume: None,
-                pitch: Some(pitch),
-            });
-        })
-    });
-    engine.register_fn("snd_playing", |tag: &str| {
-        with_ctx(|c| c.snapshot.active_sounds.iter().any(|s| s == tag))
-    });
+    Ok(ScriptValue::Null)
+}
 
-    // Flow, countdown & playlist
-    engine.register_fn("end_song", || with_ctx(|c| c.commands.push(ScriptCommand::EndSong)));
-    engine.register_fn("restart_song", || with_ctx(|c| c.commands.push(ScriptCommand::RestartSong)));
-    engine.register_fn("pause_song", || with_ctx(|c| c.commands.push(ScriptCommand::PauseSong)));
-    engine.register_fn("resume_song", || with_ctx(|c| c.commands.push(ScriptCommand::ResumeSong)));
-    engine.register_fn("seek", |ms: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let ms = dyn_to_f64(&ms)?.max(0.0);
-        with_ctx(|c| c.commands.push(ScriptCommand::SeekSong(ms)))
-    });
-    engine.register_fn("countdown", |action: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::ControlCountdown {
-                action: action.to_string(),
-            });
-        })
-    });
-
-    engine.register_fn("story_mode", || with_ctx(|c| c.snapshot.story_mode));
-    engine.register_fn("set_story_mode", |enabled: bool| {
-        with_ctx(|c| {
-            c.snapshot.story_mode = enabled;
-            c.commands.push(ScriptCommand::SetPlaylist {
-                story_mode: Some(enabled),
-                songs: None,
-                score: None,
-            });
-        })
-    });
-    engine.register_fn("playlist", || {
-        with_ctx(|c| {
-            c.snapshot
-                .playlist_songs
-                .iter()
-                .cloned()
-                .map(Dynamic::from)
-                .collect::<rhai::Array>()
-        })
-    });
-    engine.register_fn("set_playlist", |songs: rhai::Array| {
-        let list: Vec<String> = songs
-            .into_iter()
-            .filter_map(|v| v.into_string().ok())
-            .collect();
-        with_ctx(|c| {
-            c.snapshot.playlist_songs = list.clone();
-            c.commands.push(ScriptCommand::SetPlaylist {
-                story_mode: None,
-                songs: Some(list),
-                score: None,
-            });
-        })
-    });
-    engine.register_fn("campaign_score", || with_ctx(|c| i64::from(c.snapshot.campaign_score)));
-    engine.register_fn("set_campaign_score", |score: Dynamic| -> Result<(), Box<EvalAltResult>> {
-        let score = dyn_to_f64(&score)? as i32;
-        with_ctx(|c| {
-            c.snapshot.campaign_score = score;
-            c.commands.push(ScriptCommand::SetPlaylist {
-                story_mode: None,
-                songs: None,
-                score: Some(score),
-            });
-        })
-    });
-
-    engine.register_fn("load_song", |song_id: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::LoadSong {
-                song_id: song_id.to_string(),
-                difficulty: None,
-                variation: None,
-            });
-        })
-    });
-    engine.register_fn("load_song", |song_id: &str, diff: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::LoadSong {
-                song_id: song_id.to_string(),
-                difficulty: Some(diff.to_string()),
-                variation: None,
-            });
-        })
-    });
-    engine.register_fn("load_song", |song_id: &str, diff: &str, var: &str| {
-        with_ctx(|c| {
-            c.commands.push(ScriptCommand::LoadSong {
-                song_id: song_id.to_string(),
-                difficulty: Some(diff.to_string()),
-                variation: Some(var.to_string()),
-            });
-        })
-    });
+pub(crate) fn api_entries() -> Vec<ScriptApiEntry> {
+    vec![
+        ScriptApiEntry::new(&["hp"], &[0], api_hp),
+        ScriptApiEntry::new(&["set_hp"], &[1], api_set_hp),
+        ScriptApiEntry::new(&["add_hp"], &[1], api_add_hp),
+        ScriptApiEntry::new(&["score"], &[0], api_score),
+        ScriptApiEntry::new(&["set_score"], &[1], api_set_score),
+        ScriptApiEntry::new(&["add_score"], &[1], api_add_score),
+        ScriptApiEntry::new(&["combo"], &[0], api_combo),
+        ScriptApiEntry::new(&["max_combo"], &[0], api_max_combo),
+        ScriptApiEntry::new(&["misses"], &[0], api_misses),
+        ScriptApiEntry::new(&["sicks"], &[0], api_sicks),
+        ScriptApiEntry::new(&["goods"], &[0], api_goods),
+        ScriptApiEntry::new(&["bads"], &[0], api_bads),
+        ScriptApiEntry::new(&["shits"], &[0], api_shits),
+        ScriptApiEntry::new(&["hit_count"], &[0], api_hit_count),
+        ScriptApiEntry::new(&["note_count"], &[0], api_note_count),
+        ScriptApiEntry::new(&["acc"], &[0], api_acc),
+        ScriptApiEntry::new(&["rank"], &[0], api_rank),
+        ScriptApiEntry::new(&["deaths"], &[0], api_deaths),
+        ScriptApiEntry::new(&["botplay"], &[0], api_botplay),
+        ScriptApiEntry::new(&["set_botplay"], &[1], api_set_botplay),
+        ScriptApiEntry::new(&["practice"], &[0], api_practice),
+        ScriptApiEntry::new(&["set_practice"], &[1], api_set_practice),
+        ScriptApiEntry::new(&["ghost_tap"], &[0], api_ghost_tap),
+        ScriptApiEntry::new(&["set_ghost_tap"], &[1], api_set_ghost_tap),
+        ScriptApiEntry::new(&["paused"], &[0], api_paused),
+        ScriptApiEntry::new(&["in_cutscene"], &[0], api_in_cutscene),
+        ScriptApiEntry::new(&["set_cutscene"], &[1], api_set_cutscene),
+        ScriptApiEntry::new(&["start_dialogue", "start_conversation"], &[1], api_start_dialogue),
+        ScriptApiEntry::new(&["skip_dialogue", "end_dialogue"], &[0], api_skip_dialogue),
+        ScriptApiEntry::new(&["in_dialogue"], &[0], api_in_dialogue),
+        ScriptApiEntry::new(&["dialogue_speaker"], &[0], api_dialogue_speaker),
+        ScriptApiEntry::new(&["dialogue_box"], &[0], api_dialogue_box),
+        ScriptApiEntry::new(&["dialogue_music"], &[1], api_dialogue_music),
+        ScriptApiEntry::new(&["dialogue_box_anim"], &[1], api_dialogue_box_anim),
+        ScriptApiEntry::new(&["play_video"], &[1, 2], api_play_video),
+        ScriptApiEntry::new(&["skip_video"], &[0], api_skip_video),
+        ScriptApiEntry::new(&["in_video"], &[0], api_in_video),
+        ScriptApiEntry::new(&["can_pause"], &[0], api_can_pause),
+        ScriptApiEntry::new(&["set_can_pause"], &[1], api_set_can_pause),
+        ScriptApiEntry::new(&["lock_keys"], &[1], api_lock_keys),
+        ScriptApiEntry::new(&["scroll"], &[0], api_scroll),
+        ScriptApiEntry::new(&["set_scroll"], &[1], api_set_scroll),
+        ScriptApiEntry::new(&["tween_scroll"], &[3], api_tween_scroll),
+        ScriptApiEntry::new(&["rate"], &[0], api_rate),
+        ScriptApiEntry::new(&["set_rate"], &[1], api_set_rate),
+        ScriptApiEntry::new(&["downscroll"], &[0], api_downscroll),
+        ScriptApiEntry::new(&["set_downscroll"], &[1], api_set_downscroll),
+        ScriptApiEntry::new(&["middlescroll"], &[0, 1], api_middlescroll),
+        ScriptApiEntry::new(&["set_middlescroll"], &[1], api_middlescroll),
+        ScriptApiEntry::new(&["swap_strums"], &[1], api_swap_strums),
+        ScriptApiEntry::new(&["status"], &[1], api_status),
+        ScriptApiEntry::new(&["set_score_text"], &[1], api_set_score_text),
+        ScriptApiEntry::new(&["clear_score_text"], &[0], api_clear_score_text),
+        ScriptApiEntry::new(&["hud_visible"], &[1, 2], api_hud_visible),
+        ScriptApiEntry::new(&["hud_fade"], &[2, 3], api_hud_fade),
+        ScriptApiEntry::new(&["get_inst_vol"], &[0], api_get_inst_vol),
+        ScriptApiEntry::new(&["sound_volume"], &[0], api_sound_volume),
+        ScriptApiEntry::new(&["get_vocals_vol"], &[0], api_get_vocals_vol),
+        ScriptApiEntry::new(&["get_p_vocal_vol"], &[0], api_get_p_vocal_vol),
+        ScriptApiEntry::new(&["get_o_vocal_vol"], &[0], api_get_o_vocal_vol),
+        ScriptApiEntry::new(&["inst_vol"], &[1], api_inst_vol),
+        ScriptApiEntry::new(&["vocals_vol"], &[1], api_vocals_vol),
+        ScriptApiEntry::new(&["p_vocal_vol"], &[1], api_p_vocal_vol),
+        ScriptApiEntry::new(&["o_vocal_vol"], &[1], api_o_vocal_vol),
+        ScriptApiEntry::new(&["add_note"], &[4], api_add_note),
+        ScriptApiEntry::new(&["trigger_event"], &[2], api_trigger_event),
+        ScriptApiEntry::new(&["sfx"], &[1, 2], api_sfx),
+        ScriptApiEntry::new(&["preload_snd", "preload_sfx"], &[1], api_preload_snd),
+        ScriptApiEntry::new(&["play_snd", "sound"], &[2, 3, 4, 5], api_play_snd),
+        ScriptApiEntry::new(&["stop_snd", "stop_sound"], &[1], api_stop_snd),
+        ScriptApiEntry::new(&["pause_snd"], &[1], api_pause_snd),
+        ScriptApiEntry::new(&["resume_snd"], &[1], api_resume_snd),
+        ScriptApiEntry::new(&["snd_vol"], &[2], api_snd_vol),
+        ScriptApiEntry::new(&["snd_pitch"], &[2], api_snd_pitch),
+        ScriptApiEntry::new(&["snd_playing"], &[1], api_snd_playing),
+        ScriptApiEntry::new(&["end_song"], &[0], api_end_song),
+        ScriptApiEntry::new(&["restart_song"], &[0], api_restart_song),
+        ScriptApiEntry::new(&["pause_song"], &[0], api_pause_song),
+        ScriptApiEntry::new(&["resume_song"], &[0], api_resume_song),
+        ScriptApiEntry::new(&["seek"], &[1], api_seek),
+        ScriptApiEntry::new(&["countdown"], &[1], api_countdown),
+        ScriptApiEntry::new(&["story_mode"], &[0], api_story_mode),
+        ScriptApiEntry::new(&["set_story_mode"], &[1], api_set_story_mode),
+        ScriptApiEntry::new(&["playlist"], &[0], api_playlist),
+        ScriptApiEntry::new(&["set_playlist"], &[1], api_set_playlist),
+        ScriptApiEntry::new(&["campaign_score"], &[0], api_campaign_score),
+        ScriptApiEntry::new(&["set_campaign_score"], &[1], api_set_campaign_score),
+        ScriptApiEntry::new(&["load_song"], &[1, 2, 3], api_load_song),
+    ]
 }

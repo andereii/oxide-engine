@@ -13,14 +13,12 @@ use crate::utils::constants::{
     RHAI_MAX_STRING_SIZE, SCRIPT_EXT_RHAI,
 };
 
-use super::api::camera_hud::register_camera_hud_api;
-use super::api::core::{register_core_and_song_api, register_math_and_rng_api};
-use super::api::gameplay::register_gameplay_api;
-use super::api::notes::register_notes_api;
-use super::api::shaders::register_shader_api;
-use super::api::stage::{register_character_api, register_props_api};
-use super::api::text_tweens::register_text_tweens_timers_and_store_api;
-use super::context::{RhaiEvent, register_event_type, with_tls_context};
+use super::api::collect_api_entries;
+use super::context::{
+    RhaiEvent, register_event_type, script_value_from_rhai, script_value_into_rhai,
+    with_tls_context,
+};
+use super::rhai_api::register_api_bindings;
 use crate::scripting::diagnostics::split_rhai_position_suffix;
 
 use super::rhai_resolver::{SharedVfsModuleResolver, VfsModuleResolver, vfs_rel_for_script};
@@ -40,15 +38,7 @@ fn build_configured_engine(resolver: Option<Arc<VfsModuleResolver>>) -> Arc<Engi
     }
 
     register_event_type(&mut engine);
-    register_core_and_song_api(&mut engine);
-    register_gameplay_api(&mut engine);
-    register_camera_hud_api(&mut engine);
-    register_character_api(&mut engine);
-    register_props_api(&mut engine);
-    register_notes_api(&mut engine);
-    register_text_tweens_timers_and_store_api(&mut engine);
-    register_math_and_rng_api(&mut engine);
-    register_shader_api(&mut engine);
+    register_api_bindings(&mut engine, &collect_api_entries());
 
     Arc::new(engine)
 }
@@ -296,7 +286,7 @@ impl ScriptInstance for RhaiScriptInstance {
         shared_event.snapshot_into(event);
 
         match call_res {
-            Ok(val) => Ok(ScriptValue::from_rhai(&val)),
+            Ok(val) => Ok(script_value_from_rhai(&val)),
             Err(err) => Err(runtime_failure(&self.id, &self.file_label, &fn_name, &err)),
         }
     }
@@ -322,7 +312,7 @@ impl ScriptInstance for RhaiScriptInstance {
         let ast = &self.ast;
         let scope = &mut self.rhai_scope;
         let state = &mut self.script_state;
-        let dyn_args: Vec<Dynamic> = args.iter().cloned().map(ScriptValue::into_rhai).collect();
+        let dyn_args: Vec<Dynamic> = args.iter().cloned().map(script_value_into_rhai).collect();
 
         let (returned_ctx, call_res) = with_tls_context(owned_ctx, || {
             let options = CallFnOptions::new()
@@ -345,7 +335,7 @@ impl ScriptInstance for RhaiScriptInstance {
         *ctx = returned_ctx;
 
         match call_res {
-            Ok(val) => Ok(ScriptValue::from_rhai(&val)),
+            Ok(val) => Ok(script_value_from_rhai(&val)),
             Err(err) => Err(runtime_failure(&self.id, &self.file_label, fn_name, &err)),
         }
     }

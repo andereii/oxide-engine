@@ -699,7 +699,7 @@ mod tests {
     use std::fs;
 
     use super::ScriptHost;
-    use super::super::api::ScriptStateSnapshot;
+    use super::super::api::{ScriptCommand, ScriptStateSnapshot};
     use super::super::backend::ScriptSource;
     use super::super::diagnostics::ScriptDiagKind;
     use super::super::events::{HookKind, ScriptEvent};
@@ -820,6 +820,124 @@ mod tests {
             "{:?}",
             host.runtime_errors
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn language_agnostic_api_preserves_overloads_aliases_events_and_errors() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxide-script-abi-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let code = r##"
+fn onCreate() {
+    log(42);
+    this.ticks = 0;
+    this.pong = 0;
+    fade("#FF000000", 0.5, true);
+    fade("#FFFFFFFF", 1.0, false, false);
+    hud_visible(false);
+    hud_visible(true, 0.25);
+    hud_fade(0.5, 0.3);
+    hud_fade(1.0, 0.2, "quadOut");
+    play_snd("a", "sounds/a.ogg");
+    play_snd("b", "sounds/b.ogg", 0.7, true, 1.25);
+    play_video("vids/intro.mp4");
+    play_video("vids/outro.mp4", "ending");
+    start_dialogue("senpai");
+    drop_shadow("bf", "#FFFF0000", 45, 10, 1.0, 0.5);
+    drop_shadow("dad", "#FF00FF00", 90, 5, 0.8, 0.4, 1.0, 2.0, 3.0, 4.0, "mask.png", 0.25);
+    wiggle("stage_bg", "dreamy", 1.0, 2.0, 3.0);
+    wiggle("stage_bg", 1, 1.0, 2.0, 3.0);
+    rain(1.0, 0.3, "#FF8899AA");
+    rain(1.0, 0.2, 0.5, "#FF8899AA", true);
+    spawn_sparrow("sp", "path/sp", 10, 20, 5, [#{ name: "idle", prefix: "idle0", fps: 24, offsets: [1, -2], indices: [0, 1] }]);
+    spawn_sparrow("sp_hud", "path/sp2", 10, 20, 5, [#{ name: "idle", prefix: "idle0", start: 2, end: 0 }], true);
+    char_spawn("extra", "bf", 100, 200, 3);
+    char_spawn("extra2", "dad", 100, 200, 3, 0.5, 0.5);
+    char_underlay("bf", "gf");
+    char_underlay("bf", "gf", 10, 20, -2);
+    register_notekind("customA");
+    register_notekind("customB", #{ description: "b", style: "pixel", no_anim: true, suffix: "-alt", scoreable: false, low_priority: true });
+    set_note(1, #{ time: 1500.0, dir: 2, len: 250.0, kind: "customB", scoreable: false });
+    let parsed = from_json("{\"v\":9}");
+    save_set("k", parsed.v);
+    global_set("gk", to_json(#{ ok: true }));
+    tween("cam", "zoom", 1.2, 0.5);
+    tween("cam", "zoom", 1.5, 0.1, "linear", "on_done");
+    after(0.05, "on_tick_arg", 99);
+    every(0.05, "on_tick_plain", 1);
+    emit("custom_ping", #{ count: 3 });
+}
+
+fn on_done() {
+    this.ticks += 10;
+}
+
+fn on_tick_arg(v) {
+    this.ticks += v;
+}
+
+fn on_tick_plain() {
+    this.ticks += 1;
+}
+
+fn custom_ping(ev) {
+    this.pong = ev.data.count;
+}
+
+fn onNoteHit(ev) {
+    ev.lane = 2;
+    if ev.dir == 2 && ev.note_kind == "alt" {
+        ev.cancel();
+    }
+}
+
+fn trigger_errors() {
+    lane_x(-1, 5.0);
+}
+
+fn trigger_type_error() {
+    set_hp("oops");
+}
+"##;
+
+        let mods = ModRegistry::discover(dir.clone(), dir.join("mods-missing"));
+        let mut host = ScriptHost::with_registry(mods.clone());
+        let source = ScriptSource::inline("abi.rhai", "demo", code);
+        host.load_source("rhai", source).unwrap();
+
+        let mut store = ModStore::with_root(&dir);
+        let mut ctx = host.make_context(ScriptStateSnapshot::empty_placeholder(), &mods, &mut store);
+        let mut create_ev = ScriptEvent::new(HookKind::Create);
+        host.dispatch(&HookKind::Create, &mut create_ev, &mut ctx);
+        assert!(host.runtime_errors.is_empty(), "{:?}", host.runtime_errors);
+
+        let mut hit_ev = ScriptEvent::new(HookKind::NoteHit).with_field("kind", "alt");
+        host.dispatch(&HookKind::NoteHit, &mut hit_ev, &mut ctx);
+        assert!(hit_ev.canceled);
+        assert_eq!(hit_ev.get_i64("dir"), Some(2));
+        assert_eq!(hit_ev.get_i64("lane"), Some(2));
+
+        host.tick_timers_and_tweens(0.2, &mut ctx);
+        let finalized = host.finalize_context(ctx, &mut store);
+        assert!(host.runtime_errors.is_empty(), "{:?}", host.runtime_errors);
+        assert_eq!(store.get("demo", "k"), Some(&serde_json::json!(9)));
+        assert!(store.has("global", "gk"));
+        assert!(finalized.commands.iter().any(|c| matches!(c, ScriptCommand::PlayVideo { is_ending: true, .. })));
+        assert!(finalized.commands.iter().any(|c| matches!(c, ScriptCommand::StartDialogue(id) if id == "senpai")));
+
+        let mut err_ctx = host.make_context(ScriptStateSnapshot::empty_placeholder(), &mods, &mut store);
+        host.call_fn_on_script("abi.rhai", "trigger_errors", &[], &mut err_ctx);
+        host.call_fn_on_script("abi.rhai", "trigger_type_error", &[], &mut err_ctx);
+        assert_eq!(host.runtime_errors.len(), 2, "{:?}", host.runtime_errors);
+        assert_eq!(host.diagnostics.len(), 2);
+        assert_eq!(host.diagnostics[0].kind, ScriptDiagKind::Runtime);
+        assert_eq!(host.diagnostics[1].kind, ScriptDiagKind::Runtime);
 
         let _ = fs::remove_dir_all(&dir);
     }
