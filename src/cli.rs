@@ -21,6 +21,7 @@ pub struct LaunchFlags {
     pub render_backend: RenderBackend,
     pub capture_timestamps_ms: Vec<f64>,
     pub capture_out_dir: Option<PathBuf>,
+    pub test_crash: bool,
     pub show_help: bool,
 }
 
@@ -42,6 +43,7 @@ impl Default for LaunchFlags {
             render_backend: RenderBackend::Auto,
             capture_timestamps_ms: Vec::new(),
             capture_out_dir: None,
+            test_crash: false,
             show_help: false,
         }
     }
@@ -156,6 +158,9 @@ impl LaunchFlags {
                         out.capture_out_dir = Some(PathBuf::from(v));
                     }
                 }
+                "--test-crash" => {
+                    out.test_crash = true;
+                }
                 _ => {}
             }
         }
@@ -183,6 +188,7 @@ impl LaunchFlags {
              \x20 --vulkan / --dx12 / --gl    Shorthand GPU backend flags\n\
              \x20 --capture-ms:<ms,...>       Capture screenshots at sorted ms and exit\n\
              \x20 --capture-out:<dir>         Output directory for --capture-ms (default: captures)\n\
+             \x20 --test-crash                Trigger a simulated fatal crash dialog (works in debug builds)\n\
              \x20 -h, --help                  Show this help message"
         );
     }

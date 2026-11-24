@@ -100,6 +100,7 @@ mod tests {
             end_ms: 2_000.0,
             text: "Hi you".to_string(),
             segments: Vec::new(),
+            sub_lines: Vec::new(),
         };
 
         let word_mid = compute_char_progress(&cue, 1_200.0, SubtitleHighlightMode::Word, 80.0);
@@ -111,6 +112,43 @@ mod tests {
         assert!(letter_mid[0] > 0.99);
         assert!(letter_mid[3] > 0.0 && letter_mid[3] < 1.0, "middle letter should blend smoothly");
         assert!(letter_mid[5] < 0.05);
+    }
+
+    #[test]
+    fn parses_dual_vocalist_and_background_vocal_sublines() {
+        let raw = "\
+[00:10.00]<00:10.00>Main <00:10.50>line<00:11.50>[bg:<00:10.20>(Echo <00:10.70>vocal)<00:11.40>]
+[00:12.00]<00:12.00>First <00:12.50>singer<00:13.50>
+[bg:<00:12.30>(Backing <00:12.90>harmony)<00:13.40>]
+[00:14.00]v1:Lead vocal
+[00:14.00]v2:(Duet partner)
+[00:16.00]Early start bar<00:17.60>
+[00:17.30]Next sequential bar<00:19.00>
+";
+        let cues = parse_lrc(raw, &SubtitleConfig::default());
+
+        assert_eq!(cues.len(), 5);
+        // 1) Inline [bg:...]
+        assert_eq!(cues[0].text, "Main line");
+        assert_eq!(cues[0].sub_lines.len(), 1);
+        assert_eq!(cues[0].sub_lines[0].text, "(Echo vocal)");
+        assert_eq!(cues[0].sub_lines[0].segments.len(), 2);
+        assert!((cues[0].sub_lines[0].start_ms - 10_200.0).abs() < 0.01);
+
+        // 2) Standalone [bg:...] on next line
+        assert_eq!(cues[1].text, "First singer");
+        assert_eq!(cues[1].sub_lines.len(), 1);
+        assert_eq!(cues[1].sub_lines[0].text, "(Backing harmony)");
+
+        // 3) Same-timestamp v1:/v2: duet
+        assert_eq!(cues[2].text, "Lead vocal");
+        assert_eq!(cues[2].sub_lines.len(), 1);
+        assert_eq!(cues[2].sub_lines[0].text, "(Duet partner)");
+
+        // 4) Non-contained overlapping sequential bars stay separate main cues
+        assert_eq!(cues[3].text, "Early start bar");
+        assert!(cues[3].sub_lines.is_empty());
+        assert_eq!(cues[4].text, "Next sequential bar");
     }
 
     #[test]

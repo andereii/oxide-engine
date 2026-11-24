@@ -144,8 +144,11 @@ pub struct PlayState {
     pub subtitle_prev_index: Option<usize>,
     pub subtitle_exiting_index: Option<usize>,
     pub subtitle_next_index: Option<usize>,
+    pub subtitle_prev_was_active: bool,
+    pub subtitle_active_was_next: bool,
     pub subtitle_transition_elapsed_s: f64,
     pub subtitle_bar_elapsed_s: f64,
+    pub subtitle_idle_elapsed_s: f64,
     pub subtitle_outgoing_text: String,
     pub subtitle_outgoing_elapsed_s: f64,
     pub subtitle_last_ended_ms: Option<f64>,
@@ -278,8 +281,11 @@ impl PlayState {
             subtitle_prev_index: None,
             subtitle_exiting_index: None,
             subtitle_next_index: None,
+            subtitle_prev_was_active: false,
+            subtitle_active_was_next: false,
             subtitle_transition_elapsed_s: 1.0,
             subtitle_bar_elapsed_s: 0.0,
+            subtitle_idle_elapsed_s: 0.0,
             subtitle_outgoing_text: String::new(),
             subtitle_outgoing_elapsed_s: 1.0,
             subtitle_last_ended_ms: None,
@@ -402,9 +408,9 @@ impl PlayState {
         self.update_health_bar(elapsed_s);
         self.update_score_text();
         self.advance_tweens(elapsed_s);
-        self.update_subtitles(elapsed_s);
 
         let tick = self.sync_song_clock(elapsed_s, audio_time_ms);
+        self.update_subtitles(elapsed_s);
 
         if self.is_in_countdown && !self.countdown_paused {
             let beat_s = self.conductor.beat_length_ms() / 1000.0;
@@ -584,8 +590,11 @@ impl PlayState {
         self.subtitle_prev_index = None;
         self.subtitle_exiting_index = None;
         self.subtitle_next_index = None;
+        self.subtitle_prev_was_active = false;
+        self.subtitle_active_was_next = false;
         self.subtitle_transition_elapsed_s = self.subtitle_config.transition_duration_s.max(1.0);
         self.subtitle_bar_elapsed_s = 0.0;
+        self.subtitle_idle_elapsed_s = 0.0;
         self.subtitle_outgoing_text.clear();
         self.subtitle_outgoing_elapsed_s = self.subtitle_config.exit_duration_s.max(1.0);
         self.subtitle_last_ended_ms = None;
@@ -625,6 +634,8 @@ impl PlayState {
     }
 
     fn update_subtitles(&mut self, elapsed_s: f64) {
+        const CLOCK_JITTER_GUARD_MS: f64 = 80.0;
+
         let dt = elapsed_s.max(0.0);
         if self.subtitle_cues.is_empty() {
             if !self.subtitle_text.is_empty() {
@@ -634,15 +645,26 @@ impl PlayState {
             self.subtitle_prev_index = None;
             self.subtitle_exiting_index = None;
             self.subtitle_next_index = None;
+            self.subtitle_prev_was_active = false;
+            self.subtitle_active_was_next = false;
+            self.subtitle_idle_elapsed_s = 0.0;
             return;
         }
 
-        let cur_ms = if self.subtitle_sync_to_song {
+        let mut cur_ms = if self.subtitle_sync_to_song {
             self.conductor.song_position_ms
         } else {
             self.subtitle_elapsed_ms += dt * 1000.0 * self.playback_rate.max(0.0);
             self.subtitle_elapsed_ms
         };
+        // Ignore tiny backward audio-buffer jitter (< 80ms) so cues never flicker across boundaries,
+        // while still honoring real backward seeks.
+        if self.subtitle_sync_to_song
+            && cur_ms < self.subtitle_time_ms
+            && (self.subtitle_time_ms - cur_ms) < CLOCK_JITTER_GUARD_MS
+        {
+            cur_ms = self.subtitle_time_ms;
+        }
         self.subtitle_time_ms = cur_ms;
 
         // Find primary active cue (last cue whose window covers cur_ms)
@@ -658,17 +680,81 @@ impl PlayState {
             }
         }
 
-        // Track bar changes for smooth ScrollThreeLine & BounceLetters transitions
-        if active_idx != self.subtitle_active_index {
-            if let Some(old_idx) = self.subtitle_active_index {
-                self.subtitle_outgoing_text = self.subtitle_cues[old_idx].text.clone();
-                self.subtitle_outgoing_elapsed_s = 0.0;
-                self.subtitle_last_ended_ms = Some(self.subtitle_cues[old_idx].end_ms.min(cur_ms));
-            }
-            if active_idx.is_some() {
-                self.subtitle_exiting_index = self.subtitle_prev_index;
-                self.subtitle_transition_elapsed_s = 0.0;
-                self.subtitle_bar_elapsed_s = 0.0;
+        // Bridge gaps shorter than `gap_threshold_ms` between consecutive bars so the outgoing
+        // bar and incoming bar always scroll together in ONE synchronized, fluid animation
+        // instead of splitting into two staggered moves. Real silences (>= gap_threshold_ms)
+        // still clear cleanly into `None` (and show `idle_text` if configured).
+        let bridge_ms = self.subtitle_config.gap_threshold_ms.max(0.0);
+        if active_idx.is_none()
+            && bridge_ms > 0.0
+            && let Some(prev_active) = self.subtitle_active_index
+            && let (Some(cur_cue), Some(next_cue)) = (
+                self.subtitle_cues.get(prev_active),
+                self.subtitle_cues.get(prev_active + 1),
+            )
+            && cur_ms > cur_cue.end_ms
+            && cur_ms < next_cue.start_ms
+            && (next_cue.start_ms - cur_cue.end_ms) < bridge_ms
+        {
+            active_idx = Some(prev_active);
+            text = cur_cue.text.clone();
+        }
+
+        // Track bar changes cleanly across all 4 transition cases
+        let prev_active = self.subtitle_active_index;
+        if active_idx != prev_active {
+            match (prev_active, active_idx) {
+                // Direct sequential advance: old -> old + 1
+                (Some(old), Some(new)) if new == old + 1 => {
+                    self.subtitle_outgoing_text = self.subtitle_cues[old].text.clone();
+                    self.subtitle_outgoing_elapsed_s = 0.0;
+                    self.subtitle_last_ended_ms = Some(self.subtitle_cues[old].end_ms.min(cur_ms));
+                    self.subtitle_exiting_index = old.checked_sub(1);
+                    self.subtitle_prev_was_active = true;
+                    self.subtitle_active_was_next = true;
+                    self.subtitle_transition_elapsed_s = 0.0;
+                    self.subtitle_bar_elapsed_s = 0.0;
+                    self.subtitle_idle_elapsed_s = 0.0;
+                }
+                // Bar ended and entered a real silence gap: old -> None
+                (Some(old), None) => {
+                    self.subtitle_outgoing_text = self.subtitle_cues[old].text.clone();
+                    self.subtitle_outgoing_elapsed_s = 0.0;
+                    self.subtitle_last_ended_ms = Some(self.subtitle_cues[old].end_ms.min(cur_ms));
+                    self.subtitle_exiting_index = old.checked_sub(1);
+                    self.subtitle_prev_was_active = true;
+                    self.subtitle_active_was_next = false;
+                    self.subtitle_transition_elapsed_s = 0.0;
+                    self.subtitle_idle_elapsed_s = 0.0;
+                }
+                // Leaving a gap (or starting first bar): None -> new
+                (None, Some(new)) => {
+                    // `prev` is already resting in the previous slot; do NOT animate or duplicate it!
+                    let prev_already_there = self.subtitle_prev_index == new.checked_sub(1);
+                    self.subtitle_exiting_index = if prev_already_there {
+                        None
+                    } else {
+                        self.subtitle_prev_index
+                    };
+                    self.subtitle_prev_was_active = false;
+                    self.subtitle_active_was_next = true;
+                    self.subtitle_transition_elapsed_s = 0.0;
+                    self.subtitle_bar_elapsed_s = 0.0;
+                    self.subtitle_idle_elapsed_s = 0.0;
+                }
+                // Non-sequential jump / seek: snap cleanly without bogus scroll animations
+                (Some(old), Some(_new)) => {
+                    self.subtitle_outgoing_text = self.subtitle_cues[old].text.clone();
+                    self.subtitle_outgoing_elapsed_s = self.subtitle_config.exit_duration_s.max(1.0);
+                    self.subtitle_exiting_index = None;
+                    self.subtitle_prev_was_active = false;
+                    self.subtitle_active_was_next = false;
+                    self.subtitle_transition_elapsed_s =
+                        self.subtitle_config.transition_duration_s.max(1.0);
+                    self.subtitle_bar_elapsed_s = 0.0;
+                    self.subtitle_idle_elapsed_s = 0.0;
+                }
+                (None, None) => {}
             }
             self.subtitle_active_index = active_idx;
         } else {
@@ -685,6 +771,7 @@ impl PlayState {
             } else {
                 None
             };
+            self.subtitle_idle_elapsed_s = 0.0;
         } else {
             let mut last_past: Option<usize> = None;
             let mut first_future: Option<usize> = None;
@@ -700,6 +787,7 @@ impl PlayState {
             self.subtitle_next_index = first_future;
 
             // Optional idle placeholder between bars (e.g. "...", "♪", or "" for nothing)
+            let mut show_idle = false;
             if !self.subtitle_config.idle_text.is_empty() && first_future.is_some() {
                 let silence_ms = last_past
                     .map(|idx| cur_ms - self.subtitle_cues[idx].end_ms)
@@ -707,7 +795,13 @@ impl PlayState {
                     .unwrap_or(cur_ms);
                 if silence_ms >= self.subtitle_config.gap_threshold_ms {
                     text = self.subtitle_config.idle_text.clone();
+                    show_idle = true;
                 }
+            }
+            if show_idle {
+                self.subtitle_idle_elapsed_s += dt;
+            } else {
+                self.subtitle_idle_elapsed_s = 0.0;
             }
         }
 
@@ -877,6 +971,7 @@ mod tests {
             end_ms: 19_200.0,
             text: "That's how you do it!".to_string(),
             segments: Vec::new(),
+            sub_lines: Vec::new(),
         }]);
         state.conductor.update(18_500.0);
         state.update_subtitles(0.016);
@@ -900,12 +995,14 @@ mod tests {
                 end_ms: 2_000.0,
                 text: "Bar one".to_string(),
                 segments: Vec::new(),
+                sub_lines: Vec::new(),
             },
             super::super::hud::subtitles::SubtitleCue {
                 start_ms: 5_000.0,
                 end_ms: 6_000.0,
                 text: "Bar two".to_string(),
                 segments: Vec::new(),
+                sub_lines: Vec::new(),
             },
         ]);
 
@@ -924,5 +1021,76 @@ mod tests {
         assert_eq!(state.subtitle_text, "...");
         assert_eq!(state.subtitle_prev_index, Some(0));
         assert_eq!(state.subtitle_next_index, Some(1));
+    }
+
+    #[test]
+    fn gap_recovery_micro_gap_bridge_and_jitter_guard_prevent_flicker() {
+        let mut state = PlayState::new(PlayStateParams::default());
+        state.subtitle_config.idle_text = "...".to_string();
+        state.subtitle_config.gap_threshold_ms = 650.0;
+        state.load_song_subtitles(vec![
+            super::super::hud::subtitles::SubtitleCue {
+                start_ms: 1_000.0,
+                end_ms: 2_000.0,
+                text: "Bar zero".to_string(),
+                segments: Vec::new(),
+                sub_lines: Vec::new(),
+            },
+            // 300ms breath gap (< 650ms threshold) -> stays unified so prev & next scroll together
+            super::super::hud::subtitles::SubtitleCue {
+                start_ms: 2_300.0,
+                end_ms: 3_000.0,
+                text: "Bar one".to_string(),
+                segments: Vec::new(),
+                sub_lines: Vec::new(),
+            },
+            // 2000ms real gap (>= 650ms) -> clears cleanly into None, then enters smoothly
+            super::super::hud::subtitles::SubtitleCue {
+                start_ms: 5_000.0,
+                end_ms: 6_000.0,
+                text: "Bar two".to_string(),
+                segments: Vec::new(),
+                sub_lines: Vec::new(),
+            },
+        ]);
+
+        state.conductor.update(1_500.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_active_index, Some(0));
+
+        // 300ms breath gap at 2150ms: holds Bar zero smoothly so both lines scroll together at 2300ms
+        state.conductor.update(2_150.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_active_index, Some(0));
+        assert_eq!(state.subtitle_text, "Bar zero");
+
+        // Advance directly to Bar one -> single synchronized scroll
+        state.conductor.update(2_310.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_active_index, Some(1));
+        assert!(state.subtitle_prev_was_active);
+        assert!(state.subtitle_active_was_next);
+
+        // Small backward jitter (15ms) across 2300ms boundary must NOT flip back to Bar zero
+        state.conductor.update(2_295.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_active_index, Some(1));
+
+        // Real silence gap at 3700ms: enters None, prev becomes Bar one sliding up
+        state.conductor.update(3_700.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_active_index, None);
+        assert_eq!(state.subtitle_prev_index, Some(1));
+        assert!(state.subtitle_prev_was_active);
+        assert_eq!(state.subtitle_text, "...");
+
+        // Leaving gap into Bar two: prev (Bar one) is already resting above, must NOT flash active or duplicate into exiting
+        state.conductor.update(5_010.0);
+        state.update_subtitles(0.016);
+        assert_eq!(state.subtitle_active_index, Some(2));
+        assert_eq!(state.subtitle_prev_index, Some(1));
+        assert_eq!(state.subtitle_exiting_index, None);
+        assert!(!state.subtitle_prev_was_active);
+        assert!(state.subtitle_active_was_next);
     }
 }

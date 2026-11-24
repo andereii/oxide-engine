@@ -1,5 +1,6 @@
 mod cli;
 mod core;
+mod crash_handler;
 mod mods;
 mod play;
 mod ui;
@@ -22,10 +23,15 @@ use ui::{
 use utils::alphabet::AlphabetPlugin;
 
 fn main() {
+    crash_handler::install();
+
     let flags = LaunchFlags::from_env_args();
     if flags.show_help {
         LaunchFlags::print_help();
         return;
+    }
+    if flags.test_crash {
+        crash_handler::trigger_test_crash();
     }
 
     let started_from_cli = flags.has_play_flags();

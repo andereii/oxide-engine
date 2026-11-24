@@ -6,13 +6,24 @@ use crate::play::scene::PlayState;
 use crate::utils::constants::SCREEN_HEIGHT;
 
 use super::config::{SubtitleConfig, SubtitleHighlightMode, SubtitleTemplate};
-use super::parser::{SubtitleCue, compute_char_progress};
+use super::parser::{
+    SubtitleCue, SubtitleSubLine, compute_char_progress, compute_subline_char_progress,
+};
 
 // Bevy's default 2D orthographic frustum spans z = -1000..1000, so the native
 // FlxSprite zIndex of 10000 cannot be used literally here.
 const SUBTITLE_Z: f32 = 100.0;
 const SHADOW_OFFSET: Vec2 = Vec2::new(2.0, -2.0);
-const MAX_LINE_SLOTS: usize = 6;
+/// Slots `0..CUE_RING_SLOTS` are persistently bound to `cue_idx % CUE_RING_SLOTS` so a cue never
+/// hops between `Text2d` entities while scrolling (`next -> active -> prev -> exiting`).
+/// Slot `IDLE_OR_OUTGOING_SLOT` is reserved for `idle_text` and BounceLetters outgoing fade.
+/// Slots `SUB_LINE_SLOT_BASE..MAX_LINE_SLOTS` render secondary/duet sub-lines in `Line` mode.
+const CUE_RING_SLOTS: usize = 5;
+const IDLE_OR_OUTGOING_SLOT: usize = CUE_RING_SLOTS;
+const SUB_LINE_SLOT_BASE: usize = IDLE_OR_OUTGOING_SLOT + 1;
+const MAX_SUB_LINE_SLOTS: usize = 2;
+const MAX_LINE_SLOTS: usize = SUB_LINE_SLOT_BASE + MAX_SUB_LINE_SLOTS;
+const INITIAL_GLYPH_POOL: usize = 96;
 
 #[derive(Component)]
 pub struct HudSubtitleText;
@@ -64,10 +75,17 @@ pub fn spawn_subtitle_visuals(commands: &mut Commands, font: Handle<Font>) {
         }
     }
 
-    commands.insert_resource(SubtitleVisualPool {
+    let mut pool = SubtitleVisualPool {
         font,
-        glyph_entities: Vec::new(),
-    });
+        glyph_entities: Vec::with_capacity(INITIAL_GLYPH_POOL),
+    };
+    ensure_glyph_pool(
+        commands,
+        &mut pool,
+        INITIAL_GLYPH_POOL,
+        SubtitleConfig::default().font_size,
+    );
+    commands.insert_resource(pool);
 }
 
 fn ensure_glyph_pool(
@@ -175,23 +193,19 @@ fn layout_text_glyphs(
     out
 }
 
-fn build_highlighted_glyphs(
-    cue: &SubtitleCue,
-    cur_ms: f64,
+fn build_highlighted_glyphs_raw(
+    text: &str,
+    progress: &[f32],
     center_y: f32,
     scale: f32,
     alpha_mul: f32,
+    active_color: [f32; 4],
+    inactive_color: [f32; 4],
     cfg: &SubtitleConfig,
     bar_elapsed_s: Option<f64>,
 ) -> Vec<GlyphRenderCmd> {
-    let progress = compute_char_progress(
-        cue,
-        cur_ms,
-        cfg.highlight_mode,
-        cfg.highlight_softness_ms,
-    );
     let layout = layout_text_glyphs(
-        &cue.text,
+        text,
         center_y,
         cfg.font_size,
         cfg.letter_spacing,
@@ -205,10 +219,8 @@ fn build_highlighted_glyphs(
     let mut visible_idx = 0usize;
 
     for (ch, x, base_y) in layout {
-        // Advance past newlines in `progress` (which indexes `cue.text.chars()`)
-        while prog_idx < progress.len()
-            && cue.text.chars().nth(prog_idx) == Some('\n')
-        {
+        // Advance past newlines in `progress` (which indexes `text.chars()`)
+        while prog_idx < progress.len() && text.chars().nth(prog_idx) == Some('\n') {
             prog_idx += 1;
         }
         let p = progress.get(prog_idx).copied().unwrap_or(1.0);
@@ -218,7 +230,7 @@ fn build_highlighted_glyphs(
             continue;
         }
 
-        let mut col = lerp_rgba(cfg.inactive_color, cfg.active_color, p);
+        let mut col = lerp_rgba(inactive_color, active_color, p);
         let mut y = base_y;
 
         if let Some(elapsed_s) = bar_elapsed_s {
@@ -227,7 +239,8 @@ fn build_highlighted_glyphs(
             let eased_y = enter_ease.eval(raw_t) as f32;
             y = base_y + cfg.enter_offset_y * (1.0 - eased_y);
             // Smooth alpha fade-in slightly ahead of bounce landing
-            let alpha_t = ((elapsed_s - delay) / (enter_dur * 0.45).max(0.02)).clamp(0.0, 1.0) as f32;
+            let alpha_t =
+                ((elapsed_s - delay) / (enter_dur * 0.45).max(0.02)).clamp(0.0, 1.0) as f32;
             col = scale_alpha(col, alpha_t);
         }
 
@@ -243,6 +256,112 @@ fn build_highlighted_glyphs(
     }
 
     out
+}
+
+fn build_highlighted_glyphs(
+    cue: &SubtitleCue,
+    cur_ms: f64,
+    center_y: f32,
+    scale: f32,
+    alpha_mul: f32,
+    cfg: &SubtitleConfig,
+    bar_elapsed_s: Option<f64>,
+) -> Vec<GlyphRenderCmd> {
+    let progress = compute_char_progress(
+        cue,
+        cur_ms,
+        cfg.highlight_mode,
+        cfg.highlight_softness_ms,
+    );
+    build_highlighted_glyphs_raw(
+        &cue.text,
+        &progress,
+        center_y,
+        scale,
+        alpha_mul,
+        cfg.active_color,
+        cfg.inactive_color,
+        cfg,
+        bar_elapsed_s,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_active_sublines(
+    sub_lines: &[SubtitleSubLine],
+    cur_ms: f64,
+    active_y: f32,
+    active_scale: f32,
+    cfg: &SubtitleConfig,
+    bounce_mode: bool,
+    slot_cmds: &mut [Option<LineRenderCmd>; MAX_LINE_SLOTS],
+    glyph_cmds: &mut Vec<GlyphRenderCmd>,
+) -> usize {
+    const SUB_FADE_MS: f64 = 120.0;
+    const SUB_END_HOLD_MS: f64 = 160.0;
+
+    let sub_active_col = cfg.effective_sub_active_color();
+    let sub_inactive_col = cfg.effective_sub_inactive_color();
+    let sub_scale = active_scale * cfg.sub_line_scale;
+    let mut visible_count = 0usize;
+
+    for sub in sub_lines {
+        if visible_count >= MAX_SUB_LINE_SLOTS {
+            break;
+        }
+        // Show while active (or briefly fading out after end_ms while parent bar is still active)
+        if cur_ms + SUB_FADE_MS < sub.start_ms || cur_ms > sub.end_ms + SUB_END_HOLD_MS {
+            continue;
+        }
+        let fade_in = ((cur_ms - (sub.start_ms - SUB_FADE_MS * 0.5)) / SUB_FADE_MS).clamp(0.0, 1.0);
+        let fade_out = if cur_ms > sub.end_ms {
+            1.0 - ((cur_ms - sub.end_ms) / SUB_END_HOLD_MS).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let alpha_mul = (fade_in * fade_out) as f32;
+        if alpha_mul <= 0.001 {
+            continue;
+        }
+
+        let sub_y = active_y - cfg.sub_line_spacing * ((visible_count + 1) as f32);
+        let use_glyphs = bounce_mode || cfg.highlight_mode != SubtitleHighlightMode::Line;
+
+        if use_glyphs {
+            let progress = compute_subline_char_progress(
+                sub,
+                cur_ms,
+                cfg.highlight_mode,
+                cfg.highlight_softness_ms,
+            );
+            let sub_elapsed = if bounce_mode {
+                Some(((cur_ms - sub.start_ms) / 1000.0).max(0.0))
+            } else {
+                None
+            };
+            glyph_cmds.extend(build_highlighted_glyphs_raw(
+                &sub.text,
+                &progress,
+                sub_y,
+                sub_scale,
+                alpha_mul,
+                sub_active_col,
+                sub_inactive_col,
+                cfg,
+                sub_elapsed,
+            ));
+        } else {
+            slot_cmds[SUB_LINE_SLOT_BASE + visible_count] = Some(LineRenderCmd {
+                text: sub.text.clone(),
+                y: sub_y,
+                scale: sub_scale,
+                color: scale_alpha(sub_active_col, alpha_mul),
+            });
+        }
+        visible_count += 1;
+    }
+
+    visible_count
 }
 
 /// Applies the current subtitle/lyric state, template animations, and word/letter highlights
@@ -289,18 +408,18 @@ pub fn sync_subtitles(
         -SCREEN_HEIGHT * 0.5 + cfg.bottom_margin
     };
 
-    let mut line_cmds: Vec<LineRenderCmd> = Vec::new();
+    let mut slot_cmds: [Option<LineRenderCmd>; MAX_LINE_SLOTS] = Default::default();
     let mut glyph_cmds: Vec<GlyphRenderCmd> = Vec::new();
 
-    let active_cue = state
-        .subtitle_active_index
-        .and_then(|i| state.subtitle_cues.get(i));
+    let active_idx = state.subtitle_active_index;
+    let active_cue = active_idx.and_then(|i| state.subtitle_cues.get(i));
+    let idle_fade = (state.subtitle_idle_elapsed_s / 0.22).clamp(0.0, 1.0) as f32;
 
     match cfg.template {
         SubtitleTemplate::Simple => {
-            if let Some(cue) = active_cue {
+            if let (Some(idx), Some(cue)) = (active_idx, active_cue) {
                 if cfg.highlight_mode == SubtitleHighlightMode::Line {
-                    line_cmds.push(LineRenderCmd {
+                    slot_cmds[idx % CUE_RING_SLOTS] = Some(LineRenderCmd {
                         text: cue.text.clone(),
                         y: anchor_y,
                         scale: cfg.active_scale,
@@ -317,12 +436,22 @@ pub fn sync_subtitles(
                         None,
                     );
                 }
+                append_active_sublines(
+                    &cue.sub_lines,
+                    state.subtitle_time_ms,
+                    anchor_y,
+                    cfg.active_scale,
+                    cfg,
+                    false,
+                    &mut slot_cmds,
+                    &mut glyph_cmds,
+                );
             } else if !state.subtitle_text.is_empty() {
-                line_cmds.push(LineRenderCmd {
+                slot_cmds[IDLE_OR_OUTGOING_SLOT] = Some(LineRenderCmd {
                     text: state.subtitle_text.clone(),
                     y: anchor_y,
                     scale: cfg.inactive_scale,
-                    color: cfg.inactive_color,
+                    color: scale_alpha(cfg.inactive_color, idle_fade),
                 });
             }
         }
@@ -334,22 +463,23 @@ pub fn sync_subtitles(
                 1.0
             };
             let t = ease.eval(raw_t) as f32;
-            // Slide progress: 1.0 -> 0.0 as new bar settles into center slot
             let slide = 1.0 - t;
             let spacing = cfg.line_spacing;
             let past_col = cfg.effective_past_color();
             let next_col = cfg.effective_upcoming_color();
             let max_lines = cfg.max_lines.max(1);
 
-            // 1) Exiting oldest line (only during transition, fades out leaving top of canvas)
+            // 1) Exiting oldest line (only while actively sliding out of the top of the canvas)
             if max_lines >= 3
                 && slide > 0.001
                 && let Some(exiting_idx) = state.subtitle_exiting_index
+                && Some(exiting_idx) != state.subtitle_prev_index
+                && Some(exiting_idx) != active_idx
                 && let Some(cue) = state.subtitle_cues.get(exiting_idx)
             {
                 let y = anchor_y + spacing * (1.0 + t);
                 let col = scale_alpha(past_col, 1.0 - t);
-                line_cmds.push(LineRenderCmd {
+                slot_cmds[exiting_idx % CUE_RING_SLOTS] = Some(LineRenderCmd {
                     text: cue.text.clone(),
                     y,
                     scale: cfg.inactive_scale,
@@ -357,15 +487,23 @@ pub fn sync_subtitles(
                 });
             }
 
-            // 2) Previous line (above current)
+            // 2) Previous line (above current). Only animates from center->top if it just left active;
+            // if it was already resting in the previous slot during a gap, keep it completely stable.
             if max_lines >= 2
                 && let Some(prev_idx) = state.subtitle_prev_index
+                && Some(prev_idx) != active_idx
                 && let Some(cue) = state.subtitle_cues.get(prev_idx)
             {
-                let y = anchor_y + spacing * t;
-                let col = lerp_rgba(cfg.active_color, past_col, t);
-                let sc = cfg.active_scale + (cfg.inactive_scale - cfg.active_scale) * t;
-                line_cmds.push(LineRenderCmd {
+                let (y, col, sc) = if state.subtitle_prev_was_active {
+                    (
+                        anchor_y + spacing * t,
+                        lerp_rgba(cfg.active_color, past_col, t),
+                        cfg.active_scale + (cfg.inactive_scale - cfg.active_scale) * t,
+                    )
+                } else {
+                    (anchor_y + spacing, past_col, cfg.inactive_scale)
+                };
+                slot_cmds[prev_idx % CUE_RING_SLOTS] = Some(LineRenderCmd {
                     text: cue.text.clone(),
                     y,
                     scale: sc,
@@ -373,19 +511,34 @@ pub fn sync_subtitles(
                 });
             }
 
-            // 3) Current active line (center) or idle placeholder
-            if let Some(cue) = active_cue {
-                let y = anchor_y - spacing * slide;
-                let sc = cfg.inactive_scale + (cfg.active_scale - cfg.inactive_scale) * t;
+            // 3) Current active line (center) + optional duet/backing-vocal sub-lines underneath
+            let mut sub_push_down = 0.0_f32;
+            if let (Some(idx), Some(cue)) = (active_idx, active_cue) {
+                let (y, sc, line_col) = if state.subtitle_active_was_next {
+                    (
+                        anchor_y - spacing * slide,
+                        cfg.inactive_scale + (cfg.active_scale - cfg.inactive_scale) * t,
+                        lerp_rgba(next_col, cfg.active_color, t),
+                    )
+                } else {
+                    (anchor_y, cfg.active_scale, cfg.active_color)
+                };
                 if cfg.highlight_mode == SubtitleHighlightMode::Line {
-                    let col = lerp_rgba(next_col, cfg.active_color, t);
-                    line_cmds.push(LineRenderCmd {
+                    slot_cmds[idx % CUE_RING_SLOTS] = Some(LineRenderCmd {
                         text: cue.text.clone(),
                         y,
                         scale: sc,
-                        color: col,
+                        color: line_col,
                     });
                 } else {
+                    // Keep the cue's ring slot primed with invisible text so moving active -> prev
+                    // never triggers a 1-frame Bevy Text2d layout hitch.
+                    slot_cmds[idx % CUE_RING_SLOTS] = Some(LineRenderCmd {
+                        text: cue.text.clone(),
+                        y,
+                        scale: sc,
+                        color: scale_alpha(cfg.active_color, 0.0),
+                    });
                     glyph_cmds = build_highlighted_glyphs(
                         cue,
                         state.subtitle_time_ms,
@@ -396,23 +549,44 @@ pub fn sync_subtitles(
                         None,
                     );
                 }
+                let sub_count = append_active_sublines(
+                    &cue.sub_lines,
+                    state.subtitle_time_ms,
+                    y,
+                    sc,
+                    cfg,
+                    false,
+                    &mut slot_cmds,
+                    &mut glyph_cmds,
+                );
+                if sub_count > 0 {
+                    sub_push_down = cfg.sub_line_spacing * (sub_count as f32);
+                }
             } else if !state.subtitle_text.is_empty() {
-                line_cmds.push(LineRenderCmd {
+                slot_cmds[IDLE_OR_OUTGOING_SLOT] = Some(LineRenderCmd {
                     text: state.subtitle_text.clone(),
                     y: anchor_y,
                     scale: cfg.inactive_scale,
-                    color: cfg.inactive_color,
+                    color: scale_alpha(cfg.inactive_color, idle_fade),
                 });
             }
 
-            // 4) Upcoming next line (below current)
+            // 4) Upcoming next line (below current). Slides in from below only when a new active bar
+            // just took the center slot; stays stable when entering/waiting in a gap.
             if max_lines >= 3
                 && let Some(next_idx) = state.subtitle_next_index
+                && Some(next_idx) != active_idx
                 && let Some(cue) = state.subtitle_cues.get(next_idx)
             {
-                let y = anchor_y - spacing * (1.0 + slide);
-                let col = scale_alpha(next_col, t.max(if state.subtitle_active_index.is_some() { 0.0 } else { 1.0 }));
-                line_cmds.push(LineRenderCmd {
+                let (y, col) = if state.subtitle_active_was_next {
+                    (
+                        anchor_y - spacing * (1.0 + slide) - sub_push_down,
+                        scale_alpha(next_col, t),
+                    )
+                } else {
+                    (anchor_y - spacing - sub_push_down, next_col)
+                };
+                slot_cmds[next_idx % CUE_RING_SLOTS] = Some(LineRenderCmd {
                     text: cue.text.clone(),
                     y,
                     scale: cfg.inactive_scale,
@@ -427,7 +601,7 @@ pub fn sync_subtitles(
                 if raw_exit < 1.0 {
                     let exit_t = cfg.exit_ease_kind().eval(raw_exit) as f32;
                     let col = scale_alpha(cfg.active_color, 1.0 - exit_t);
-                    line_cmds.push(LineRenderCmd {
+                    slot_cmds[IDLE_OR_OUTGOING_SLOT] = Some(LineRenderCmd {
                         text: state.subtitle_outgoing_text.clone(),
                         y: anchor_y + cfg.exit_offset_y * exit_t,
                         scale: cfg.active_scale,
@@ -447,12 +621,22 @@ pub fn sync_subtitles(
                     cfg,
                     Some(state.subtitle_bar_elapsed_s),
                 );
-            } else if !state.subtitle_text.is_empty() {
-                line_cmds.push(LineRenderCmd {
+                append_active_sublines(
+                    &cue.sub_lines,
+                    state.subtitle_time_ms,
+                    anchor_y,
+                    cfg.active_scale,
+                    cfg,
+                    true,
+                    &mut slot_cmds,
+                    &mut glyph_cmds,
+                );
+            } else if !state.subtitle_text.is_empty() && slot_cmds[IDLE_OR_OUTGOING_SLOT].is_none() {
+                slot_cmds[IDLE_OR_OUTGOING_SLOT] = Some(LineRenderCmd {
                     text: state.subtitle_text.clone(),
                     y: anchor_y,
                     scale: cfg.inactive_scale,
-                    color: cfg.inactive_color,
+                    color: scale_alpha(cfg.inactive_color, idle_fade),
                 });
             }
         }
@@ -462,9 +646,9 @@ pub fn sync_subtitles(
         ensure_glyph_pool(&mut commands, pool, glyph_cmds.len(), cfg.font_size);
     }
 
-    // Apply line slots
+    // Apply persistent line slots
     for (slot, mut text2d, mut font, mut color, mut shadow, mut tf, mut vis) in &mut lines_q {
-        if let Some(cmd) = line_cmds.get(slot.slot_idx) {
+        if let Some(cmd) = slot_cmds.get(slot.slot_idx).and_then(Option::as_ref) {
             if text2d.0 != cmd.text {
                 **text2d = cmd.text.clone();
             }

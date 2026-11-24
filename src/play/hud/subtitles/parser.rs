@@ -8,6 +8,15 @@ pub struct SubtitleSegment {
     pub text: String,
 }
 
+/// Secondary / backing-vocal / duet line displayed directly underneath a main [`SubtitleCue`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubtitleSubLine {
+    pub start_ms: f64,
+    pub end_ms: f64,
+    pub text: String,
+    pub segments: Vec<SubtitleSegment>,
+}
+
 /// One parsed subtitle/lyric cue, with times relative to the start of its track.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubtitleCue {
@@ -16,6 +25,8 @@ pub struct SubtitleCue {
     pub text: String,
     /// Optional word/syllable-level timing spans (Enhanced LRC). Empty for plain SRT/LRC.
     pub segments: Vec<SubtitleSegment>,
+    /// Optional secondary / duet / background-vocal lines shown underneath this bar.
+    pub sub_lines: Vec<SubtitleSubLine>,
 }
 
 /// Strips inline HTML/XML tags (`<...>`) and ASS override blocks (`{...}`)
@@ -80,32 +91,180 @@ pub fn parse_srt(raw: &str) -> Vec<SubtitleCue> {
             end_ms,
             text,
             segments,
+            sub_lines: Vec::new(),
         });
     }
 
     cues.sort_by(|a, b| a.start_ms.total_cmp(&b.start_ms));
-    cues
+    group_overlapping_sublines(cues)
+}
+
+/// Extracts optional inline `[bg:...]` background-vocal blocks from a lyric body.
+/// Returns `(main_body, vec_of_bg_bodies)`.
+fn split_inline_bg_blocks(raw: &str) -> (String, Vec<String>) {
+    let mut main = String::with_capacity(raw.len());
+    let mut bgs = Vec::new();
+    let mut rest = raw;
+
+    while let Some(pos) = find_bg_tag_start(rest) {
+        main.push_str(&rest[..pos]);
+        let after_prefix = &rest[pos + 4..]; // skip "[bg:"
+        if let Some(end_rel) = after_prefix.find(']') {
+            let inner = after_prefix[..end_rel].trim();
+            if !inner.is_empty() {
+                bgs.push(inner.to_string());
+            }
+            rest = &after_prefix[end_rel + 1..];
+        } else {
+            main.push_str(&rest[pos..]);
+            rest = "";
+            break;
+        }
+    }
+    main.push_str(rest);
+    (main.trim().to_string(), bgs)
+}
+
+fn find_bg_tag_start(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 4 {
+        return None;
+    }
+    for i in 0..=bytes.len() - 4 {
+        if bytes[i] == b'['
+            && bytes[i + 1].eq_ignore_ascii_case(&b'b')
+            && bytes[i + 2].eq_ignore_ascii_case(&b'g')
+            && bytes[i + 3] == b':'
+        {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Strips optional duet/speaker prefixes (`v1:`, `v2:`, `bg:`) from a cue body.
+/// Returns `(cleaned_body, is_secondary_vocal)`.
+fn strip_vocal_prefix(body: &str) -> (&str, bool) {
+    let trimmed = body.trim_start();
+    for (prefix, is_sub) in [
+        ("bg:", true),
+        ("BG:", true),
+        ("v2:", true),
+        ("V2:", true),
+        ("v1:", false),
+        ("V1:", false),
+    ] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return (rest.trim_start(), is_sub);
+        }
+    }
+    (trimmed, false)
+}
+
+fn build_subline(
+    raw_body: &str,
+    default_start_ms: f64,
+    default_end_ms: f64,
+    offset_ms: f64,
+) -> Option<SubtitleSubLine> {
+    let (clean_body, _) = strip_vocal_prefix(raw_body);
+    let (enh_text, mut segments, trailing_end_ms) =
+        parse_inline_enhanced(clean_body, default_start_ms, Some(default_end_ms), offset_ms);
+    let text = if segments.is_empty() {
+        strip_subtitle_markup(clean_body)
+    } else {
+        enh_text
+    };
+    if text.is_empty() {
+        return None;
+    }
+    let start_ms = segments
+        .first()
+        .map(|s| s.start_ms)
+        .unwrap_or(default_start_ms);
+    let end_ms = trailing_end_ms
+        .or_else(|| segments.last().map(|s| s.end_ms))
+        .unwrap_or(default_end_ms)
+        .max(start_ms);
+    if let Some(last) = segments.last_mut()
+        && last.end_ms > end_ms
+    {
+        last.end_ms = end_ms.max(last.start_ms);
+    }
+    Some(SubtitleSubLine {
+        start_ms,
+        end_ms,
+        text,
+        segments,
+    })
+}
+
+/// Groups simultaneous / strictly-contained secondary cues (e.g. dual vocalists singing the same
+/// bar or overlapping harmonies) as `sub_lines` underneath the primary cue.
+fn group_overlapping_sublines(cues: Vec<SubtitleCue>) -> Vec<SubtitleCue> {
+    const SAME_START_TOLERANCE_MS: f64 = 25.0;
+    const CONTAINED_END_TOLERANCE_MS: f64 = 50.0;
+
+    let mut out: Vec<SubtitleCue> = Vec::with_capacity(cues.len());
+    for cue in cues {
+        if let Some(parent) = out.last_mut() {
+            let same_start = (cue.start_ms - parent.start_ms).abs() <= SAME_START_TOLERANCE_MS;
+            let strictly_contained = cue.start_ms >= parent.start_ms
+                && cue.start_ms < parent.end_ms
+                && cue.end_ms <= parent.end_ms + CONTAINED_END_TOLERANCE_MS;
+            if same_start || strictly_contained {
+                let sub_end = cue.end_ms.max(cue.start_ms);
+                if sub_end > parent.end_ms {
+                    parent.end_ms = sub_end;
+                }
+                parent.sub_lines.push(SubtitleSubLine {
+                    start_ms: cue.start_ms,
+                    end_ms: sub_end,
+                    text: cue.text,
+                    segments: cue.segments,
+                });
+                parent.sub_lines.extend(cue.sub_lines);
+                continue;
+            }
+        }
+        out.push(cue);
+    }
+    out
 }
 
 /// Parses standard LRC (`[mm:ss.xx] line`) and Enhanced LRC (`[mm:ss.xx] <mm:ss.xx>word ...`).
 ///
-/// Bar termination rules:
-/// - A trailing `<mm:ss.xx>` tag at the end of a line explicitly closes that bar at that time.
-/// - An empty timestamped line (e.g. `[00:15.50]`) acts as an explicit end marker for the previous
-///   bar so it does not linger until the next lyric.
-/// - Otherwise a bar ends at `next_bar.start_ms - lrc_end_gap_ms`, optionally capped by
-///   `max_line_duration_ms`.
-/// - Supports `[offset:+/-ms]` metadata tags and multiple `[mm:ss.xx]` tags per line.
+/// Supports:
+/// - `[offset:+/-ms]` metadata tags and multiple `[mm:ss.xx]` tags per line.
+/// - Trailing `<mm:ss.xx>` or empty timestamped lines `[mm:ss.xx]` to explicitly end a bar.
+/// - Secondary / duet / background-vocal sub-lines via `[bg:...]`, `v2:`/`bg:` prefixes,
+///   same-timestamp lines, or strictly-contained overlapping lines.
 pub fn parse_lrc(raw: &str, config: &SubtitleConfig) -> Vec<SubtitleCue> {
     let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = normalized.trim_start_matches('\u{feff}');
 
     let mut offset_ms = 0.0_f64;
-    let mut raw_entries: Vec<(f64, String)> = Vec::new();
+    // (start_ms, body, explicit_bg_blocks, forced_secondary)
+    let mut raw_entries: Vec<(f64, String, Vec<String>, bool)> = Vec::new();
 
     for line in normalized.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
+            continue;
+        }
+
+        // Standalone `[bg:...]` line attaches to the most recently added timestamped lyric line
+        if let Some(bg_inner) = trimmed
+            .strip_prefix("[bg:")
+            .or_else(|| trimmed.strip_prefix("[BG:"))
+            .and_then(|s| s.strip_suffix(']'))
+        {
+            if let Some(last) = raw_entries.last_mut()
+                && !last.1.is_empty()
+                && !bg_inner.trim().is_empty()
+            {
+                last.2.push(bg_inner.trim().to_string());
+            }
             continue;
         }
 
@@ -144,9 +303,11 @@ pub fn parse_lrc(raw: &str, config: &SubtitleConfig) -> Vec<SubtitleCue> {
             continue;
         }
 
-        let body = rest.trim().to_string();
+        let (main_raw, inline_bgs) = split_inline_bg_blocks(rest.trim());
+        let (stripped_body, is_secondary) = strip_vocal_prefix(&main_raw);
+        let body = stripped_body.to_string();
         for t in line_times {
-            raw_entries.push((t, body.clone()));
+            raw_entries.push((t, body.clone(), inline_bgs.clone(), is_secondary));
         }
     }
 
@@ -155,22 +316,28 @@ pub fn parse_lrc(raw: &str, config: &SubtitleConfig) -> Vec<SubtitleCue> {
     }
 
     // Apply LRC [offset:] (positive offset shifts lyrics earlier in standard LRC)
-    for (t, _) in &mut raw_entries {
+    for (t, _, _, _) in &mut raw_entries {
         *t = (*t - offset_ms).max(0.0);
     }
+    // Stable sort preserves main-line-before-subline ordering when timestamps are identical
     raw_entries.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let mut cues: Vec<SubtitleCue> = Vec::new();
     let default_last_duration_ms = config.max_line_duration_ms.unwrap_or(5_000.0);
 
     for i in 0..raw_entries.len() {
-        let (start_ms, ref body) = raw_entries[i];
+        let (start_ms, ref body, ref bg_blocks, is_secondary) = raw_entries[i];
         if body.is_empty() {
             // Explicit bar terminator for the previous cue
             continue;
         }
 
-        let next_start_ms = raw_entries.get(i + 1).map(|(t, _)| *t);
+        // Next timestamp strictly after this start_ms (skipping simultaneous duet lines)
+        let next_entry = raw_entries[i + 1..]
+            .iter()
+            .find(|(t, _, _, _)| *t > start_ms + 25.0);
+        let next_start_ms = next_entry.map(|(t, _, _, _)| *t);
+
         let (text, mut segments, trailing_end_ms) =
             parse_inline_enhanced(body, start_ms, next_start_ms, offset_ms);
 
@@ -185,13 +352,13 @@ pub fn parse_lrc(raw: &str, config: &SubtitleConfig) -> Vec<SubtitleCue> {
 
         let mut end_ms = if let Some(explicit_end) = trailing_end_ms {
             explicit_end.max(start_ms)
-        } else if let Some(next_t) = next_start_ms {
-            let gap = if raw_entries[i + 1].1.is_empty() {
+        } else if let Some((next_t, next_body, _, _)) = next_entry {
+            let gap = if next_body.is_empty() {
                 0.0
             } else {
                 config.lrc_end_gap_ms.max(0.0)
             };
-            (next_t - gap).max(start_ms)
+            (*next_t - gap).max(start_ms)
         } else {
             start_ms + default_last_duration_ms
         };
@@ -208,15 +375,39 @@ pub fn parse_lrc(raw: &str, config: &SubtitleConfig) -> Vec<SubtitleCue> {
             last_seg.end_ms = end_ms.max(last_seg.start_ms);
         }
 
+        let mut sub_lines: Vec<SubtitleSubLine> = bg_blocks
+            .iter()
+            .filter_map(|bg| build_subline(bg, start_ms, end_ms, offset_ms))
+            .collect();
+
+        // Explicit `bg:` / `v2:` line inside the previous main cue attaches underneath it
+        if is_secondary
+            && let Some(parent) = cues.last_mut()
+            && start_ms <= parent.end_ms + 25.0
+        {
+            if end_ms > parent.end_ms {
+                parent.end_ms = end_ms;
+            }
+            parent.sub_lines.push(SubtitleSubLine {
+                start_ms,
+                end_ms,
+                text: clean_text,
+                segments,
+            });
+            parent.sub_lines.append(&mut sub_lines);
+            continue;
+        }
+
         cues.push(SubtitleCue {
             start_ms,
             end_ms,
             text: clean_text,
             segments,
+            sub_lines,
         });
     }
 
-    cues
+    group_overlapping_sublines(cues)
 }
 
 /// Auto-detects LRC vs SRT from file extension or content and parses accordingly.
@@ -346,7 +537,44 @@ pub fn compute_char_progress(
     mode: SubtitleHighlightMode,
     softness_ms: f64,
 ) -> Vec<f32> {
-    let chars: Vec<char> = cue.text.chars().collect();
+    compute_span_char_progress(
+        &cue.text,
+        cue.start_ms,
+        cue.end_ms,
+        &cue.segments,
+        cur_ms,
+        mode,
+        softness_ms,
+    )
+}
+
+pub fn compute_subline_char_progress(
+    sub: &SubtitleSubLine,
+    cur_ms: f64,
+    mode: SubtitleHighlightMode,
+    softness_ms: f64,
+) -> Vec<f32> {
+    compute_span_char_progress(
+        &sub.text,
+        sub.start_ms,
+        sub.end_ms,
+        &sub.segments,
+        cur_ms,
+        mode,
+        softness_ms,
+    )
+}
+
+fn compute_span_char_progress(
+    text: &str,
+    start_ms: f64,
+    end_ms: f64,
+    segments: &[SubtitleSegment],
+    cur_ms: f64,
+    mode: SubtitleHighlightMode,
+    softness_ms: f64,
+) -> Vec<f32> {
+    let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
     if n == 0 {
         return Vec::new();
@@ -359,11 +587,11 @@ pub fn compute_char_progress(
     let mut out = vec![0.0_f32; n];
 
     // Enhanced LRC segments path
-    if !cue.segments.is_empty() {
-        let seg_char_total: usize = cue.segments.iter().map(|s| s.text.chars().count()).sum();
+    if !segments.is_empty() {
+        let seg_char_total: usize = segments.iter().map(|s| s.text.chars().count()).sum();
         if seg_char_total == n {
             let mut cursor = 0;
-            for seg in &cue.segments {
+            for seg in segments {
                 let len = seg.text.chars().count();
                 let dur = (seg.end_ms - seg.start_ms).max(1.0);
                 match mode {
@@ -389,7 +617,7 @@ pub fn compute_char_progress(
     }
 
     // Fake word-by-word or letter-by-letter path (plain SRT / plain LRC)
-    let bar_dur = (cue.end_ms - cue.start_ms).max(1.0);
+    let bar_dur = (end_ms - start_ms).max(1.0);
     match mode {
         SubtitleHighlightMode::Word => {
             // Split into word/whitespace runs so timing is weighted by character count
@@ -412,7 +640,7 @@ pub fn compute_char_progress(
             let mut acc_chars = 0usize;
             for (a, b, is_ws) in runs {
                 let run_start_ms =
-                    cue.start_ms + bar_dur * (acc_chars as f64 / total_word_chars as f64);
+                    start_ms + bar_dur * (acc_chars as f64 / total_word_chars as f64);
                 let run_len = b - a;
                 let run_dur = bar_dur * (run_len as f64 / total_word_chars as f64);
                 let t = smooth_step_01((cur_ms - run_start_ms) / soft.min(run_dur.max(1.0)));
@@ -429,7 +657,7 @@ pub fn compute_char_progress(
             let step = bar_dur / (visible_count as f64);
             let mut vis_idx = 0usize;
             for (idx, ch) in chars.iter().enumerate() {
-                let c_start = cue.start_ms + step * (vis_idx as f64);
+                let c_start = start_ms + step * (vis_idx as f64);
                 out[idx] = smooth_step_01((cur_ms - c_start) / soft);
                 if !ch.is_whitespace() {
                     vis_idx += 1;

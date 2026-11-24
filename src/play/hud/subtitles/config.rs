@@ -157,6 +157,14 @@ pub struct SubtitleConfig {
     pub active_scale: f32,
     /// Scale multiplier for inactive (past/next) lines in `ScrollThreeLine`.
     pub inactive_scale: f32,
+    /// Scale multiplier for secondary / duet / background-vocal lines under the active bar.
+    pub sub_line_scale: f32,
+    /// Vertical offset (px) below the active bar for each secondary / duet sub-line.
+    pub sub_line_spacing: f32,
+    /// Optional RGBA override for highlighted text on secondary / duet sub-lines.
+    pub sub_active_color: Option<[f32; 4]>,
+    /// Optional RGBA override for unhighlighted text on secondary / duet sub-lines.
+    pub sub_inactive_color: Option<[f32; 4]>,
 }
 
 impl Default for SubtitleConfig {
@@ -173,7 +181,7 @@ impl Default for SubtitleConfig {
             max_lines: 3,
             bottom_margin: 139.0,
             idle_text: String::new(),
-            gap_threshold_ms: 0.0,
+            gap_threshold_ms: 650.0,
             max_line_duration_ms: None,
             lrc_end_gap_ms: 0.0,
             transition_duration_s: 0.35,
@@ -189,6 +197,10 @@ impl Default for SubtitleConfig {
             highlight_softness_ms: 90.0,
             active_scale: 1.0,
             inactive_scale: 0.86,
+            sub_line_scale: 0.72,
+            sub_line_spacing: 28.0,
+            sub_active_color: None,
+            sub_inactive_color: None,
         }
     }
 }
@@ -200,6 +212,19 @@ impl SubtitleConfig {
 
     pub fn effective_upcoming_color(&self) -> [f32; 4] {
         self.upcoming_color.unwrap_or(self.inactive_color)
+    }
+
+    pub fn effective_sub_active_color(&self) -> [f32; 4] {
+        self.sub_active_color.unwrap_or([
+            self.active_color[0],
+            self.active_color[1],
+            self.active_color[2],
+            (self.active_color[3] * 0.9).clamp(0.0, 1.0),
+        ])
+    }
+
+    pub fn effective_sub_inactive_color(&self) -> [f32; 4] {
+        self.sub_inactive_color.unwrap_or(self.inactive_color)
     }
 
     pub fn transition_ease_kind(&self) -> EaseKind {
@@ -296,6 +321,18 @@ impl SubtitleConfig {
         if let Some(v) = patch.inactive_scale {
             self.inactive_scale = v.clamp(0.25, 4.0);
         }
+        if let Some(v) = patch.sub_line_scale {
+            self.sub_line_scale = v.clamp(0.25, 2.0);
+        }
+        if let Some(v) = patch.sub_line_spacing {
+            self.sub_line_spacing = v.max(8.0);
+        }
+        if let Some(v) = patch.sub_active_color {
+            self.sub_active_color = v;
+        }
+        if let Some(v) = patch.sub_inactive_color {
+            self.sub_inactive_color = v;
+        }
     }
 }
 
@@ -329,6 +366,10 @@ pub struct SubtitleConfigPatch {
     pub highlight_softness_ms: Option<f64>,
     pub active_scale: Option<f32>,
     pub inactive_scale: Option<f32>,
+    pub sub_line_scale: Option<f32>,
+    pub sub_line_spacing: Option<f32>,
+    pub sub_active_color: Option<Option<[f32; 4]>>,
+    pub sub_inactive_color: Option<Option<[f32; 4]>>,
 }
 
 /// Parses a `#RRGGBB`, `#RRGGBBAA`, `0xRRGGBB`, or `0xAARRGGBB` color string into `[r, g, b, a]`.
@@ -448,6 +489,21 @@ impl SubtitleConfigPatch {
         p.highlight_softness_ms = f64_key(&["highlight_softness_ms", "letter_fade_ms", "softness_ms"]);
         p.active_scale = f32_key(&["active_scale"]);
         p.inactive_scale = f32_key(&["inactive_scale"]);
+        p.sub_line_scale = f32_key(&["sub_line_scale", "sub_scale", "bg_scale"]);
+        p.sub_line_spacing = f32_key(&["sub_line_spacing", "sub_spacing", "bg_spacing"]);
+        if let Some(v) = obj
+            .get("sub_active_color")
+            .or_else(|| obj.get("bg_active_color"))
+            .or_else(|| obj.get("sub_color"))
+        {
+            p.sub_active_color = Some(if v.is_null() { None } else { parse_color_json(v) });
+        }
+        if let Some(v) = obj
+            .get("sub_inactive_color")
+            .or_else(|| obj.get("bg_inactive_color"))
+        {
+            p.sub_inactive_color = Some(if v.is_null() { None } else { parse_color_json(v) });
+        }
         p
     }
 }
