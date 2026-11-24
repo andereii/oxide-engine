@@ -8,6 +8,9 @@ use super::report::{BUG_REPORT_URL, ENGINE_NAME, ENGINE_VERSION};
 /// assets folder cannot be resolved during an early crash.
 const EMBEDDED_CRASH_GIF: &[u8] = include_bytes!("cat_exploding.gif");
 
+/// Embedded rusty pixel-art gear icon used as the native window/taskbar icon.
+const EMBEDDED_CRASH_ICON: &[u8] = include_bytes!("crash_icon.png");
+
 /// Resolves `assets/ui/crash/cat_exploding.gif`, falling back to a temp file written from the
 /// embedded bytes when assets are unreachable.
 pub(crate) fn resolve_or_extract_gif() -> Option<PathBuf> {
@@ -30,16 +33,40 @@ pub(crate) fn resolve_or_extract_gif() -> Option<PathBuf> {
     tmp.is_file().then_some(tmp)
 }
 
+/// Resolves `assets/ui/crash/crash_icon.png`, falling back to a temp file written from the
+/// embedded rusty gear PNG bytes.
+pub(crate) fn resolve_or_extract_icon() -> Option<PathBuf> {
+    let candidates = [
+        PathBuf::from("assets/ui/crash/crash_icon.png"),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("assets/ui/crash/crash_icon.png")))
+            .unwrap_or_default(),
+    ];
+    for c in candidates {
+        if !c.as_os_str().is_empty() && c.is_file() {
+            return Some(c);
+        }
+    }
+    let tmp = std::env::temp_dir().join("oxide_crash_gear_icon.png");
+    let _ = fs::write(&tmp, EMBEDDED_CRASH_ICON);
+    tmp.is_file().then_some(tmp)
+}
+
 /// Launches the out-of-process native OS crash dialog (Qt on Linux, Windows Forms on Windows).
 /// Returns `true` if a native dialog process was started and exited cleanly.
 pub fn show_native_crash_dialog(
     report_path: &Path,
     gif_path: Option<&Path>,
+    icon_path: Option<&Path>,
     exe_path: &Path,
     restart_args: &[String],
 ) -> bool {
     let title = format!("{ENGINE_NAME} {ENGINE_VERSION} - Fatal error");
     let gif_str = gif_path
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let icon_str = icon_path
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
     let report_str = report_path.to_string_lossy().into_owned();
@@ -48,7 +75,14 @@ pub fn show_native_crash_dialog(
 
     #[cfg(target_os = "linux")]
     {
-        if launch_linux_qt_dialog(&title, &report_str, &gif_str, &exe_str, &args_json) {
+        if launch_linux_qt_dialog(
+            &title,
+            &report_str,
+            &gif_str,
+            &icon_str,
+            &exe_str,
+            &args_json,
+        ) {
             return true;
         }
         launch_linux_fallback_dialog(&title, &report_str)
@@ -56,12 +90,19 @@ pub fn show_native_crash_dialog(
 
     #[cfg(target_os = "windows")]
     {
-        launch_windows_forms_dialog(&title, &report_str, &gif_str, &exe_str, &args_json)
+        launch_windows_forms_dialog(
+            &title,
+            &report_str,
+            &gif_str,
+            &icon_str,
+            &exe_str,
+            &args_json,
+        )
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
-        let _ = (title, gif_str, report_str, exe_str, args_json);
+        let _ = (title, gif_str, icon_str, report_str, exe_str, args_json);
         false
     }
 }
@@ -90,14 +131,18 @@ if QtWidgets is None:
 title = sys.argv[1]
 report_path = sys.argv[2]
 gif_path = sys.argv[3]
-exe_path = sys.argv[4]
-restart_args = json.loads(sys.argv[5]) if len(sys.argv) > 5 else []
-bug_url = sys.argv[6] if len(sys.argv) > 6 else "https://github.com/andereii/oxide-engine/issues/new"
+icon_path = sys.argv[4]
+exe_path = sys.argv[5]
+restart_args = json.loads(sys.argv[6]) if len(sys.argv) > 6 else []
+bug_url = sys.argv[7] if len(sys.argv) > 7 else "https://github.com/andereii/oxide-engine/issues/new"
 screenshot_out = os.environ.get("OXIDE_CRASH_DIALOG_SCREENSHOT", "").strip()
 
 report_text = Path(report_path).read_text(encoding="utf-8", errors="replace") if Path(report_path).is_file() else "(crash report missing)"
 
 app = QtWidgets.QApplication([title])
+window_icon = QtGui.QIcon(icon_path) if icon_path and Path(icon_path).is_file() else None
+if window_icon is not None:
+    app.setWindowIcon(window_icon)
 
 def make_copy_icon(palette):
     fg = palette.color(QtGui.QPalette.ColorRole.ButtonText)
@@ -135,6 +180,8 @@ def make_save_icon(palette):
 
 dlg = QtWidgets.QDialog()
 dlg.setWindowTitle(title)
+if window_icon is not None:
+    dlg.setWindowIcon(window_icon)
 dlg.resize(780, 560)
 dlg.setMinimumSize(620, 440)
 
@@ -295,6 +342,7 @@ fn launch_linux_qt_dialog(
     title: &str,
     report_path: &str,
     gif_path: &str,
+    icon_path: &str,
     exe_path: &str,
     args_json: &str,
 ) -> bool {
@@ -305,6 +353,7 @@ fn launch_linux_qt_dialog(
             title,
             report_path,
             gif_path,
+            icon_path,
             exe_path,
             args_json,
             BUG_REPORT_URL,
@@ -346,6 +395,7 @@ param(
     [string]$Title,
     [string]$ReportPath,
     [string]$GifPath,
+    [string]$IconPath,
     [string]$ExePath,
     [string]$ArgsJson,
     [string]$BugUrl
@@ -355,15 +405,63 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$reportText = if (Test-Path $ReportPath) { Get-Content -Raw -Encoding UTF8 $ReportPath } else { "(crash report missing)" }
+$rawReport = if (Test-Path $ReportPath) { Get-Content -Raw -Encoding UTF8 $ReportPath } else { "(crash report missing)" }
+# Win32 multiline TextBox requires CRLF line breaks; bare LF renders all lines horizontally.
+$reportText = ($rawReport -split "\r\n|\n|\r") -join [Environment]::NewLine
+
 $restartArgs = @()
 try { $restartArgs = ConvertFrom-Json $ArgsJson } catch { $restartArgs = @() }
+
+function New-CopyIcon {
+    $bmp = New-Object System.Drawing.Bitmap 18, 18
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.SystemColors]::ControlText), 1.5
+    $bgBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.SystemColors]::Control)
+    $g.DrawRectangle($pen, 6, 2, 9, 11)
+    $g.FillRectangle($bgBrush, 3, 5, 9, 11)
+    $g.DrawRectangle($pen, 3, 5, 9, 11)
+    $pen.Dispose()
+    $bgBrush.Dispose()
+    $g.Dispose()
+    return $bmp
+}
+
+function New-SaveIcon {
+    $bmp = New-Object System.Drawing.Bitmap 18, 18
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.SystemColors]::ControlText), 1.5
+    [System.Drawing.Point[]]$pts = @(
+        (New-Object System.Drawing.Point 2, 2),
+        (New-Object System.Drawing.Point 12, 2),
+        (New-Object System.Drawing.Point 15, 5),
+        (New-Object System.Drawing.Point 15, 15),
+        (New-Object System.Drawing.Point 2, 15)
+    )
+    $g.DrawPolygon($pen, $pts)
+    $g.DrawRectangle($pen, 5, 2, 6, 4)
+    $g.DrawRectangle($pen, 5, 10, 7, 5)
+    $pen.Dispose()
+    $g.Dispose()
+    return $bmp
+}
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = $Title
 $form.Size = New-Object System.Drawing.Size(780, 560)
 $form.MinimumSize = New-Object System.Drawing.Size(620, 440)
 $form.StartPosition = "CenterScreen"
+if ($IconPath -and (Test-Path $IconPath)) {
+    try {
+        $iconBmp = [System.Drawing.Bitmap]::FromFile($IconPath)
+        $form.Icon = [System.Drawing.Icon]::FromHandle($iconBmp.GetHicon())
+    } catch {}
+}
+
+$tooltip = New-Object System.Windows.Forms.ToolTip
 
 # Top dark banner
 $banner = New-Object System.Windows.Forms.Panel
@@ -409,6 +507,8 @@ $txt.BackColor = [System.Drawing.SystemColors]::Window
 $txt.ForeColor = [System.Drawing.SystemColors]::WindowText
 $txt.Font = New-Object System.Drawing.Font("Consolas", 9.5)
 $txt.Text = $reportText
+$txt.SelectionStart = 0
+$txt.SelectionLength = 0
 $txt.Location = New-Object System.Drawing.Point(16, 130)
 $txt.Size = New-Object System.Drawing.Size(732, 300)
 $txt.Anchor = "Top, Bottom, Left, Right"
@@ -419,14 +519,17 @@ $statusLbl.Text = ""
 $statusLbl.Location = New-Object System.Drawing.Point(16, 442)
 $statusLbl.AutoSize = $true
 $statusLbl.Anchor = "Bottom, Left"
-$statusLbl.ForeColor = [System.Drawing.Color]::DimGray
+$statusLbl.ForeColor = [System.Drawing.SystemColors]::GrayText
 $form.Controls.Add($statusLbl)
 
 $btnCopy = New-Object System.Windows.Forms.Button
-$btnCopy.Text = [char]0x2398
+$btnCopy.Text = ""
+$btnCopy.Image = New-CopyIcon
+$btnCopy.ImageAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $btnCopy.Size = New-Object System.Drawing.Size(32, 28)
 $btnCopy.Location = New-Object System.Drawing.Point(678, 438)
 $btnCopy.Anchor = "Bottom, Right"
+$tooltip.SetToolTip($btnCopy, "Copy crash report to clipboard")
 $btnCopy.Add_Click({
     [System.Windows.Forms.Clipboard]::SetText($reportText)
     $statusLbl.Text = "Crash report copied to clipboard."
@@ -434,10 +537,13 @@ $btnCopy.Add_Click({
 $form.Controls.Add($btnCopy)
 
 $btnSave = New-Object System.Windows.Forms.Button
-$btnSave.Text = "S"
+$btnSave.Text = ""
+$btnSave.Image = New-SaveIcon
+$btnSave.ImageAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $btnSave.Size = New-Object System.Drawing.Size(32, 28)
 $btnSave.Location = New-Object System.Drawing.Point(716, 438)
 $btnSave.Anchor = "Bottom, Right"
+$tooltip.SetToolTip($btnSave, "Save crash report to file...")
 $btnSave.Add_Click({
     $sfd = New-Object System.Windows.Forms.SaveFileDialog
     $sfd.Filter = "Text Files (*.txt)|*.txt|Log Files (*.log)|*.log|All Files (*.*)|*.*"
@@ -484,6 +590,12 @@ $form.AcceptButton = $btnClose
 $form.CancelButton = $btnClose
 $form.Controls.Add($btnClose)
 
+$form.Add_Shown({
+    $txt.SelectionStart = 0
+    $txt.SelectionLength = 0
+    $btnClose.Focus()
+})
+
 [void]$form.ShowDialog()
 "##;
 
@@ -492,6 +604,7 @@ fn launch_windows_forms_dialog(
     title: &str,
     report_path: &str,
     gif_path: &str,
+    icon_path: &str,
     exe_path: &str,
     args_json: &str,
 ) -> bool {
@@ -517,6 +630,8 @@ fn launch_windows_forms_dialog(
         report_path,
         "-GifPath",
         gif_path,
+        "-IconPath",
+        icon_path,
         "-ExePath",
         exe_path,
         "-ArgsJson",

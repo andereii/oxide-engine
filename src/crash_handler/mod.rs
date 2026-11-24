@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use dialog::{resolve_or_extract_gif, show_native_crash_dialog};
+use dialog::{resolve_or_extract_gif, resolve_or_extract_icon, show_native_crash_dialog};
 use report::{CrashContext, generate_session_id};
 
 struct RuntimeCrashMeta {
@@ -140,9 +140,11 @@ fn handle_fatal_panic(info: &PanicHookInfo<'_>) {
     };
 
     let gif_path = resolve_or_extract_gif();
+    let icon_path = resolve_or_extract_icon();
     let shown = show_native_crash_dialog(
         &effective_report_path,
         gif_path.as_deref(),
+        icon_path.as_deref(),
         &exe_path,
         &restart_args,
     );
@@ -153,7 +155,7 @@ fn handle_fatal_panic(info: &PanicHookInfo<'_>) {
 
 #[cfg(test)]
 mod tests {
-    use super::dialog::resolve_or_extract_gif;
+    use super::dialog::{resolve_or_extract_gif, resolve_or_extract_icon};
     use super::report::{CrashContext, format_uptime, format_utc_timestamp, generate_session_id};
     use super::should_show_crash_dialog;
     use std::backtrace::Backtrace;
@@ -195,8 +197,10 @@ mod tests {
     }
 
     #[test]
-    fn resolves_crash_gif_asset() {
+    fn resolves_crash_gif_and_icon_assets() {
         let gif = resolve_or_extract_gif().expect("crash GIF must resolve or extract");
         assert!(gif.is_file());
+        let icon = resolve_or_extract_icon().expect("crash icon PNG must resolve or extract");
+        assert!(icon.is_file());
     }
 }
