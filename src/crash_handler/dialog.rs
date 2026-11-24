@@ -6,7 +6,7 @@ use super::report::{BUG_REPORT_URL, ENGINE_NAME, ENGINE_VERSION};
 
 /// Embedded fallback copy of the crash banner GIF so the dialog still animates even if the
 /// assets folder cannot be resolved during an early crash.
-const EMBEDDED_CRASH_GIF: &[u8] = include_bytes!("../../assets/ui/crash/cat_exploding.gif");
+const EMBEDDED_CRASH_GIF: &[u8] = include_bytes!("cat_exploding.gif");
 
 /// Resolves `assets/ui/crash/cat_exploding.gif`, falling back to a temp file written from the
 /// embedded bytes when assets are unreachable.

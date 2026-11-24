@@ -1,4 +1,5 @@
 use std::backtrace::Backtrace;
+#[cfg(target_os = "linux")]
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
