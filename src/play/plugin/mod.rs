@@ -193,7 +193,10 @@ impl Plugin for PlayPlugin {
             state.status_message = err;
         }
 
-        let controls = Controls::default();
+        let mut controls = Controls::default();
+        if let Some(note_keys) = self.flags.keybinds {
+            controls.set_note_keys(note_keys);
+        }
         let mut precise_input = PreciseInputManager::default();
         precise_input.initialize_keys(&controls);
 

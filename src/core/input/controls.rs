@@ -151,6 +151,20 @@ impl Controls {
         self.bindings.insert(action, keys);
     }
 
+    pub fn set_note_keys(&mut self, keys: [KeyCode; 4]) {
+        self.scheme = KeyboardScheme::Custom;
+        self.bind_keys(Action::NoteLeft, vec![keys[0]]);
+        self.bind_keys(Action::NoteDown, vec![keys[1]]);
+        self.bind_keys(Action::NoteUp, vec![keys[2]]);
+        self.bind_keys(Action::NoteRight, vec![keys[3]]);
+
+        for action in [Action::Reset, Action::Pause] {
+            if let Some(bound) = self.bindings.get_mut(&action) {
+                bound.retain(|k| !keys.contains(k));
+            }
+        }
+    }
+
     pub fn keys_for(&self, action: Action) -> &[KeyCode] {
         self.bindings.get(&action).map(Vec::as_slice).unwrap_or(&[])
     }
@@ -250,5 +264,25 @@ pub fn keycode_aliases(key: KeyCode) -> Vec<String> {
         out.push("Alt".to_string());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_note_keys_overrides_lanes_and_avoids_reset_pause_conflicts() {
+        let mut controls = Controls::default();
+        controls.set_note_keys([KeyCode::KeyA, KeyCode::KeyR, KeyCode::KeyP, KeyCode::KeyL]);
+
+        assert_eq!(controls.scheme, KeyboardScheme::Custom);
+        assert_eq!(controls.keys_for(Action::NoteLeft), &[KeyCode::KeyA]);
+        assert_eq!(controls.keys_for(Action::NoteDown), &[KeyCode::KeyR]);
+        assert_eq!(controls.keys_for(Action::NoteUp), &[KeyCode::KeyP]);
+        assert_eq!(controls.keys_for(Action::NoteRight), &[KeyCode::KeyL]);
+        assert!(!controls.keys_for(Action::Reset).contains(&KeyCode::KeyR));
+        assert!(!controls.keys_for(Action::Pause).contains(&KeyCode::KeyP));
+        assert!(controls.keys_for(Action::Pause).contains(&KeyCode::Escape));
+    }
 }
 

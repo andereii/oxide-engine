@@ -37,7 +37,7 @@ fn onCreate() {
 
     let target = "sserafim-chaewon";
     char_attach_atlas(target, "lipsync", "mouth default", "gameplay/stages/sserafim/sserafim-lipsync");
-    char_attach_style(target, "lipsync", false, 0.5);
+    char_attach_style(target, "lipsync", false, 1.0);
     char_attach_frame(target, "lipsync", 0);
     let p = this.offsets["idle"];
     char_attach_pose(target, "lipsync", p.offset[0], p.offset[1], p.angle);

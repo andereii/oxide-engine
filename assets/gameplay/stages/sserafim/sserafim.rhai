@@ -385,7 +385,7 @@ fn build_stage_extras() {
     ];
     spawn_atlas("sserafimGf", "gameplay/stages/sserafim/cutscene/gf-get-up", 655.0, -104.0, -497.4, getup_anims);
     prop_scroll("sserafimGf", 0.95, 0.95);
-    prop_alpha("sserafimGf", 0.5);
+    prop_alpha("sserafimGf", 1.0);
     prop_visible("sserafimGf", false);
 
     spawn_atlas("sserafimBf", "gameplay/stages/sserafim/cutscene/bf-get-up", 1220.0, 531.0, -469.5, getup_anims);
